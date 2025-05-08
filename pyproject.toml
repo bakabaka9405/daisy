@@ -1,0 +1,8 @@
+[tool.ruff]
+line-length = 150
+indent-width = 4
+
+[tool.ruff.format]
+quote-style = "single"
+indent-style = "tab"
+docstring-code-format = true
