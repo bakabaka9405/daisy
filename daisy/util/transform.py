@@ -1,5 +1,5 @@
 import torch
-from torchvision import transforms
+from torchvision.transforms import v2 as transforms
 import torch.nn.functional as F
 
 
@@ -59,8 +59,56 @@ def get_default_train_transform():
 def get_default_val_transform():
 	return transforms.Compose(
 		[
+			transforms.Resize(224),
+			transforms.CenterCrop(224),
+			ZeroOneNormalize(),
+			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+		]
+	)
+
+
+def get_pad_train_transform():
+	return transforms.Compose(
+		[
+			transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
+			ResizeAndPad(224),
+			# transforms.CenterCrop(224),
+			ZeroOneNormalize(),
+			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+		]
+	)
+
+
+def get_pad_val_transform():
+	return transforms.Compose(
+		[
 			ResizeAndPad(224),
 			ZeroOneNormalize(),
 			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+		]
+	)
+
+
+def get_rectangle_train_transform():
+	return transforms.Compose(
+		[
+			transforms.Resize((224, 112)),
+			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+			# transforms.GaussianBlur(kernel_size=(11, 21)),
+			transforms.RandomHorizontalFlip(),
+			ZeroOneNormalize(),
+			# transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+			transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+		]
+	)
+
+
+def get_rectangle_val_transform():
+	return transforms.Compose(
+		[
+			transforms.Resize((224, 112)),
+			ZeroOneNormalize(),
+			# transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+			transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
 		]
 	)

@@ -1,4 +1,4 @@
-from . import annotation, dataset, feeder, mae, util
+from . import annotation, dataset, feeder, mae, util, classfier_trainer
 
 __all__ = [
 	'annotation',
@@ -6,4 +6,5 @@ __all__ = [
 	'feeder',
 	'mae',
 	'util',
+	'classfier_trainer',
 ]

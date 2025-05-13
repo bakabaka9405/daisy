@@ -1,4 +1,4 @@
-from .util import gather_list_by_indexes, shuffle_correlated_lists, enable_cudnn_benchmark
+from .util import gather_list_by_indexes, shuffle_correlated_lists, enable_cudnn_benchmark, change_model_classifier
 from .transform import get_default_val_transform, get_default_train_transform
 
 __all__ = [
@@ -7,4 +7,5 @@ __all__ = [
 	'get_default_val_transform',
 	'get_default_train_transform',
 	'enable_cudnn_benchmark',
+	'change_model_classifier',
 ]

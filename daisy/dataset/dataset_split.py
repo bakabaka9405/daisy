@@ -4,6 +4,7 @@ from ..util import (
 	gather_list_by_indexes as gather,
 	shuffle_correlated_lists,
 )
+from collections.abc import Generator
 
 
 def split_by_label(dataset: IndexDataset) -> dict[int, list]:
@@ -77,6 +78,44 @@ def minimum_class_proportional_split(
 		shuffle_correlated_lists(val_data, val_labels)
 
 	return dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
+
+
+def balanced_k_fold(dataset: IndexDataset, k: int) -> Generator[tuple[IndexDataset, IndexDataset]]:
+	"""K 折验证，保证同类别样本均匀分布在每一折中"""
+
+	dataset_type = type(dataset)
+
+	label_dict = split_by_label(dataset)
+
+	for _, i in label_dict.items():
+		if len(i) < k:
+			raise ValueError(f'类别 {i} 的样本数量 {len(i)} 小于 K 折数 {k}')
+
+	idx = numpy.random.permutation(len(dataset))
+
+	for fold in range(k):
+		train_data = []
+		train_labels = []
+		val_data = []
+		val_labels = []
+
+		yield dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
+
+
+def k_fold(dataset: IndexDataset, k: int) -> Generator[tuple[IndexDataset, IndexDataset]]:
+	"""K 折验证，类别不均匀的情况下不保证同类别样本均匀分布在每一折中"""
+
+	dataset_type = type(dataset)
+
+	data, labels = dataset.getRawData()
+	idx = numpy.random.permutation(len(data))
+	idxes = numpy.array_split(idx, k)
+	for fold in range(k):
+		train_data = gather(data, numpy.concatenate(idxes[:fold] + idxes[fold + 1 :]))
+		train_labels = gather(labels, numpy.concatenate(idxes[:fold] + idxes[fold + 1 :]))
+		val_data = gather(data, idxes[fold])
+		val_labels = gather(labels, idxes[fold])
+		yield dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
 
 
 def trunc_max_class(dataset: IndexDataset):

@@ -1,5 +1,5 @@
 from torch import Tensor
-from torchvision import transforms
+from torchvision.transforms import v2 as transforms
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
 

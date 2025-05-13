@@ -70,21 +70,49 @@ def GetModelClassifier(model):
 		raise ValueError('Invalid model type')
 
 
-def ChangeModelClassifier(model, num_classes: int):
+def change_model_classifier(model, *, identity: bool = False, num_classes: int = 0):
 	# Change the output layer to match the number of classes
 	# The output layer is either model.fc or model.head.fc or model.classifier
 	# Differ between models created by torchvision or timm
-	if hasattr(model, 'fc'):
-		model.fc = torch.nn.Linear(model.fc.in_features, num_classes).to(model.fc.weight.device)
-	elif hasattr(model, 'head'):
-		if not hasattr(model.head, 'fc'):
-			model.head = torch.nn.Linear(model.head.in_features, num_classes).to(model.head.weight.device)
+
+	if not identity and num_classes == 0:
+		raise ValueError('num_classes must be specified if identity is False')
+	if identity and num_classes != 0:
+		raise ValueError('num_classes must be 0 if identity is True')
+
+	if identity:
+		if hasattr(model, 'fc'):
+			assert isinstance(model.fc, torch.nn.Linear)
+			model.fc = torch.nn.Identity().to(model.fc.weight.device)
+		elif hasattr(model, 'head'):
+			if not hasattr(model.head, 'fc'):
+				assert isinstance(model.head, torch.nn.Linear)
+				model.head = torch.nn.Identity().to(model.head.weight.device)
+			else:
+				assert isinstance(model.head.fc, torch.nn.Linear)
+				model.head.fc = torch.nn.Identity().to(model.head.fc.weight.device)
+		elif hasattr(model, 'classifier'):
+			assert isinstance(model.classifier, torch.nn.Linear)
+			model.classifier = torch.nn.Identity().to(model.classifier.weight.device)
 		else:
-			model.head.fc = torch.nn.Linear(model.head.fc.in_features, num_classes).to(model.head.fc.weight.device)
-	elif hasattr(model, 'classifier'):
-		model.classifier = torch.nn.Linear(model.classifier.in_features, num_classes).to(model.classifier.weight.device)
+			raise ValueError('Invalid model type')
+
 	else:
-		raise ValueError('Invalid model type')
+		if hasattr(model, 'fc'):
+			assert isinstance(model.fc, torch.nn.Linear)
+			model.fc = torch.nn.Linear(model.fc.in_features, num_classes).to(model.fc.weight.device)
+		elif hasattr(model, 'head'):
+			if not hasattr(model.head, 'fc'):
+				assert isinstance(model.head, torch.nn.Linear)
+				model.head = torch.nn.Linear(model.head.in_features, num_classes).to(model.head.weight.device)
+			else:
+				assert isinstance(model.head.fc, torch.nn.Linear)
+				model.head.fc = torch.nn.Linear(model.head.fc.in_features, num_classes).to(model.head.fc.weight.device)
+		elif hasattr(model, 'classifier'):
+			assert isinstance(model.classifier, torch.nn.Linear)
+			model.classifier = torch.nn.Linear(model.classifier.in_features, num_classes).to(model.classifier.weight.device)
+		else:
+			raise ValueError('Invalid model type')
 
 
 def FreezeModel(model):

@@ -19,7 +19,15 @@ class Feeder:
 		return self.files, self.labels
 
 
-def load_feeder_from_folder(root: Path | str, class_dict: dict[str, int] | None = None) -> tuple[Feeder, dict[str, int]]:
+class FolderFeeder(Feeder):
+	class_dict: dict[str, int] = {}
+
+	def __init__(self, files: list[Path] = [], labels: list[int] = [], class_dict: dict[str, int] = {}):
+		super().__init__(files, labels)
+		self.class_dict = class_dict
+
+
+def load_feeder_from_folder(root: Path | str, class_dict: dict[str, int] | None = None) -> FolderFeeder:
 	if isinstance(root, str):
 		root = Path(root)
 
@@ -44,7 +52,7 @@ def load_feeder_from_folder(root: Path | str, class_dict: dict[str, int] | None 
 			files.append(file)
 			labels.append(label)
 
-	return Feeder(files, labels), class_dict
+	return FolderFeeder(files, labels, class_dict)
 
 
 def load_feeder_from_sheet(
