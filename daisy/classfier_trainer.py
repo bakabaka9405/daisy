@@ -67,12 +67,14 @@ def fast_train_smile(
 					outputs = model(images)
 					loss = loss_fn(outputs, label)
 				scaler.scale(loss).backward()
+				torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 				scaler.step(optimizer)
 				scaler.update()
 			else:
 				outputs = model(images)
 				loss = loss_fn(outputs, label)
 				loss.backward()
+				torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 				optimizer.step()
 			losses += loss.item()
 
