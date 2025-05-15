@@ -15,6 +15,7 @@ def fast_train_smile(
 	lr: float,
 	dataset: IndexDataset,
 	batch_size: int = 128,
+	val_ratio: float = 0.1,
 	warmup_epochs: int = 0,
 	num_workers: int | tuple[int, int] = 10,
 	use_amp: bool = True,
@@ -23,7 +24,7 @@ def fast_train_smile(
 	train_transform = daisy.util.transform.get_rectangle_train_transform()
 	val_transform = daisy.util.transform.get_rectangle_val_transform()
 
-	train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(dataset, val_ratio=0.1)
+	train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(dataset, val_ratio=val_ratio)
 	torch.cuda.empty_cache()
 
 	train_dataset.setTransform(train_transform)
