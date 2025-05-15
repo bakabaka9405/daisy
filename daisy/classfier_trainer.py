@@ -1,115 +1,90 @@
 import daisy
 import torch
+from daisy.dataset import IndexDataset
 from torch.optim import AdamW
-from timm import create_model
 from timm.loss.cross_entropy import LabelSmoothingCrossEntropy
 from timm.data.loader import MultiEpochsDataLoader
-import math
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 
-def train_classfier():
-	daisy.util.enable_cudnn_benchmark()
-	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+def fast_train_smile(
+	device: torch.device,
+	model: torch.nn.Module,
+	epochs: int,
+	lr: float,
+	dataset: IndexDataset,
+):
+	train_transform = daisy.util.transform.get_rectangle_train_transform()
+	val_transform = daisy.util.transform.get_rectangle_val_transform()
 
-	num_classes = [3, 4, 5, 3, 3, 3, 3]
-	label_offset = [-1, 0, 0, -1, -1, -1, -1]
+	train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(dataset, val_ratio=0.1)
+	torch.cuda.empty_cache()
 
-	epochs = 100
-	warmup_epochs = 20
-	lr = 1e-3
+	train_dataset.setTransform(train_transform)
+	val_dataset.applyTransform(val_transform)
 
-	for i in range(1, 8):
-		feeder = daisy.feeder.load_feeder_from_sheet(
-			r'C:\Resources\Datasets\微笑图片标注汇总25-3-4\微笑图片标注汇总25-3-4',
-			r'C:\Resources\Datasets\微笑图片标注汇总25-3-4\微笑图片标注汇总25-3-4.xlsx',
-			have_header=True,
-			column=i,
-			label_offset=label_offset[i - 1],
-		)
+	print('loading dataloaders...')
+	train_loader = MultiEpochsDataLoader(
+		train_dataset,
+		batch_size=128,
+		shuffle=True,
+		num_workers=2,
+		pin_memory=True,
+	)
 
+	val_loader = MultiEpochsDataLoader(
+		val_dataset,
+		batch_size=128,
+		shuffle=False,
+		num_workers=2,
+		pin_memory=True,
+	)
 
-		files, labels = feeder.fetch()
+	model.to(device)
 
-		dataset = daisy.dataset.DiskDataset(files, labels)
-		train_transform = daisy.util.transform.get_default_train_transform()
-		val_transform = daisy.util.transform.get_default_val_transform()
+	optimizer = AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+	loss_fn = LabelSmoothingCrossEntropy()
 
-		train_dataset, val_dataset = daisy.dataset.dataset_split.minimum_class_proportional_split(
-			dataset,
-			val_minimum_size=20,
-			force_fetch_minimum_size=True,
-		)
+	print('ready to train...')
 
-		train_dataset = daisy.dataset.dataset_split.trunc_max_class(train_dataset)
+	scaler = torch.GradScaler()
+	for epoch in range(epochs):
+		model.train()
+		losses = 0.0
+		for images, label in train_loader:
+			images, label = images.to(device, non_blocking=True), label.to(device, non_blocking=True)
 
-		train_dataset.setTransform(train_transform)
-		val_dataset.applyTransform(val_transform)
+			optimizer.zero_grad()
 
-		train_loader = MultiEpochsDataLoader(
-			train_dataset,
-			batch_size=64,
-			shuffle=True,
-			num_workers=4,
-			pin_memory=True,
-		)
-
-		val_loader = MultiEpochsDataLoader(
-			val_dataset,
-			batch_size=64,
-			shuffle=False,
-			pin_memory=True,
-		)
-
-		model = create_model('resnet34', pretrained=True, num_classes=num_classes[i - 1])
-		model.to(device)
-
-		criterion = LabelSmoothingCrossEntropy()
-
-		optimizer = AdamW(model.parameters(), lr=lr, weight_decay=0.05, betas=(0.9, 0.95))
-
-		def lr_func(epoch: int):
-			return min((epoch + 1) / (warmup_epochs + 1e-8), 0.5 * (math.cos(epoch / max(1, epochs) * math.pi) + 1))
-
-		lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_func)
-
-		for epoch in range(epochs):
-			model.train()
-			losses = 0.0
-			for data, target in train_loader:
-				data, target = data.to(device), target.to(device)
-
-				optimizer.zero_grad()
-				output = model(data)
-				loss = criterion(output, target)
-				loss.backward()
+			with torch.autocast('cuda'):
+				outputs = model(images)
+				loss = loss_fn(outputs, label)
 				losses += loss.item()
-				optimizer.step()
+			scaler.scale(loss).backward()
+			scaler.step(optimizer)
+			scaler.update()
+		losses /= len(train_loader)
+		model.eval()
+		y_pred = []
+		y_true = []
+		count = [[0] * 3 for _ in range(3)]
+		with torch.no_grad():
+			for images, label in val_loader:
+				images, label = images.to(device, non_blocking=True), label.to(device, non_blocking=True)
 
-			lr_scheduler.step()
+				with torch.autocast('cuda'):
+					outputs = model(images)
+				preds = torch.argmax(outputs, dim=1)
 
-			y_pred = []
-			y_true = []
+				y_pred.extend(preds.cpu().numpy())
+				y_true.extend(label.cpu().numpy())
+				for i, j in zip(label, preds):
+					count[i][j] += 1
 
-			with torch.no_grad():
-				model.eval()
-				for data, target in val_loader:
-					data, target = data.to(device), target.to(device)
-					output = model(data)
-					predicted = torch.argmax(output, dim=1)
-					y_pred.extend(predicted.cpu().numpy())
-					y_true.extend(target.cpu().numpy())
+		acc = accuracy_score(y_true, y_pred)
+		prec = precision_score(y_true, y_pred, average='macro', zero_division=0)
+		recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
+		f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
 
-				confusion_matrix = [[0] * num_classes[i - 1] for _ in range(num_classes[i - 1])]
-				for t, p in zip(y_true, y_pred):
-					confusion_matrix[t][p] += 1
-
-				print(confusion_matrix)
-
-				acc = accuracy_score(y_true, y_pred)
-				precision = precision_score(y_true, y_pred, average='macro', zero_division=0)
-				recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
-				f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
-				print(
-					f'Epoch {epoch + 1}/{epochs}, Loss: {losses / len(train_loader)}, Accuracy: {acc:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}'
-				)
+		print(count)
+		print(f'Epoch {epoch + 1}/{epochs}, Loss:{losses:.4f}, Accuracy: {acc:.4f}, Precision: {prec:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}')
