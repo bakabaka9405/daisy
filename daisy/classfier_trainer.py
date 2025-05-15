@@ -14,6 +14,7 @@ def fast_train_smile(
 	lr: float,
 	dataset: IndexDataset,
 	num_workers: int | tuple[int, int] = 10,
+	pin_memory: bool = True,
 ):
 	train_transform = daisy.util.transform.get_rectangle_train_transform()
 	val_transform = daisy.util.transform.get_rectangle_val_transform()
@@ -33,7 +34,7 @@ def fast_train_smile(
 		batch_size=128,
 		shuffle=True,
 		num_workers=num_workers[0],
-		pin_memory=True,
+		pin_memory=pin_memory,
 	)
 
 	val_loader = MultiEpochsDataLoader(
@@ -41,7 +42,7 @@ def fast_train_smile(
 		batch_size=128,
 		shuffle=False,
 		num_workers=num_workers[1],
-		pin_memory=True,
+		pin_memory=pin_memory,
 	)
 
 	model.to(device)
