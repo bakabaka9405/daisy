@@ -60,7 +60,7 @@ def fast_train_smile(
 
 	print('ready to train...')
 
-	scaler = torch.GradScaler()
+	scaler = torch.GradScaler(enabled=use_amp)
 	for epoch in range(epochs):
 		model.train()
 		losses = 0.0
@@ -73,16 +73,15 @@ def fast_train_smile(
 				with torch.autocast('cuda'):
 					outputs = model(images)
 					loss = criterion(outputs, label)
-				scaler.scale(loss).backward()
-				torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-				scaler.step(optimizer)
-				scaler.update()
+
 			else:
 				outputs = model(images)
 				loss = criterion(outputs, label)
-				loss.backward()
-				torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-				optimizer.step()
+
+			scaler.scale(loss).backward()
+			torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+			scaler.step(optimizer)
+			scaler.update()
 			losses += loss.item()
 
 		lr_scheduler.step()
