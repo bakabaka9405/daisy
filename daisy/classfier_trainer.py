@@ -14,6 +14,7 @@ def fast_train_smile(
 	lr: float,
 	dataset: IndexDataset,
 	num_workers: int | tuple[int, int] = 10,
+	use_amp: bool = True,
 	pin_memory: bool = True,
 ):
 	train_transform = daisy.util.transform.get_rectangle_train_transform()
@@ -61,13 +62,20 @@ def fast_train_smile(
 
 			optimizer.zero_grad()
 
-			with torch.autocast('cuda'):
+			if use_amp:
+				with torch.autocast('cuda'):
+					outputs = model(images)
+					loss = loss_fn(outputs, label)
+				scaler.scale(loss).backward()
+				scaler.step(optimizer)
+				scaler.update()
+			else:
 				outputs = model(images)
 				loss = loss_fn(outputs, label)
-				losses += loss.item()
-			scaler.scale(loss).backward()
-			scaler.step(optimizer)
-			scaler.update()
+				loss.backward()
+				optimizer.step()
+			losses += loss.item()
+
 		losses /= len(train_loader)
 		model.eval()
 		y_pred = []
