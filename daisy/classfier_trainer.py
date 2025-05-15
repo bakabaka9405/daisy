@@ -13,6 +13,7 @@ def fast_train_smile(
 	epochs: int,
 	lr: float,
 	dataset: IndexDataset,
+	num_workers: int | tuple[int, int] = 10,
 ):
 	train_transform = daisy.util.transform.get_rectangle_train_transform()
 	val_transform = daisy.util.transform.get_rectangle_val_transform()
@@ -23,12 +24,15 @@ def fast_train_smile(
 	train_dataset.setTransform(train_transform)
 	val_dataset.applyTransform(val_transform)
 
+	if isinstance(num_workers, int):
+		num_workers = (num_workers, num_workers)
+
 	print('loading dataloaders...')
 	train_loader = MultiEpochsDataLoader(
 		train_dataset,
 		batch_size=128,
 		shuffle=True,
-		num_workers=2,
+		num_workers=num_workers[0],
 		pin_memory=True,
 	)
 
@@ -36,7 +40,7 @@ def fast_train_smile(
 		val_dataset,
 		batch_size=128,
 		shuffle=False,
-		num_workers=2,
+		num_workers=num_workers[1],
 		pin_memory=True,
 	)
 
