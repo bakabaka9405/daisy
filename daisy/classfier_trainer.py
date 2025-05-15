@@ -19,6 +19,7 @@ def fast_train_smile(
 	warmup_epochs: int = 0,
 	num_workers: int | tuple[int, int] = 10,
 	use_amp: bool = True,
+	use_scheduler: bool = True,
 	pin_memory: bool = True,
 ):
 	train_transform = daisy.util.transform.get_rectangle_train_transform()
@@ -80,12 +81,13 @@ def fast_train_smile(
 				loss = criterion(outputs, label)
 
 			scaler.scale(loss).backward()
-			# torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+			torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 			scaler.step(optimizer)
 			scaler.update()
 			losses += loss.item()
 
-		lr_scheduler.step()
+		if use_scheduler:
+			lr_scheduler.step()
 		losses /= len(train_loader)
 		model.eval()
 		y_pred = []
