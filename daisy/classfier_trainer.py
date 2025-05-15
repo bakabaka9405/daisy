@@ -85,7 +85,10 @@ def fast_train_smile(
 			for images, label in val_loader:
 				images, label = images.to(device, non_blocking=True), label.to(device, non_blocking=True)
 
-				with torch.autocast('cuda'):
+				if use_amp:
+					with torch.autocast('cuda'):
+						outputs = model(images)
+				else:
 					outputs = model(images)
 				preds = torch.argmax(outputs, dim=1)
 
