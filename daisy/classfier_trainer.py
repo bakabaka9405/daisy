@@ -66,7 +66,9 @@ def fast_train_smile(
 	scaler = torch.GradScaler(enabled=use_amp)
 	for epoch in range(epochs):
 		model.train()
-		losses = 0.0
+		train_losses = 0.0
+		y_pred = []
+		y_true = []
 		for images, label in train_loader:
 			images, label = images.to(device, non_blocking=True), label.to(device, non_blocking=True)
 
@@ -80,20 +82,27 @@ def fast_train_smile(
 				outputs = model(images)
 				loss = criterion(outputs, label)
 
+			preds = torch.argmax(outputs, dim=1)
+			y_pred.extend(preds.cpu().numpy())
+			y_true.extend(label.cpu().numpy())
 			scaler.scale(loss).backward()
 			scaler.unscale_(optimizer)
 			torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 			scaler.step(optimizer)
 			scaler.update()
-			losses += loss.item()
+			train_losses += loss.item()
 
 		if use_scheduler:
 			lr_scheduler.step()
-		losses /= len(train_loader)
-		model.eval()
+		train_losses /= len(train_loader)
+
+		train_acc = accuracy_score(y_true, y_pred)
+
 		y_pred = []
 		y_true = []
+		val_losses = 0.0
 		count = [[0] * 3 for _ in range(3)]
+		model.eval()
 		with torch.no_grad():
 			for images, label in val_loader:
 				images, label = images.to(device, non_blocking=True), label.to(device, non_blocking=True)
@@ -101,8 +110,12 @@ def fast_train_smile(
 				if use_amp:
 					with torch.autocast('cuda'):
 						outputs = model(images)
+						loss = criterion(outputs, label)
 				else:
 					outputs = model(images)
+					loss = criterion(outputs, label)
+
+				val_losses += loss.item()
 				preds = torch.argmax(outputs, dim=1)
 
 				y_pred.extend(preds.cpu().numpy())
@@ -110,10 +123,13 @@ def fast_train_smile(
 				for i, j in zip(label, preds):
 					count[i][j] += 1
 
-		acc = accuracy_score(y_true, y_pred)
+		val_losses /= len(val_loader)
+		val_acc = accuracy_score(y_true, y_pred)
 		prec = precision_score(y_true, y_pred, average='macro', zero_division=0)
 		recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
 		f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
 
 		print(count)
-		print(f'Epoch {epoch + 1}/{epochs}, Loss:{losses:.4f}, Accuracy: {acc:.4f}, Precision: {prec:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}')
+		print(
+			f'Epoch {epoch + 1}/{epochs}, Train Loss:{train_losses:.4f}, Train Acc:{train_acc:.4f}, Val Loss:{val_losses:.4f}, Val Accuracy: {val_acc:.4f}, Precision: {prec:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}'
+		)
