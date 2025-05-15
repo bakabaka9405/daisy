@@ -5,6 +5,7 @@ from torch.optim import AdamW
 from timm.loss.cross_entropy import LabelSmoothingCrossEntropy
 from timm.data.loader import MultiEpochsDataLoader
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import math
 
 
 def fast_train_smile(
@@ -13,6 +14,7 @@ def fast_train_smile(
 	epochs: int,
 	lr: float,
 	dataset: IndexDataset,
+	warmup_epochs: int = 0,
 	num_workers: int | tuple[int, int] = 10,
 	use_amp: bool = True,
 	pin_memory: bool = True,
@@ -49,7 +51,12 @@ def fast_train_smile(
 	model.to(device)
 
 	optimizer = AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-	loss_fn = LabelSmoothingCrossEntropy()
+	criterion = LabelSmoothingCrossEntropy()
+
+	def lr_func(epoch: int):
+		return min((epoch + 1) / (warmup_epochs + 1e-8), 0.5 * (math.cos(epoch / epochs * math.pi) + 1))
+
+	lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_func)
 
 	print('ready to train...')
 
@@ -65,19 +72,20 @@ def fast_train_smile(
 			if use_amp:
 				with torch.autocast('cuda'):
 					outputs = model(images)
-					loss = loss_fn(outputs, label)
+					loss = criterion(outputs, label)
 				scaler.scale(loss).backward()
 				torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 				scaler.step(optimizer)
 				scaler.update()
 			else:
 				outputs = model(images)
-				loss = loss_fn(outputs, label)
+				loss = criterion(outputs, label)
 				loss.backward()
 				torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 				optimizer.step()
 			losses += loss.item()
 
+		lr_scheduler.step()
 		losses /= len(train_loader)
 		model.eval()
 		y_pred = []
