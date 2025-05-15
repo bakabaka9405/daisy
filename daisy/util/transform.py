@@ -92,9 +92,8 @@ def get_pad_val_transform():
 def get_rectangle_train_transform():
 	return transforms.Compose(
 		[
-			transforms.Resize((224, 112)),
+			transforms.Resize((224, 224)),
 			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-			# transforms.GaussianBlur(kernel_size=(11, 21)),
 			transforms.RandomHorizontalFlip(),
 			ZeroOneNormalize(),
 			# transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -106,7 +105,7 @@ def get_rectangle_train_transform():
 def get_rectangle_val_transform():
 	return transforms.Compose(
 		[
-			transforms.Resize((224, 112)),
+			transforms.Resize((224, 224)),
 			ZeroOneNormalize(),
 			# transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 			transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
