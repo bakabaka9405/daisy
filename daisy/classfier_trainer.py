@@ -75,13 +75,12 @@ def fast_train_smile(
 				with torch.autocast('cuda'):
 					outputs = model(images)
 					loss = criterion(outputs, label)
-
 			else:
 				outputs = model(images)
 				loss = criterion(outputs, label)
 
 			scaler.scale(loss).backward()
-			torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+			# torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 			scaler.step(optimizer)
 			scaler.update()
 			losses += loss.item()
