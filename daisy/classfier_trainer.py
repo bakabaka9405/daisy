@@ -14,6 +14,7 @@ def fast_train_smile(
 	epochs: int,
 	lr: float,
 	dataset: IndexDataset,
+	batch_size: int = 128,
 	warmup_epochs: int = 0,
 	num_workers: int | tuple[int, int] = 10,
 	use_amp: bool = True,
@@ -34,7 +35,7 @@ def fast_train_smile(
 	print('loading dataloaders...')
 	train_loader = MultiEpochsDataLoader(
 		train_dataset,
-		batch_size=128,
+		batch_size=batch_size,
 		shuffle=True,
 		num_workers=num_workers[0],
 		pin_memory=pin_memory,
@@ -42,7 +43,7 @@ def fast_train_smile(
 
 	val_loader = MultiEpochsDataLoader(
 		val_dataset,
-		batch_size=128,
+		batch_size=batch_size,
 		shuffle=False,
 		num_workers=num_workers[1],
 		pin_memory=pin_memory,
