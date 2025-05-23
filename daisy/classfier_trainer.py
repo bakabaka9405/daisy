@@ -11,21 +11,36 @@ import math
 def fast_train_smile(
 	device: torch.device,
 	model: torch.nn.Module,
+	num_classes: int,
 	epochs: int,
 	lr: float,
-	dataset: IndexDataset,
+	dataset: IndexDataset | tuple[IndexDataset, IndexDataset],
 	batch_size: int = 128,
+	accum_iter: int = 1,
+	train_transform: torch.nn.Module | None = None,
+	val_transform: torch.nn.Module | None = None,
 	val_ratio: float = 0.1,
 	warmup_epochs: int = 0,
 	num_workers: int | tuple[int, int] = 10,
+	weight_decay: float = 1e-4,
+	smoothing: float = 0.1,
 	use_amp: bool = True,
 	use_scheduler: bool = True,
+	clip_grad: bool = False,
+	max_norm: float = 1.0,
 	pin_memory: bool = True,
+	early_stop: bool = False,
+	early_stop_epoch: int = 5,
 ):
-	train_transform = daisy.util.transform.get_rectangle_train_transform()
-	val_transform = daisy.util.transform.get_rectangle_val_transform()
+	if train_transform is None:
+		train_transform = daisy.util.transform.get_rectangle_train_transform()
+	if val_transform is None:
+		val_transform = daisy.util.transform.get_rectangle_val_transform()
 
-	train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(dataset, val_ratio=val_ratio)
+	if isinstance(dataset, tuple):
+		train_dataset, val_dataset = dataset
+	else:
+		train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(dataset, val_ratio=val_ratio)
 	torch.cuda.empty_cache()
 
 	train_dataset.setTransform(train_transform)
@@ -53,8 +68,8 @@ def fast_train_smile(
 
 	model.to(device)
 
-	optimizer = AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-	criterion = LabelSmoothingCrossEntropy()
+	optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+	criterion = LabelSmoothingCrossEntropy(smoothing=smoothing)
 
 	def lr_func(epoch: int):
 		return min((epoch + 1) / (warmup_epochs + 1e-8), 0.5 * (math.cos(epoch / epochs * math.pi) + 1))
@@ -64,33 +79,37 @@ def fast_train_smile(
 	print('ready to train...')
 
 	scaler = torch.GradScaler(enabled=use_amp)
+
+	best_epoch = 0
+	best_acc = 0.0
 	for epoch in range(epochs):
 		model.train()
 		train_losses = 0.0
 		y_pred = []
 		y_true = []
-		for images, label in train_loader:
+		for i, (images, label) in enumerate(train_loader):
 			images, label = images.to(device, non_blocking=True), label.to(device, non_blocking=True)
-
-			optimizer.zero_grad()
 
 			if use_amp:
 				with torch.autocast('cuda'):
 					outputs = model(images)
-					loss = criterion(outputs, label)
+					loss = criterion(outputs, label) / accum_iter
 			else:
 				outputs = model(images)
-				loss = criterion(outputs, label)
+				loss = criterion(outputs, label) / accum_iter
 
 			preds = torch.argmax(outputs, dim=1)
 			y_pred.extend(preds.cpu().numpy())
 			y_true.extend(label.cpu().numpy())
 			scaler.scale(loss).backward()
-			scaler.unscale_(optimizer)
-			torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-			scaler.step(optimizer)
-			scaler.update()
-			train_losses += loss.item()
+			if (i + 1) % accum_iter == 0 or (i + 1) == len(train_loader):
+				if clip_grad:
+					scaler.unscale_(optimizer)
+					torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
+				scaler.step(optimizer)
+				scaler.update()
+				optimizer.zero_grad()
+			train_losses += loss.item() * accum_iter
 
 		if use_scheduler:
 			lr_scheduler.step()
@@ -101,7 +120,7 @@ def fast_train_smile(
 		y_pred = []
 		y_true = []
 		val_losses = 0.0
-		count = [[0] * 3 for _ in range(3)]
+		count = [[0] * num_classes for _ in range(num_classes)]
 		model.eval()
 		with torch.no_grad():
 			for images, label in val_loader:
@@ -131,5 +150,13 @@ def fast_train_smile(
 
 		print(count)
 		print(
-			f'Epoch {epoch + 1}/{epochs}, Train Loss:{train_losses:.4f}, Train Acc:{train_acc:.4f}, Val Loss:{val_losses:.4f}, Val Accuracy: {val_acc:.4f}, Precision: {prec:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}'
+			f'Epoch {epoch + 1}/{epochs}, LR: {optimizer.param_groups[0]["lr"]:.6f}, Train Loss: {train_losses:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_losses:.4f}, Val Accuracy: {val_acc:.4f}, Precision: {prec:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}'
 		)
+
+		if val_acc > best_acc:
+			best_acc = val_acc
+			best_epoch = epoch
+
+		if early_stop and epoch - best_epoch >= early_stop_epoch:
+			print(f'Early stopping at epoch {epoch + 1}')
+			break

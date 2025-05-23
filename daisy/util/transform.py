@@ -1,6 +1,7 @@
 import torch
-from torchvision.transforms import v2 as transforms
+from torchvision.transforms import v2 as transforms, InterpolationMode
 import torch.nn.functional as F
+from collections.abc import Sequence
 
 
 class ZeroOneNormalize:
@@ -88,6 +89,7 @@ def get_pad_val_transform():
 		]
 	)
 
+
 def get_stretch_train_transform():
 	return transforms.Compose(
 		[
@@ -115,8 +117,9 @@ def get_stretch_val_transform():
 def get_rectangle_train_transform():
 	return transforms.Compose(
 		[
+			# transforms.RandomRotation((-5, 5), InterpolationMode.BILINEAR, expand=True),
 			transforms.Resize((112, 224)),
-			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
 			transforms.RandomHorizontalFlip(),
 			ZeroOneNormalize(),
 			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
@@ -134,3 +137,47 @@ def get_rectangle_val_transform():
 			# transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
 		]
 	)
+
+
+def get_randaug_train_transform(input_size: int | tuple[int, int] = (224, 224), pad_size: int | Sequence[int] | None = None):
+	if isinstance(input_size, int):
+		resize_size = input_size * 256 // 224
+	else:
+		resize_size = input_size[0] * 256 // 224, input_size[1] * 256 // 224
+
+	trans = []
+
+	if pad_size is not None:
+		trans += [transforms.Pad(pad_size)]
+
+	trans += [
+		transforms.RandAugment(2, interpolation=InterpolationMode.BILINEAR),
+		transforms.Resize(resize_size),
+		transforms.CenterCrop(input_size),
+		ZeroOneNormalize(),
+		transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+	]
+
+	return transforms.Compose(trans)
+
+
+def get_autoaug_train_transform(input_size: int | tuple[int, int] = (224, 224), pad_size: int | Sequence[int] | None = None):
+	if isinstance(input_size, int):
+		resize_size = input_size * 256 // 224
+	else:
+		resize_size = input_size[0] * 256 // 224, input_size[1] * 256 // 224
+
+	trans = []
+
+	if pad_size is not None:
+		trans += [transforms.Pad(pad_size)]
+
+	trans += [
+		transforms.AutoAugment(interpolation=InterpolationMode.BILINEAR),
+		transforms.Resize(resize_size),
+		transforms.CenterCrop(input_size),
+		ZeroOneNormalize(),
+		transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+	]
+
+	return transforms.Compose(trans)
