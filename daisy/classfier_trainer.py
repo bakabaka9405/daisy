@@ -7,6 +7,7 @@ from timm.data.loader import MultiEpochsDataLoader
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import math
 from pathlib import Path
+from typing import Literal
 
 
 def fast_train_smile(
@@ -34,6 +35,7 @@ def fast_train_smile(
 	early_stop_epoch: int = 5,
 	save_path: Path | None = None,
 	keep_count: int = 0,
+	cmp_obj: Literal['acc', 'f1'] = 'f1',
 ):
 	if train_transform is None:
 		train_transform = daisy.util.transform.get_rectangle_train_transform()
@@ -88,6 +90,7 @@ def fast_train_smile(
 
 	best_epoch = 0
 	best_acc = 0.0
+	best_f1 = 0.0
 	for epoch in range(epochs):
 		model.train()
 		train_losses = 0.0
@@ -159,6 +162,14 @@ def fast_train_smile(
 			f'Epoch {epoch + 1}/{epochs}, LR: {optimizer.param_groups[0]["lr"]:.6f}, Train Loss: {train_losses:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_losses:.4f}, Val Accuracy: {val_acc:.4f}, Precision: {prec:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}'
 		)
 
+		better = False
+
+		if cmp_obj == 'acc' and val_acc > best_acc:
+			better = True
+
+		elif cmp_obj == 'f1' and f1 > best_f1:
+			better = True
+
 		if save_path is not None:
 			torch.save(model.state_dict(), save_path / f'model_epoch_{epoch + 1}.pth')
 			# print(f'Model saved at {save_path / f"model_epoch_{epoch + 1}.pth"}')
@@ -168,11 +179,12 @@ def fast_train_smile(
 					remove_path.unlink()
 					# print(f'Removed old model {remove_path}')
 
-			if val_acc > best_acc:
+			if better:
 				torch.save(model.state_dict(), save_path / 'best_model.pth')
 
-		if val_acc > best_acc:
+		if better:
 			best_acc = val_acc
+			best_f1 = f1
 			best_epoch = epoch
 
 		if early_stop and epoch - best_epoch >= early_stop_epoch:
