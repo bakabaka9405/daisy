@@ -6,6 +6,7 @@ from torch import Tensor
 from torchvision.io.image import decode_image, ImageReadMode
 from torchvision import transforms
 from typing import TypeVar
+from typing import Any
 
 
 def set_global_seed(seed: int):
@@ -147,3 +148,20 @@ def shuffle_correlated_lists(*args: list):
 		tmp = gather_list_by_indexes(i, idx)
 		for j in range(length):
 			i[j] = tmp[j]
+
+
+def copy_by_label(files: list, labels: list[int], label: int, val: int) -> None:
+	mask = [1 if i == label else 0 for i in labels]
+	copied_files = [i for i, j in zip(files, mask) if j == 1]
+
+	files += copied_files * val
+	labels += [label] * (len(copied_files) * val)
+
+
+if __name__ == '__main__':
+	files = [1, 2, 3, 4]
+	labels = [1, 1, 2, 2]
+
+	copy_by_label(files, labels, 1, 2)
+
+	print(files)
