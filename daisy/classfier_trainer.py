@@ -35,7 +35,7 @@ def fast_train_smile(
 	early_stop_epoch: int = 5,
 	save_path: Path | None = None,
 	keep_count: int = 0,
-	cmp_obj: Literal['acc', 'f1'] = 'f1',
+	cmp_obj: Literal['acc', 'prec', 'recall', 'f1'] = 'f1',
 ):
 	if train_transform is None:
 		train_transform = daisy.util.transform.get_rectangle_train_transform()
@@ -89,8 +89,12 @@ def fast_train_smile(
 	scaler = torch.GradScaler(enabled=use_amp)
 
 	best_epoch = 0
-	best_acc = 0.0
-	best_f1 = 0.0
+	best = {
+		'acc': 0.0,
+		'prec': 0.0,
+		'recall': 0.0,
+		'f1': 0.0,
+	}
 	for epoch in range(epochs):
 		model.train()
 		train_losses = 0.0
@@ -162,13 +166,14 @@ def fast_train_smile(
 			f'Epoch {epoch + 1}/{epochs}, LR: {optimizer.param_groups[0]["lr"]:.6f}, Train Loss: {train_losses:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_losses:.4f}, Val Accuracy: {val_acc:.4f}, Precision: {prec:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}'
 		)
 
-		better = False
+		current = {
+			'acc': val_acc,
+			'prec': prec,
+			'recall': recall,
+			'f1': f1,
+		}
 
-		if cmp_obj == 'acc' and val_acc > best_acc:
-			better = True
-
-		elif cmp_obj == 'f1' and f1 > best_f1:
-			better = True
+		better = current[cmp_obj] > best[cmp_obj]
 
 		if save_path is not None:
 			torch.save(model.state_dict(), save_path / f'model_epoch_{epoch + 1}.pth')
@@ -183,8 +188,7 @@ def fast_train_smile(
 				torch.save(model.state_dict(), save_path / 'best_model.pth')
 
 		if better:
-			best_acc = val_acc
-			best_f1 = f1
+			best = current
 			best_epoch = epoch
 
 		if early_stop and epoch - best_epoch >= early_stop_epoch:
