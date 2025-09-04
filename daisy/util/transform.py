@@ -2,6 +2,8 @@ import torch
 from torchvision.transforms import v2 as transforms, InterpolationMode
 import torch.nn.functional as F
 from collections.abc import Sequence
+import albumentations as A
+import cv2
 
 
 class ZeroOneNormalize:
@@ -118,9 +120,14 @@ def get_rectangle_train_transform():
 	return transforms.Compose(
 		[
 			# transforms.RandomRotation((-5, 5), InterpolationMode.BILINEAR, expand=True),
-			transforms.Resize((112, 224)),
-			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
+			transforms.RandomZoomOut(),
+			transforms.RandomRotation(degrees=(-5, 5), interpolation=InterpolationMode.BILINEAR),
+			# transforms.RandomAdjustSharpness(0.5),
+			transforms.Resize((120, 230)),
+			transforms.RandomCrop((112, 224)),
+			transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.2),
 			transforms.RandomHorizontalFlip(),
+			# transforms.RandomVerticalFlip(),
 			ZeroOneNormalize(),
 			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 			# transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
@@ -152,8 +159,9 @@ def get_randaug_train_transform(input_size: int | tuple[int, int] = (224, 224), 
 
 	trans += [
 		transforms.RandAugment(2, interpolation=InterpolationMode.BILINEAR),
-		transforms.Resize(resize_size),
-		transforms.CenterCrop(input_size),
+		# transforms.Resize(resize_size),
+		# transforms.CenterCrop(input_size),
+		transforms.Resize(input_size),
 		ZeroOneNormalize(),
 		transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 	]
@@ -181,3 +189,49 @@ def get_autoaug_train_transform(input_size: int | tuple[int, int] = (224, 224), 
 	]
 
 	return transforms.Compose(trans)
+
+
+def get_one_by_one_transform():
+	return transforms.Compose(
+		[
+			transforms.Resize((224, 224)),
+			ZeroOneNormalize(),
+			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+			# transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+		]
+	)
+
+
+def get_rectangle_train_transform_A():
+	return A.Compose(
+		[
+			A.Rotate((-5, 5), interpolation=cv2.INTER_CUBIC),
+			A.Resize(120, 230),
+			A.RandomCrop(112, 224),
+			A.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.2),
+			A.HorizontalFlip(),
+			A.ISONoise(),
+			A.OneOf(
+				[
+					A.ToGray(p=1.0),
+					A.ChannelDropout(p=1.0),
+				],
+				p=0.1,
+			),
+			A.CoarseDropout((8, 16), (0.05, 0.1), (0.05, 0.1), p=1.0),
+			A.Normalize(),
+			A.ToTensorV2(),
+		]
+	)
+
+
+def get_rectangle_val_transform_A():
+	return A.Compose(
+		[
+			A.Resize(112, 224),
+			# A.SmallestMaxSize(224),
+			# A.CenterCrop(224, 224),
+			A.Normalize(),
+			A.ToTensorV2(),
+		]
+	)

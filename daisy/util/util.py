@@ -158,10 +158,22 @@ def copy_by_label(files: list, labels: list[int], label: int, val: int) -> None:
 	labels += [label] * (len(copied_files) * val)
 
 
+def extract_by_label(labels: list[int], target: int, *args: list):
+	return ([j for j, k in zip(i, labels) if k == target] for i in args)
+
+
+def exclude_by_label(labels: list[int], target: int, *args: list):
+	return ([j for j, k in zip(i, labels) if k != target] for i in args)
+
+
+def filter_by_label(labels: list[int], cond: Any, *args: list):
+	return ([j for j, k in zip(i, labels) if cond(k)] for i in args)
+
+
 if __name__ == '__main__':
 	files = [1, 2, 3, 4]
 	labels = [1, 1, 2, 2]
 
-	copy_by_label(files, labels, 1, 2)
-
-	print(files)
+	a, b = extract_by_label(labels, 1, files, ['asdf', 666, 0, 1.2])
+	print(a)
+	print(b)

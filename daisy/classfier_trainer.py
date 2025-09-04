@@ -5,6 +5,7 @@ from torch.optim import AdamW
 from timm.loss.cross_entropy import LabelSmoothingCrossEntropy
 from timm.data.loader import MultiEpochsDataLoader
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.utils.class_weight import compute_class_weight
 import math
 from pathlib import Path
 from typing import Literal
@@ -19,8 +20,8 @@ def fast_train_smile(
 	dataset: IndexDataset | tuple[IndexDataset, IndexDataset],
 	batch_size: int = 128,
 	accum_iter: int = 1,
-	train_transform: torch.nn.Module | None = None,
-	val_transform: torch.nn.Module | None = None,
+	train_transform=None,
+	val_transform=None,
 	val_ratio: float = 0.1,
 	warmup_epochs: int = 0,
 	num_workers: int | tuple[int, int] = 10,
@@ -33,9 +34,10 @@ def fast_train_smile(
 	pin_memory: bool = True,
 	early_stop: bool = False,
 	early_stop_epoch: int = 5,
-	save_path: Path | None = None,
+	save_path: Path | str | None = None,
 	keep_count: int = 0,
 	cmp_obj: Literal['acc', 'prec', 'recall', 'f1'] = 'f1',
+	show_matrix: bool = True,
 ):
 	if train_transform is None:
 		train_transform = daisy.util.transform.get_rectangle_train_transform()
@@ -43,6 +45,8 @@ def fast_train_smile(
 		val_transform = daisy.util.transform.get_rectangle_val_transform()
 
 	if save_path is not None:
+		if isinstance(save_path, str):
+			save_path = Path(save_path)
 		save_path.mkdir(parents=True, exist_ok=True)
 
 	if isinstance(dataset, tuple):
@@ -76,13 +80,17 @@ def fast_train_smile(
 
 	model.to(device)
 
+	# model.to(device).compile()
+
 	optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+
 	criterion = LabelSmoothingCrossEntropy(smoothing=smoothing)
 
 	def lr_func(epoch: int):
 		return min(epoch / (warmup_epochs + 1e-8), 0.5 * (math.cos(epoch / epochs * math.pi) + 1))
 
-	lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_func)
+	if use_scheduler:
+		lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_func)
 
 	print('ready to train...')
 
@@ -103,11 +111,8 @@ def fast_train_smile(
 		for i, (images, label) in enumerate(train_loader):
 			images, label = images.to(device, non_blocking=True), label.to(device, non_blocking=True)
 
-			if use_amp:
-				with torch.autocast('cuda'):
-					outputs = model(images)
-					loss = criterion(outputs, label) / accum_iter
-			else:
+			with torch.autocast('cuda', enabled=use_amp):
+				# outputs = model(images)
 				outputs = model(images)
 				loss = criterion(outputs, label) / accum_iter
 
@@ -125,7 +130,7 @@ def fast_train_smile(
 			train_losses += loss.item() * accum_iter
 
 		if use_scheduler:
-			lr_scheduler.step()
+			lr_scheduler.step()  # type:ignore
 		train_losses /= len(train_loader)
 
 		train_acc = accuracy_score(y_true, y_pred)
@@ -133,7 +138,8 @@ def fast_train_smile(
 		y_pred = []
 		y_true = []
 		val_losses = 0.0
-		count = [[0] * num_classes for _ in range(num_classes)]
+		if show_matrix:
+			count = [[0] * num_classes for _ in range(num_classes)]
 		model.eval()
 		with torch.no_grad():
 			for images, label in val_loader:
@@ -152,8 +158,9 @@ def fast_train_smile(
 
 				y_pred.extend(preds.cpu().numpy())
 				y_true.extend(label.cpu().numpy())
-				for i, j in zip(label, preds):
-					count[i][j] += 1
+				if show_matrix:
+					for i, j in zip(label, preds):
+						count[i][j] += 1  # type:ignore
 
 		val_losses /= len(val_loader)
 		val_acc = accuracy_score(y_true, y_pred)
@@ -161,7 +168,8 @@ def fast_train_smile(
 		recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
 		f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
 
-		print(count)
+		if show_matrix:
+			print(count)  # type:ignore
 		print(
 			f'Epoch {epoch + 1}/{epochs}, LR: {optimizer.param_groups[0]["lr"]:.6f}, Train Loss: {train_losses:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_losses:.4f}, Val Accuracy: {val_acc:.4f}, Precision: {prec:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}'
 		)

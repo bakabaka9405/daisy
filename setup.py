@@ -7,7 +7,7 @@ setup(
 	author='bakabaka',
 	author_email='none',
 	packages=['daisy'],  # 自动查找你的包内的模块
-	install_requires=['torch>=2.6.0', 'torchvision>=0.21.0', 'timm>=1.0.0', 'numpy>=2.1.2'],
+	install_requires=[],
 	classifiers=[
 		'Development Status :: 3 - Alpha',  # 项目的开发状态 (Alpha, Beta, Production/Stable 等)
 		'Intended Audience :: Developers',
