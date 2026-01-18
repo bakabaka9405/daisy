@@ -1,10 +1,9 @@
-from . import annotation, dataset, feeder, mae, util, classfier_trainer
+from . import dataset, feeder, util, classfier_trainer, task
 
 __all__ = [
-	'annotation',
 	'dataset',
 	'feeder',
-	'mae',
 	'util',
 	'classfier_trainer',
+	'task',
 ]

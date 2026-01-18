@@ -11,230 +11,255 @@ from typing import Literal
 import time
 
 
+def calc_confusion_matrix(y_true, y_pred, num_classes: int):
+	count = [[0] * num_classes for _ in range(num_classes)]
+	for i, j in zip(y_true, y_pred):
+		count[i][j] += 1  # type:ignore
+	return count
+
+
 def fast_train_smile(
-    device: torch.device,
-    model: torch.nn.Module,
-    num_classes: int,
-    epochs: int,
-    lr: float,
-    dataset: IndexDataset | tuple[IndexDataset, IndexDataset],
-    batch_size: int = 128,
-    accum_iter: int = 1,
-    train_transform=None,
-    val_transform=None,
-    val_ratio: float = 0.1,
-    warmup_epochs: int = 0,
-    num_workers: int | tuple[int, int] = 10,
-    weight_decay: float = 1e-4,
-    smoothing: float = 0.1,
-    use_amp: bool = True,
-    use_scheduler: bool = True,
-    clip_grad: bool = False,
-    max_norm: float = 1.0,
-    pin_memory: bool = True,
-    early_stop: bool = False,
-    early_stop_epoch: int = 5,
-    save_path: Path | str | None = None,
-    keep_count: int = 0,
-    cmp_obj: Literal["acc", "prec", "recall", "f1"] = "f1",
-    show_matrix: bool = True,
-    log_dir: Path | str | None = None,
+	device: torch.device,
+	model: torch.nn.Module,
+	num_classes: int,
+	epochs: int,
+	lr: float,
+	dataset: IndexDataset | tuple[IndexDataset, IndexDataset],
+	batch_size: int = 128,
+	accum_iter: int = 1,
+	train_transform=None,
+	val_transform=None,
+	val_ratio: float = 0.1,
+	warmup_epochs: int = 0,
+	num_workers: int | tuple[int, int] = 10,
+	weight_decay: float = 1e-4,
+	smoothing: float = 0.1,
+	use_amp: bool = True,
+	use_scheduler: bool = True,
+	clip_grad: bool = False,
+	max_norm: float = 1.0,
+	pin_memory: bool = True,
+	early_stop: bool = False,
+	early_stop_epoch: int = 5,
+	save_path: Path | str | None = None,
+	keep_count: int = 0,
+	save_best: bool = True,
+	cmp_obj: Literal['acc', 'prec', 'recall', 'f1'] = 'f1',
+	show_matrix: bool = True,
+	log_dir: Path | str | None = None,
 ):
-    if train_transform is None:
-        train_transform = daisy.util.transform.get_rectangle_train_transform()
-    if val_transform is None:
-        val_transform = daisy.util.transform.get_rectangle_val_transform()
+	if train_transform is None:
+		train_transform = daisy.util.transform.get_rectangle_train_transform()
+	if val_transform is None:
+		val_transform = daisy.util.transform.get_rectangle_val_transform()
 
-    if save_path is not None:
-        if isinstance(save_path, str):
-            save_path = Path(save_path)
-        save_path.mkdir(parents=True, exist_ok=True)
+	if save_path is not None:
+		if isinstance(save_path, str):
+			save_path = Path(save_path)
+		save_path.mkdir(parents=True, exist_ok=True)
 
-    # 处理日志路径
-    if log_dir is not None:
-        if isinstance(log_dir, str):
-            log_dir = Path(log_dir)
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_file = log_dir / f"log_{time.strftime('%Y%m%d_%H%M%S')}.csv"
-        if not log_file.exists():
-            with open(log_file, "w", encoding="utf-8") as f:
-                f.write(
-                    "epoch,lr,train_loss,train_acc,val_loss,val_acc,precision,recall,f1,confusion_matrix\n"
-                )
-    else:
-        log_file = None
+	# 处理日志路径
+	if log_dir is not None:
+		if isinstance(log_dir, str):
+			log_dir = Path(log_dir)
+		log_dir.mkdir(parents=True, exist_ok=True)
+		log_file = log_dir / f"log_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+		if not log_file.exists():
+			with open(log_file, 'w', encoding='utf-8') as f:
+				f.write('epoch,lr,train_loss,train_acc,val_loss,val_acc,precision,recall,f1,confusion_matrix\n')
+	else:
+		log_file = None
 
-    if isinstance(dataset, tuple):
-        train_dataset, val_dataset = dataset
-    else:
-        train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(
-            dataset, val_ratio=val_ratio
-        )
-    torch.cuda.empty_cache()
+	if isinstance(dataset, tuple):
+		train_dataset, val_dataset = dataset
+	else:
+		train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(dataset, val_ratio=val_ratio)
+	torch.cuda.empty_cache()
 
-    train_dataset.setTransform(train_transform)
-    val_dataset.applyTransform(val_transform)
+	train_dataset.setTransform(train_transform)
+	val_dataset.applyTransform(val_transform)
 
-    if isinstance(num_workers, int):
-        num_workers = (num_workers, num_workers)
+	if isinstance(num_workers, int):
+		num_workers = (num_workers, num_workers)
 
-    print("loading dataloaders...")
-    train_loader = MultiEpochsDataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers[0],
-        pin_memory=pin_memory,
-    )
+	print('loading dataloaders...')
+	train_loader = MultiEpochsDataLoader(
+		train_dataset,
+		batch_size=batch_size,
+		shuffle=True,
+		num_workers=num_workers[0],
+		pin_memory=pin_memory,
+	)
 
-    val_loader = MultiEpochsDataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers[1],
-        pin_memory=pin_memory,
-    )
+	val_loader = MultiEpochsDataLoader(
+		val_dataset,
+		batch_size=batch_size,
+		shuffle=False,
+		num_workers=num_workers[1],
+		pin_memory=pin_memory,
+	)
 
-    model.to(device)
+	model.to(device)
 
-    # model.to(device).compile()
+	# model.to(device).compile()
 
-    optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+	optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
-    criterion = LabelSmoothingCrossEntropy(smoothing=smoothing)
+	criterion = LabelSmoothingCrossEntropy(smoothing=smoothing)
 
-    def lr_func(epoch: int):
-        return min(
-            epoch / (warmup_epochs + 1e-8),
-            0.5 * (math.cos(epoch / epochs * math.pi) + 1),
-        )
+	def lr_func(epoch: int):
+		return min(
+			epoch / (warmup_epochs + 1e-8),
+			0.5 * (math.cos(epoch / epochs * math.pi) + 1),
+		)
 
-    if use_scheduler:
-        lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_func)
+	if use_scheduler:
+		lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_func)
 
-    print("ready to train...")
+	print('ready to train...')
 
-    scaler = torch.GradScaler(enabled=use_amp)
+	scaler = torch.GradScaler(enabled=use_amp)
 
-    best_epoch = 0
-    best = {
-        "acc": 0.0,
-        "prec": 0.0,
-        "recall": 0.0,
-        "f1": 0.0,
-    }
-    for epoch in range(epochs):
-        model.train()
-        train_losses = 0.0
-        y_pred = []
-        y_true = []
-        for i, (images, label) in enumerate(train_loader):
-            images, label = (
-                images.to(device, non_blocking=True),
-                label.to(device, non_blocking=True),
-            )
+	best_epoch = 0
+	best = {
+		'acc': 0.0,
+		'prec': 0.0,
+		'recall': 0.0,
+		'f1': 0.0,
+	}
+	for epoch in range(epochs):
+		model.train()
+		train_losses = 0.0
+		y_pred = []
+		y_true = []
+		for i, (images, label) in enumerate(train_loader):
+			images, label = (
+				images.to(device, non_blocking=True),
+				label.to(device, non_blocking=True),
+			)
 
-            with torch.autocast("cuda", enabled=use_amp):
-                # outputs = model(images)
-                outputs = model(images)
-                loss = criterion(outputs, label) / accum_iter
+			with torch.autocast('cuda', enabled=use_amp):
+				# outputs = model(images)
+				outputs = model(images)
+				loss = criterion(outputs, label) / accum_iter
 
-            preds = torch.argmax(outputs, dim=1)
-            y_pred.extend(preds.cpu().numpy())
-            y_true.extend(label.cpu().numpy())
-            scaler.scale(loss).backward()
-            if (i + 1) % accum_iter == 0 or (i + 1) == len(train_loader):
-                if clip_grad:
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(
-                        model.parameters(), max_norm=max_norm
-                    )
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad()
-            train_losses += loss.item() * accum_iter
+			preds = torch.argmax(outputs, dim=1)
+			y_pred.extend(preds.cpu().numpy())
+			y_true.extend(label.cpu().numpy())
+			scaler.scale(loss).backward()
+			if (i + 1) % accum_iter == 0 or (i + 1) == len(train_loader):
+				if clip_grad:
+					scaler.unscale_(optimizer)
+					torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
+				scaler.step(optimizer)
+				scaler.update()
+				optimizer.zero_grad()
+			train_losses += loss.item() * accum_iter
 
-        if use_scheduler:
-            lr_scheduler.step()  # type:ignore
-        train_losses /= len(train_loader)
+		if use_scheduler:
+			lr_scheduler.step()  # type:ignore
+		train_losses /= len(train_loader)
 
-        train_acc = accuracy_score(y_true, y_pred)
+		train_acc = accuracy_score(y_true, y_pred)
 
-        y_pred = []
-        y_true = []
-        val_losses = 0.0
-        count = [[0] * num_classes for _ in range(num_classes)]
-        model.eval()
-        with torch.no_grad():
-            for images, label in val_loader:
-                images, label = (
-                    images.to(device, non_blocking=True),
-                    label.to(device, non_blocking=True),
-                )
+		y_pred = []
+		y_true = []
+		val_losses = 0.0
+		model.eval()
+		with torch.no_grad():
+			for images, label in val_loader:
+				images, label = (
+					images.to(device, non_blocking=True),
+					label.to(device, non_blocking=True),
+				)
 
-                if use_amp:
-                    with torch.autocast("cuda"):
-                        outputs = model(images)
-                        loss = criterion(outputs, label)
-                else:
-                    outputs = model(images)
-                    loss = criterion(outputs, label)
+				with torch.autocast('cuda', enabled=use_amp):
+					outputs = model(images)
+					loss = criterion(outputs, label)
 
-                val_losses += loss.item()
-                preds = torch.argmax(outputs, dim=1)
+				val_losses += loss.item()
+				preds = torch.argmax(outputs, dim=1)
 
-                y_pred.extend(preds.cpu().numpy())
-                y_true.extend(label.cpu().numpy())
-                for i, j in zip(label, preds):
-                    count[i][j] += 1  # type:ignore
+				y_pred.extend(preds.cpu().numpy())
+				y_true.extend(label.cpu().numpy())
 
-        val_losses /= len(val_loader)
-        val_acc = accuracy_score(y_true, y_pred)
-        prec = precision_score(y_true, y_pred, average="macro", zero_division=0)
-        recall = recall_score(y_true, y_pred, average="macro", zero_division=0)
-        f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
+		val_losses /= len(val_loader)
+		val_acc = accuracy_score(y_true, y_pred)
+		prec = precision_score(y_true, y_pred, average='macro', zero_division=0)
+		recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
+		f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
+		count = calc_confusion_matrix(y_true, y_pred, num_classes)
+		if show_matrix:
+			print(count)
+		print(
+			f'Epoch {epoch + 1}/{epochs}, LR: {optimizer.param_groups[0]["lr"]:.6f}, Train Loss: {train_losses:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_losses:.4f}, Val Accuracy: {val_acc:.4f}, Precision: {prec:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}'
+		)
 
-        if show_matrix:
-            print(count)  # type:ignore
-        print(
-            f'Epoch {epoch + 1}/{epochs}, LR: {optimizer.param_groups[0]["lr"]:.6f}, Train Loss: {train_losses:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_losses:.4f}, Val Accuracy: {val_acc:.4f}, Precision: {prec:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}'
-        )
+		if log_file is not None:
+			with open(log_file, 'a', encoding='utf-8') as f:  # type:ignore
+				f.write(
+					f'{epoch + 1},{optimizer.param_groups[0]["lr"]:.6f},{train_losses:.4f},{train_acc:.4f},{val_losses:.4f},{val_acc:.4f},{prec:.4f},{recall:.4f},{f1:.4f},"{count}"\n'
+				)
 
-        # 写日志行（混淆矩阵 JSON 后转义逗号）
-        if log_file is not None:
-            with open(log_file, "a", encoding="utf-8") as f:  # type:ignore
-                f.write(
-                    f'{epoch + 1},{optimizer.param_groups[0]["lr"]:.6f},{train_losses:.4f},{train_acc:.4f},{val_losses:.4f},{val_acc:.4f},{prec:.4f},{recall:.4f},{f1:.4f},"{count}"\n'
-                )
+		current = {
+			'acc': val_acc,
+			'prec': prec,
+			'recall': recall,
+			'f1': f1,
+		}
 
-        current = {
-            "acc": val_acc,
-            "prec": prec,
-            "recall": recall,
-            "f1": f1,
-        }
+		better = current[cmp_obj] > best[cmp_obj]
 
-        better = current[cmp_obj] > best[cmp_obj]
+		if save_path is not None:
+			if keep_count > 0:
+				torch.save(model.state_dict(), save_path / f'model_epoch_{epoch + 1}.pth')
+				# print(f'Model saved at {save_path / f"model_epoch_{epoch + 1}.pth"}')
+				if epoch >= keep_count:
+					remove_path = save_path / f'model_epoch_{epoch + 1 - keep_count}.pth'
+					if remove_path.exists():
+						remove_path.unlink()
+						# print(f'Removed old model {remove_path}')
 
-        if save_path is not None:
-            torch.save(model.state_dict(), save_path / f"model_epoch_{epoch + 1}.pth")
-            # print(f'Model saved at {save_path / f"model_epoch_{epoch + 1}.pth"}')
-            if keep_count > 0 and epoch >= keep_count:
-                remove_path = save_path / f"model_epoch_{epoch + 1 - keep_count}.pth"
-                if remove_path.exists():
-                    remove_path.unlink()
-                    # print(f'Removed old model {remove_path}')
+			if better and save_best:
+				torch.save(model.state_dict(), save_path / 'best_model.pth')
 
-            if better:
-                torch.save(model.state_dict(), save_path / "best_model.pth")
+		if better:
+			best = current
+			best_epoch = epoch
 
-        if better:
-            best = current
-            best_epoch = epoch
+		if early_stop and epoch - best_epoch >= early_stop_epoch:
+			print(f'Early stopping at epoch {epoch + 1}')
+			if log_dir is not None:
+				with open(log_dir, 'a', encoding='utf-8') as f:
+					f.write(f'# Early stopping at epoch {epoch + 1}\n')
+			break
 
-        if early_stop and epoch - best_epoch >= early_stop_epoch:
-            print(f"Early stopping at epoch {epoch + 1}")
-            if log_dir is not None:
-                with open(log_dir, "a", encoding="utf-8") as f:
-                    f.write(f"# Early stopping at epoch {epoch + 1}\n")
-            break
+
+def fast_eval(device, model, dataset, transform, batch_size=1, num_workers=0):
+	dataset.setTransform(transform)
+	data_loader = MultiEpochsDataLoader(
+		dataset,
+		batch_size=batch_size,
+		shuffle=False,
+		num_workers=num_workers,
+		pin_memory=True,
+	)
+
+	model.to(device)
+	model.eval()
+	y_pred = []
+	y_true = []
+	with torch.no_grad():
+		for images, label in data_loader:
+			images, label = (
+				images.to(device, non_blocking=True),
+				label.to(device, non_blocking=True),
+			)
+
+			outputs = model(images)
+			preds = torch.argmax(outputs, dim=1)
+
+			y_pred.extend(preds.cpu().numpy())
+			y_true.extend(label.cpu().numpy())
+
+	return y_true, y_pred

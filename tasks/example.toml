@@ -1,0 +1,53 @@
+# 示例任务配置
+# 文件名格式: yyyymmdd-id[-comment].toml
+
+# 任务类型：classification, detection, segmentation, etc.
+task_type = "classification"
+
+[meta]
+title = "ResNet34 Smile Classification"
+description = "使用 ResNet34 进行三分类微笑检测"
+creator = "your_name"
+created_at = "2026-01-18"
+commit = "auto"  # 运行时自动记录 git commit hash
+
+[dataset]
+type = "sheet"  # "sheet" 或 "folder"
+root = "C:/Resources/Datasets/FFHQ数据集标注"
+sheet = "C:/Resources/Datasets/FFHQ数据集标注.xlsx"
+column = 1
+label_offset = -1
+have_header = true
+
+[dataset.split]
+method = "ratio"  # "ratio" 或 "sheet"
+val_ratio = 0.1
+
+[model]
+name = "resnet34"
+pretrained = true
+num_classes = 3
+# checkpoint = "path/to/checkpoint.pth"  # 可选：加载预训练权重
+
+[training]
+epochs = 30
+batch_size = 64
+lr = 1e-3
+weight_decay = 0.05
+warmup_epochs = 5
+smoothing = 0.1
+accum_iter = 1
+use_scheduler = true
+use_amp = true
+num_workers = 4
+cmp_obj = "f1"  # "acc", "prec", "recall", "f1"
+
+[training.transform]
+train = "rectangle_train"  # rectangle_train, rectangle_train_slight, stretch_train
+val = "rectangle_val"      # rectangle_val, stretch_val
+
+[output]
+save_path = "outputs/{task_id}"  # 支持 {task_id}, {date} 变量
+keep_count = 1
+save_best = true
+log = true

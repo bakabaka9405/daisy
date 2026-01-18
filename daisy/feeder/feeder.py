@@ -4,7 +4,6 @@ from typing import Literal
 
 
 class Feeder:
-	root: Path
 	files: list[Path] = []
 	labels: list[int] = []
 
@@ -100,12 +99,3 @@ def load_feeder_from_sheet(
 		list(map(lambda x: x + label_offset, df[column].astype(int).tolist())),
 	)
 
-
-if __name__ == '__main__':
-	feeder = load_feeder_from_sheet(
-		Path(r'c:\Resources\Datasets\微笑图片标注汇总25-3-4\微笑图片标注汇总25-3-4'),
-		Path(r'C:\Resources\Datasets\微笑图片标注汇总25-3-4\微笑图片标注汇总25-3-4.xlsx'),
-		have_header=True,
-		column=1,
-	)
-	print(feeder.fetch())

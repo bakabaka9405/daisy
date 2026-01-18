@@ -10,10 +10,10 @@ from typing import Any
 
 
 def set_global_seed(seed: int):
+	random.seed(seed)
+	numpy.random.seed(seed)
 	torch.manual_seed(seed)
 	torch.cuda.manual_seed_all(seed)
-	numpy.random.seed(seed)
-	random.seed(seed)
 	torch.backends.cudnn.benchmark = False
 	torch.backends.cudnn.deterministic = True
 
@@ -57,7 +57,7 @@ def get_default_val_transform():
 	)
 
 
-def GetModelClassifier(model):
+def get_model_classifier(model):
 	if hasattr(model, 'fc'):
 		return model.fc
 	elif hasattr(model, 'head'):
