@@ -1,0 +1,41 @@
+# MAE 预训练任务示例配置
+task_type = "mae_pretrain"
+
+[meta]
+title = "MAE Pretraining Example"
+description = "使用 MAE 进行自监督预训练"
+
+[dataset]
+type = "folder"
+root = "/path/to/images"  # 修改为实际数据路径
+extensions = [".jpg", ".jpeg", ".png"]
+
+[model]
+name = "mae_vit_base_patch16"  # 可选: mae_vit_base_patch16, mae_vit_large_patch16, mae_vit_huge_patch14
+img_size = 224
+norm_pix_loss = false
+# checkpoint = "/path/to/checkpoint.pth"  # 可选：从 checkpoint 恢复
+
+[training]
+epochs = 400
+batch_size = 64
+blr = 1.5e-4  # 基础学习率, 实际 lr = blr * batch_size / 256
+weight_decay = 0.05
+warmup_epochs = 40
+mask_ratio = 0.75
+accum_iter = 1
+use_amp = true
+clip_grad = false
+max_norm = 1.0
+num_workers = 4
+save_freq = 20
+
+[training.transform]
+input_size = 224
+scale_min = 0.2
+scale_max = 1.0
+hflip = true
+
+[output]
+save_path = "outputs/{task_id}"
+log = true

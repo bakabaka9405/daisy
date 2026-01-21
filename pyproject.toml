@@ -30,3 +30,8 @@ docstring-code-format = true
 [[tool.uv.index]]
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 default = true
+
+[tool.pyright]
+include = ["daisy"]
+exclude = ["**/node_modules", "**/__pycache__", ".venv"]
+typeCheckingMode = "standard"

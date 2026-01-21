@@ -1,0 +1,48 @@
+task_type = "mae_finetune"
+
+[meta]
+title = "MAE Finetune Example"
+description = "使用 MAE 预训练权重进行分类任务微调"
+
+[dataset]
+type = "folder"
+root = "/path/to/imagenet"
+
+[dataset.split]
+method = "preset"  # 或 "ratio"
+
+[model]
+name = "vit_base_patch16"
+num_classes = 1000
+global_pool = "avg"
+drop_path = 0.1
+img_size = 224
+checkpoint = "/path/to/mae_pretrain_vit_base.pth"
+
+[training]
+epochs = 100
+batch_size = 64
+blr = 5e-4
+layer_decay = 0.65
+weight_decay = 0.05
+warmup_epochs = 5
+min_lr = 1e-6
+accum_iter = 1
+use_amp = true
+# clip_grad = 1.0  # 可选，取消注释启用梯度裁剪
+num_workers = 4
+save_freq = 20
+
+[training.augment]
+input_size = 224
+aa = "rand-m9-mstd0.5-inc1"
+reprob = 0.25
+remode = "pixel"
+recount = 1
+mixup = 0.8
+cutmix = 1.0
+smoothing = 0.1
+
+[output]
+save_path = "outputs/{task_id}"
+log = true

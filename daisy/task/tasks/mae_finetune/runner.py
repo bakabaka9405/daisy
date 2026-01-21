@@ -1,103 +1,123 @@
-"""分类任务执行器"""
+"""MAE Finetune 任务执行器"""
 
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from timm import create_model
+from torchvision.transforms import v2 as transforms, InterpolationMode
+from timm.data.transforms_factory import create_transform
 
 import daisy
+from daisy.model.mae import create_vit_model, load_mae_pretrained_weights
+from daisy.util.transform import ZeroOneNormalize
 from ...base import TaskRunner
 from ...registry import TaskRegistry
-from .config import ClassificationConfig
+from .config import MAEFinetuneConfig
 
 if TYPE_CHECKING:
 	import torch
 
 
-def get_transform(name: str):
-	"""根据名称获取 transform"""
-	transform_map = {
-		'rectangle_train': daisy.util.transform.get_rectangle_train_transform,
-		'rectangle_val': daisy.util.transform.get_rectangle_val_transform,
-		'rectangle_train_slight': daisy.util.transform.get_rectangle_train_transform_slight,
-		'stretch_train': daisy.util.transform.get_stretch_train_transform,
-		'stretch_val': daisy.util.transform.get_stretch_val_transform,
-	}
+def get_finetune_train_transform(
+	input_size: int = 224,
+	aa: str = 'rand-m9-mstd0.5-inc1',
+	reprob: float = 0.25,
+	remode: str = 'pixel',
+	recount: int = 1,
+):
+	"""获取 MAE Finetune 训练 transform
 
-	if name not in transform_map:
-		raise ValueError(f'Unknown transform: {name}. Available: {list(transform_map.keys())}')
+	使用 timm.data.create_transform 创建，包含:
+	- RandomResizedCrop
+	- RandAugment
+	- Random Erasing
+	- ImageNet Normalize
+	"""
+	transform = create_transform(
+		input_size=input_size,
+		is_training=True,
+		color_jitter=0.0,  # 使用 RandAugment 代替
+		auto_augment=aa,
+		interpolation='bicubic',
+		re_prob=reprob,
+		re_mode=remode,
+		re_count=recount,
+		mean=(0.485, 0.456, 0.406),
+		std=(0.229, 0.224, 0.225),
+	)
+	return transform
 
-	return transform_map[name]()
+
+def get_finetune_val_transform(input_size: int = 224):
+	"""获取 MAE Finetune 验证 transform
+
+	- Resize (input_size / 0.875)
+	- CenterCrop (input_size)
+	- ImageNet Normalize
+	"""
+	resize_size = int(input_size / 0.875)
+	return transforms.Compose(
+		[
+			transforms.Resize(resize_size, interpolation=InterpolationMode.BICUBIC),
+			transforms.CenterCrop(input_size),
+			ZeroOneNormalize(),
+			transforms.Normalize(
+				mean=[0.485, 0.456, 0.406],
+				std=[0.229, 0.224, 0.225],
+			),
+		]
+	)
 
 
 @TaskRegistry.register
-class ClassificationRunner(TaskRunner['ClassificationConfig']):
-	"""分类任务执行器"""
+class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
+	"""MAE Finetune 任务执行器"""
 
 	@classmethod
 	def get_task_type(cls) -> str:
-		return 'classification'
+		return 'mae_finetune'
 
 	@classmethod
-	def get_config_class(cls) -> type[ClassificationConfig]:
-		return ClassificationConfig
+	def get_config_class(cls) -> type[MAEFinetuneConfig]:
+		return MAEFinetuneConfig
 
 	@classmethod
 	def get_ui_display_name(cls) -> str:
-		return '图像分类'
+		return 'MAE 微调'
 
 	@classmethod
 	def get_ui_field_overrides(cls) -> dict[str, dict]:
 		return {
 			'meta.title': {'label': '任务标题'},
 			'meta.description': {'label': '描述', 'component': 'textarea'},
-			'meta.creator': {'label': '创建者'},
 			'meta.created_at': {'hidden': True},
 			'meta.commit': {'hidden': True},
-			'dataset.type': {'label': '数据集类型'},
 			'dataset.root': {'label': '数据根目录'},
 			'dataset.sheet': {'label': '标注文件'},
-			'dataset.column': {'label': '标签列'},
-			'dataset.split.val_ratio': {
-				'label': '验证集比例',
-				'component': 'slider',
-				'min_value': 0.05,
-				'max_value': 0.3,
-				'step': 0.01,
-			},
 			'model.name': {
 				'label': '模型',
 				'component': 'dropdown',
-				'choices': ['resnet34', 'resnet50', 'resnet101', 'efficientnet_b0', 'convnext_tiny'],
+				'choices': ['vit_base_patch16', 'vit_large_patch16', 'vit_huge_patch14'],
 				'allow_custom': True,
 			},
 			'model.num_classes': {'label': '类别数'},
-			'model.pretrained': {'label': '使用预训练权重'},
+			'model.checkpoint': {'label': 'MAE 预训练权重'},
 			'training.epochs': {'label': '训练轮数'},
 			'training.batch_size': {'label': 'Batch Size'},
-			'training.lr': {'label': '学习率'},
+			'training.blr': {'label': '基础学习率'},
+			'training.layer_decay': {
+				'label': 'Layer Decay',
+				'component': 'slider',
+				'min_value': 0.5,
+				'max_value': 0.9,
+				'step': 0.05,
+			},
 			'training.warmup_epochs': {'label': 'Warmup 轮数'},
-			'training.weight_decay': {'label': 'Weight Decay'},
-			'training.cmp_obj': {'label': '优化目标'},
-			'training.transform.train': {
-				'label': '训练 Transform',
-				'component': 'dropdown',
-				'choices': ['rectangle_train', 'rectangle_train_slight', 'stretch_train'],
-			},
-			'training.transform.val': {
-				'label': '验证 Transform',
-				'component': 'dropdown',
-				'choices': ['rectangle_val', 'stretch_val'],
-			},
 			'output.save_path': {'hidden': True},
-			'output.keep_count': {'label': '保留检查点数'},
-			'output.save_best': {'label': '保存最佳模型'},
-			'output.log': {'label': '记录日志'},
 		}
 
-	def run(self, config: ClassificationConfig, device: 'torch.device') -> Path:
-		"""执行分类训练任务"""
+	def run(self, config: MAEFinetuneConfig, device: 'torch.device') -> Path:
+		"""执行 MAE Finetune 任务"""
 		import torch
 
 		print('=' * 60)
@@ -151,7 +171,6 @@ class ClassificationRunner(TaskRunner['ClassificationConfig']):
 				dataset, val_ratio=split_cfg.val_ratio
 			)
 		elif split_cfg.method == 'sheet':
-			# 从另一个 sheet 加载验证集
 			val_feeder = daisy.feeder.load_feeder_from_sheet(
 				dataset_root=Path(dataset_cfg.root),
 				sheet=Path(split_cfg.val_sheet),  # type: ignore
@@ -163,61 +182,81 @@ class ClassificationRunner(TaskRunner['ClassificationConfig']):
 			val_files, val_labels = val_feeder.fetch()
 			train_dataset = dataset
 			val_dataset = daisy.dataset.DiskDataset(val_files, val_labels)
+		elif split_cfg.method == 'preset':
+			# 使用预先划分的 train/val 目录
+			train_feeder = daisy.feeder.load_feeder_from_folder(
+				Path(dataset_cfg.root) / 'train'
+			)
+			val_feeder = daisy.feeder.load_feeder_from_folder(Path(dataset_cfg.root) / 'val')
+			train_files, train_labels = train_feeder.fetch()
+			val_files, val_labels = val_feeder.fetch()
+			train_dataset = daisy.dataset.DiskDataset(train_files, train_labels)
+			val_dataset = daisy.dataset.DiskDataset(val_files, val_labels)
 		else:
 			raise ValueError(f'Unknown split method: {split_cfg.method}')
 
 		print(f'Train samples: {len(train_dataset)}')
 		print(f'Val samples: {len(val_dataset)}')
 
+		# 获取 transforms
+		aug_cfg = config.training.augment
+		train_transform = get_finetune_train_transform(
+			input_size=aug_cfg.input_size,
+			aa=aug_cfg.aa,
+			reprob=aug_cfg.reprob,
+			remode=aug_cfg.remode,
+			recount=aug_cfg.recount,
+		)
+		val_transform = get_finetune_val_transform(input_size=aug_cfg.input_size)
+
+		# 设置 transforms
+		train_dataset.setTransform(train_transform)  # type: ignore[arg-type]
+		val_dataset.setTransform(val_transform)
+
 		# 创建模型
 		print('\nCreating model...')
 		model_cfg = config.model
-		model = create_model(
+		model = create_vit_model(
 			model_cfg.name,
-			pretrained=model_cfg.pretrained,
 			num_classes=model_cfg.num_classes,
+			global_pool=model_cfg.global_pool,
+			drop_path_rate=model_cfg.drop_path,
+			img_size=model_cfg.img_size,
 		)
 
-		# 加载预训练权重
+		# 加载 MAE 预训练权重
 		if model_cfg.checkpoint:
-			print(f'Loading checkpoint: {model_cfg.checkpoint}')
-			model.load_state_dict(torch.load(model_cfg.checkpoint, map_location='cpu'))
+			print(f'Loading MAE checkpoint: {model_cfg.checkpoint}')
+			load_mae_pretrained_weights(model, model_cfg.checkpoint)
 
 		print(f'Model: {model_cfg.name}')
 
-		# 获取 transforms
-		train_transform = get_transform(config.training.transform.train)
-		val_transform = get_transform(config.training.transform.val)
-
 		# 训练
-		print('\nStarting training...')
+		print('\nStarting MAE finetuning...')
 		training_cfg = config.training
 
-		daisy.classfier_trainer.fast_train_smile(
+		daisy.mae_finetune_trainer.mae_finetune(
 			device=device,
 			model=model,
-			dataset=(train_dataset, val_dataset),
+			train_dataset=train_dataset,
+			val_dataset=val_dataset,
 			num_classes=model_cfg.num_classes,
 			epochs=training_cfg.epochs,
 			batch_size=training_cfg.batch_size,
-			lr=training_cfg.lr,
+			blr=training_cfg.blr,
+			layer_decay=training_cfg.layer_decay,
 			weight_decay=training_cfg.weight_decay,
 			warmup_epochs=training_cfg.warmup_epochs,
-			smoothing=training_cfg.smoothing,
+			min_lr=training_cfg.min_lr,
+			mixup=aug_cfg.mixup,
+			cutmix=aug_cfg.cutmix,
+			smoothing=aug_cfg.smoothing,
 			accum_iter=training_cfg.accum_iter,
-			use_scheduler=training_cfg.use_scheduler,
 			use_amp=training_cfg.use_amp,
 			clip_grad=training_cfg.clip_grad,
-			max_norm=training_cfg.max_norm,
 			num_workers=training_cfg.num_workers,
-			early_stop=training_cfg.early_stop,
-			early_stop_epoch=training_cfg.early_stop_epoch,
-			cmp_obj=training_cfg.cmp_obj,
-			train_transform=train_transform,
-			val_transform=val_transform,
-			save_path=output_path if config.output.save_best else None,
-			keep_count=config.output.keep_count,
-			save_best=config.output.save_best,
+			save_path=output_path,
+			save_freq=training_cfg.save_freq,
 			log_dir=output_path / 'logs' if config.output.log else None,
 		)
 

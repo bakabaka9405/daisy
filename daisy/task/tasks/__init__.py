@@ -9,3 +9,5 @@
 
 # 导入各任务模块以触发注册
 from . import classification
+from . import mae_pretrain
+from . import mae_finetune

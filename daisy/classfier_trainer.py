@@ -185,9 +185,9 @@ def fast_train_smile(
 
 		val_losses /= len(val_loader)
 		val_acc = accuracy_score(y_true, y_pred)
-		prec = precision_score(y_true, y_pred, average='macro', zero_division=0)
-		recall = recall_score(y_true, y_pred, average='macro', zero_division=0)
-		f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
+		prec = precision_score(y_true, y_pred, average='macro', zero_division=0)  # type: ignore[arg-type]
+		recall = recall_score(y_true, y_pred, average='macro', zero_division=0)  # type: ignore[arg-type]
+		f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)  # type: ignore[arg-type]
 		count = calc_confusion_matrix(y_true, y_pred, num_classes)
 		if show_matrix:
 			print(count)

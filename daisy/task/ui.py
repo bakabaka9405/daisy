@@ -1,105 +1,20 @@
-"""Gradio Web UI"""
+"""Gradio Web UI - 动态生成任务类型的 UI"""
 
 import gradio as gr
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+import tomli_w
+
+from .registry import TaskRegistry
+from .runner import load_config, run_task
+from .ui_builder import build_task_ui
 
 
 def launch_ui(port: int = 7860):
 	"""启动 Gradio Web UI"""
-
-	from .base import BaseMetaConfig, BaseOutputConfig
-	from .registry import TaskRegistry
-	from .runner import load_config, run_task
-	from .tasks.classification.config import (
-		ClassificationConfig,
-		DatasetConfig,
-		DatasetSplitConfig,
-		ModelConfig,
-		TrainingConfig,
-		TransformConfig,
-	)
-	import tomli_w
-
-	def get_task_types():
-		"""获取所有已注册的任务类型"""
-		return TaskRegistry.list_task_types() or ['classification']
-
-	def create_classification_task(
-		title,
-		description,
-		creator,
-		dataset_type,
-		root,
-		sheet,
-		column,
-		label_offset,
-		val_ratio,
-		model_name,
-		num_classes,
-		pretrained,
-		epochs,
-		batch_size,
-		lr,
-		warmup_epochs,
-		weight_decay,
-		train_transform,
-		val_transform,
-		cmp_obj,
-	):
-		"""创建并保存分类任务配置"""
-		# 生成任务 ID
-		today = datetime.now().strftime('%Y%m%d')
-		tasks_dir = Path('tasks')
-		tasks_dir.mkdir(parents=True, exist_ok=True)
-
-		existing = list(tasks_dir.glob(f'{today}-*.toml'))
-		task_num = len(existing) + 1
-		task_id = f'{today}-{task_num}'
-		if title:
-			task_id += f'-{title.replace(" ", "_")[:20]}'
-
-		config = ClassificationConfig(
-			task_type='classification',
-			meta=BaseMetaConfig(
-				title=title,
-				description=description,
-				creator=creator,
-				created_at=datetime.now().strftime('%Y-%m-%d'),
-			),
-			dataset=DatasetConfig(
-				type=dataset_type,
-				root=root,
-				sheet=sheet if dataset_type == 'sheet' else None,
-				column=int(column),
-				label_offset=int(label_offset),
-				split=DatasetSplitConfig(val_ratio=float(val_ratio)),
-			),
-			model=ModelConfig(
-				name=model_name,
-				num_classes=int(num_classes),
-				pretrained=pretrained,
-			),
-			training=TrainingConfig(
-				epochs=int(epochs),
-				batch_size=int(batch_size),
-				lr=float(lr),
-				warmup_epochs=int(warmup_epochs),
-				weight_decay=float(weight_decay),
-				cmp_obj=cmp_obj,
-				transform=TransformConfig(train=train_transform, val=val_transform),
-			),
-			output=BaseOutputConfig(save_path=f'outputs/{task_id}'),
-		)
-
-		output_file = tasks_dir / f'{task_id}.toml'
-		data = config.model_dump(exclude={'task_file', 'task_id'}, exclude_none=True)
-
-		with open(output_file, 'wb') as f:
-			tomli_w.dump(data, f)
-
-		return f'任务配置已保存: {output_file}\n\n运行命令:\npython -m daisy run {output_file}'
 
 	def list_tasks():
 		"""列出所有任务"""
@@ -144,84 +59,105 @@ def launch_ui(port: int = 7860):
 			return []
 		return [str(f) for f in sorted(tasks_dir.glob('*.toml'), reverse=True)]
 
+	def create_task_submit_handler(
+		task_type: str,
+		config_dict: dict[str, Any],
+		config_class: type,
+	) -> str:
+		"""通用的任务创建提交处理器"""
+		try:
+			# 生成任务 ID
+			today = datetime.now().strftime('%Y%m%d')
+			tasks_dir = Path('tasks')
+			tasks_dir.mkdir(parents=True, exist_ok=True)
+
+			existing = list(tasks_dir.glob(f'{today}-*.toml'))
+			task_num = len(existing) + 1
+
+			# 使用标题生成任务 ID
+			title = config_dict.get('meta', {}).get('title', '')
+			task_id = f'{today}-{task_num}'
+			if title:
+				task_id += f'-{title.replace(" ", "_")[:20]}'
+
+			# 设置 created_at
+			if 'meta' not in config_dict:
+				config_dict['meta'] = {}
+			config_dict['meta']['created_at'] = datetime.now().strftime('%Y-%m-%d')
+
+			# 设置默认输出路径
+			if 'output' not in config_dict:
+				config_dict['output'] = {}
+			if 'save_path' not in config_dict['output']:
+				config_dict['output']['save_path'] = f'outputs/{task_id}'
+
+			# 清理 None 值
+			config_dict = clean_none_values(config_dict)
+
+			# 验证配置
+			config = config_class(**config_dict)
+
+			# 保存配置
+			output_file = tasks_dir / f'{task_id}.toml'
+			data = config.model_dump(exclude={'task_file', 'task_id'}, exclude_none=True)
+
+			with open(output_file, 'wb') as f:
+				tomli_w.dump(data, f)
+
+			return f'任务配置已保存: {output_file}\n\n运行命令:\npython -m daisy run {output_file}'
+		except Exception as e:
+			import traceback
+			return f'创建任务失败: {e}\n\n{traceback.format_exc()}'
+
+	def clean_none_values(d: dict) -> dict:
+		"""递归清理字典中的 None 值"""
+		result = {}
+		for k, v in d.items():
+			if v is None:
+				continue
+			if isinstance(v, dict):
+				cleaned = clean_none_values(v)
+				if cleaned:  # 不保留空字典
+					result[k] = cleaned
+			else:
+				result[k] = v
+		return result
+
+	# 获取所有任务类型
+	task_types = TaskRegistry.list_task_types()
+	if not task_types:
+		task_types = ['classification']
+
 	# 构建 UI
 	with gr.Blocks(title='Daisy Task Manager') as demo:
 		gr.Markdown('# Daisy Task Manager')
 
-		with gr.Tab('创建分类任务'):
-			with gr.Row():
-				with gr.Column():
-					gr.Markdown('### 基本信息')
-					title = gr.Textbox(label='任务标题')
-					description = gr.Textbox(label='描述', lines=2)
-					creator = gr.Textbox(label='创建人')
+		# 为每个任务类型创建 Tab
+		for task_type in task_types:
+			try:
+				runner_cls = TaskRegistry.get_runner(task_type)
+				config_class = runner_cls.get_config_class()
+				display_name = runner_cls.get_ui_display_name()
 
-					gr.Markdown('### 数据集配置')
-					dataset_type = gr.Dropdown(choices=['sheet', 'folder'], value='sheet', label='数据集类型')
-					root = gr.Textbox(label='数据根目录')
-					sheet = gr.Textbox(label='标注文件路径 (sheet 类型)')
-					column = gr.Number(value=1, label='标签列')
-					label_offset = gr.Number(value=0, label='标签偏移')
-					val_ratio = gr.Slider(0.05, 0.3, value=0.1, label='验证集比例')
-
-				with gr.Column():
-					gr.Markdown('### 模型配置')
-					model_name = gr.Dropdown(
-						choices=['resnet34', 'resnet50', 'resnet101', 'vgg16_bn', 'efficientnet_b0', 'convnext_tiny'],
-						value='resnet34',
-						label='模型',
-						allow_custom_value=True,
+				with gr.Tab(f'创建 {display_name} 任务'):
+					build_task_ui(
+						gr,
+						task_type,
+						runner_cls,
+						config_class,
+						create_task_submit_handler,
 					)
-					num_classes = gr.Number(value=3, label='类别数')
-					pretrained = gr.Checkbox(value=True, label='使用预训练权重')
+			except Exception as e:
+				with gr.Tab(f'创建 {task_type} 任务'):
+					gr.Markdown(f'### 错误\n\n无法加载任务类型 `{task_type}`: {e}')
 
-					gr.Markdown('### 训练配置')
-					epochs = gr.Number(value=30, label='训练轮数')
-					batch_size = gr.Number(value=64, label='Batch Size')
-					lr = gr.Number(value=1e-3, label='学习率')
-					warmup_epochs = gr.Number(value=5, label='Warmup 轮数')
-					weight_decay = gr.Number(value=0.05, label='Weight Decay')
-					train_transform = gr.Dropdown(
-						choices=['rectangle_train', 'rectangle_train_slight', 'stretch_train'], value='rectangle_train', label='训练 Transform'
-					)
-					val_transform = gr.Dropdown(choices=['rectangle_val', 'stretch_val'], value='rectangle_val', label='验证 Transform')
-					cmp_obj = gr.Dropdown(choices=['f1', 'acc', 'prec', 'recall'], value='f1', label='优化目标')
-
-			create_btn = gr.Button('创建任务', variant='primary')
-			create_output = gr.Textbox(label='结果', lines=3)
-
-			create_btn.click(
-				create_classification_task,
-				inputs=[
-					title,
-					description,
-					creator,
-					dataset_type,
-					root,
-					sheet,
-					column,
-					label_offset,
-					val_ratio,
-					model_name,
-					num_classes,
-					pretrained,
-					epochs,
-					batch_size,
-					lr,
-					warmup_epochs,
-					weight_decay,
-					train_transform,
-					val_transform,
-					cmp_obj,
-				],
-				outputs=create_output,
-			)
-
+		# 任务列表 Tab
 		with gr.Tab('任务列表'):
 			refresh_btn = gr.Button('刷新')
 			tasks_display = gr.Textbox(label='任务列表', lines=15, value=list_tasks())
 			refresh_btn.click(list_tasks, outputs=tasks_display)
 
+		# 运行任务 Tab
 		with gr.Tab('运行任务'):
 			task_dropdown = gr.Dropdown(
 				choices=get_task_files(),

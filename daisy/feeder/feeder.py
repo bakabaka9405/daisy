@@ -92,7 +92,7 @@ def load_feeder_from_sheet(
 		)
 
 	if have_header and isinstance(column, int):
-		column = df.columns[column]
+		column = str(df.columns[column])
 
 	return Feeder(
 		list(map(lambda x: dataset_root / x, df[df.columns[0]].astype(str).tolist())),

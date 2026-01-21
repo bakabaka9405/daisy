@@ -1,12 +1,13 @@
 import random
+import subprocess  # noqa: F401 - used by get_git_commit
+
 import torch
 import numpy
 from numpy.typing import NDArray
 from torch import Tensor
 from torchvision.io.image import decode_image, ImageReadMode
 from torchvision import transforms
-from typing import TypeVar
-from typing import Any
+from typing import TypeVar, Any
 
 
 def set_global_seed(seed: int):
@@ -16,6 +17,20 @@ def set_global_seed(seed: int):
 	torch.cuda.manual_seed_all(seed)
 	torch.backends.cudnn.benchmark = False
 	torch.backends.cudnn.deterministic = True
+
+
+def get_git_commit() -> str:
+	"""获取当前 git commit hash (短)"""
+	try:
+		result = subprocess.run(
+			['git', 'rev-parse', 'HEAD'],
+			capture_output=True,
+			text=True,
+			check=True,
+		)
+		return result.stdout.strip()[:8]
+	except Exception:
+		return 'unknown'
 
 
 def enable_cudnn_benchmark():

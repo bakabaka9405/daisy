@@ -73,15 +73,12 @@ class TrainingConfig(BaseModel):
 class ClassificationConfig(BaseTaskConfig):
 	"""分类任务配置"""
 
-	task_type: Literal['classification'] = 'classification'
+	task_type: Literal['classification'] = 'classification'  # type: ignore[assignment]
 	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
 	output: BaseOutputConfig = Field(default_factory=BaseOutputConfig)
 	dataset: DatasetConfig = Field(default_factory=DatasetConfig)
 	model: ModelConfig = Field(default_factory=ModelConfig)
 	training: TrainingConfig = Field(default_factory=TrainingConfig)
-
-	class Config:
-		extra = 'forbid'
 
 	@classmethod
 	def get_task_type(cls) -> str:
