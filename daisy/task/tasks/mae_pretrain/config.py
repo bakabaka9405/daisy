@@ -51,6 +51,7 @@ class MAETrainingConfig(BaseModel):
 	max_norm: float = 1.0
 	num_workers: int = 4
 	save_freq: int = 20  # 保存频率
+	resume: str | None = None  # 恢复训练的 checkpoint 路径
 	transform: MAETransformConfig = Field(default_factory=MAETransformConfig)
 
 

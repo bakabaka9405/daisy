@@ -119,11 +119,16 @@ class MAEPretrainRunner(TaskRunner):
 		print('\nLoading dataset...')
 		dataset_cfg = config.dataset
 
-		# 加载所有图像文件
-		files = load_files_from_folder(
-			Path(dataset_cfg.root),
-			extensions=tuple(dataset_cfg.extensions),
-		)
+		# 加载所有图像文件（支持多个文件夹，用分号分割）
+		files = []
+		roots = [r.strip() for r in dataset_cfg.root.split(';') if r.strip()]
+		for root in roots:
+			root_files = load_files_from_folder(
+				Path(root),
+				extensions=tuple(dataset_cfg.extensions),
+			)
+			print(f'Loaded {len(root_files)} samples from {root}')
+			files.extend(root_files)
 		print(f'Total samples: {len(files)}')
 
 		# 获取 transform
@@ -147,22 +152,13 @@ class MAEPretrainRunner(TaskRunner):
 			norm_pix_loss=model_cfg.norm_pix_loss,
 		)
 
-		# 加载预训练权重
-		if model_cfg.checkpoint:
-			print(f'Loading checkpoint: {model_cfg.checkpoint}')
-			checkpoint = torch.load(model_cfg.checkpoint, map_location='cpu')
-			if 'model' in checkpoint:
-				model.load_state_dict(checkpoint['model'])
-			else:
-				model.load_state_dict(checkpoint)
-
 		print(f'Model: {model_cfg.name}')
 
 		# 训练
 		print('\nStarting MAE pretraining...')
 		training_cfg = config.training
 
-		daisy.mae_trainer.mae_pretrain(
+		daisy.mae_pretrain.mae_pretrain(
 			device=device,
 			model=model,
 			dataset=dataset,
@@ -180,6 +176,7 @@ class MAEPretrainRunner(TaskRunner):
 			save_path=output_path,
 			save_freq=training_cfg.save_freq,
 			log_dir=output_path / 'logs' if config.output.log else None,
+			resume=training_cfg.resume,
 		)
 
 		print('\n' + '=' * 60)

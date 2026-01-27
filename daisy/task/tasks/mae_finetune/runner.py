@@ -118,8 +118,6 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 
 	def run(self, config: MAEFinetuneConfig, device: 'torch.device') -> Path:
 		"""执行 MAE Finetune 任务"""
-		import torch
-
 		print('=' * 60)
 		print(f'Task: {config.meta.title or config.task_id}')
 		print(f'Description: {config.meta.description}')
@@ -209,10 +207,6 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 		)
 		val_transform = get_finetune_val_transform(input_size=aug_cfg.input_size)
 
-		# 设置 transforms
-		train_dataset.setTransform(train_transform)  # type: ignore[arg-type]
-		val_dataset.setTransform(val_transform)
-
 		# 创建模型
 		print('\nCreating model...')
 		model_cfg = config.model
@@ -235,7 +229,7 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 		print('\nStarting MAE finetuning...')
 		training_cfg = config.training
 
-		daisy.mae_finetune_trainer.mae_finetune(
+		daisy.mae_finetune.mae_finetune(
 			device=device,
 			model=model,
 			train_dataset=train_dataset,
@@ -258,6 +252,8 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 			save_path=output_path,
 			save_freq=training_cfg.save_freq,
 			log_dir=output_path / 'logs' if config.output.log else None,
+			train_transform=train_transform,
+			val_transform=val_transform,
 		)
 
 		print('\n' + '=' * 60)
