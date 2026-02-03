@@ -8,6 +8,7 @@ from torch import Tensor
 from torchvision.io.image import decode_image, ImageReadMode
 from torchvision import transforms
 from typing import TypeVar, Any
+from pathlib import Path
 
 
 def set_global_seed(seed: int):
@@ -183,6 +184,16 @@ def exclude_by_label(labels: list[int], target: int, *args: list):
 
 def filter_by_label(labels: list[int], cond: Any, *args: list):
 	return ([j for j, k in zip(i, labels) if cond(k)] for i in args)
+
+
+def prepare_csv(file: Path, header: list[str]):
+	with open(file, 'w', encoding='utf-8') as f:
+		f.write(','.join(header) + '\n')
+
+
+def append_csv(file: Path, row: list[Any]):
+	with open(file, 'a', encoding='utf-8') as f:
+		f.write(','.join(str(i) for i in row) + '\n')
 
 
 if __name__ == '__main__':

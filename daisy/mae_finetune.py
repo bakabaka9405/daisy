@@ -18,7 +18,7 @@ from daisy.classfier_trainer import TrainResult, train_classifier
 from daisy.dataset.index_dataset import IndexDataset
 
 
-def load_mae_checkpoint(
+def load_mae_pretrain_checkpoint(
 	model: nn.Module,
 	checkpoint_path: str | Path,
 	strict: bool = False,

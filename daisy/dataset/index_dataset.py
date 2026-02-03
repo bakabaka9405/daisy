@@ -33,3 +33,7 @@ class IndexDataset(Dataset):
 	@abstractmethod
 	def applyTransform(self, transform: Any) -> None:
 		pass
+
+	@abstractmethod
+	def take(self, k: int) -> 'IndexDataset':
+		pass

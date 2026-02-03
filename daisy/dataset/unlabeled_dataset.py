@@ -37,6 +37,9 @@ class UnlabeledDiskDataset(Dataset):
 		"""设置 transform"""
 		self.transform = transform
 
+	def take(self, k: int) -> 'UnlabeledDiskDataset':
+		return UnlabeledDiskDataset(self.file_paths[:k], self.transform)
+
 
 def load_files_from_folder(root: Path | str, extensions: tuple[str, ...] | None = None) -> list[Path]:
 	"""从文件夹递归加载所有图像文件

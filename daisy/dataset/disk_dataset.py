@@ -38,3 +38,6 @@ class DiskDataset(IndexDataset):
 
 	def applyTransform(self, transform: transforms.Compose) -> None:
 		self.transform = transform
+
+	def take(self, k: int) -> 'DiskDataset':
+		return DiskDataset(self.file_paths[:k], self.labels[:k], self.transform)

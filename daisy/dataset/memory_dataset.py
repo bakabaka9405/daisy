@@ -56,3 +56,6 @@ class MemoryDataset(IndexDataset):
 
 	def applyTransform(self, transform: transforms.Compose) -> None:
 		self.tensors = [transform(tensor) for tensor in self.tensors]
+
+	def take(self, k: int) -> 'MemoryDataset':
+		return MemoryDataset(self.tensors[:k], self.labels[:k], self.transform)

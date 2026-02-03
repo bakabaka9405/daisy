@@ -584,19 +584,7 @@ def train_classifier(
 
 			# 定期保存
 			if save_freq > 0 and (epoch + 1) % save_freq == 0:
-				torch.save(
-					{
-						'model': model.state_dict(),
-						'epoch': epoch,
-						'metrics': {
-							'acc': val_metrics.acc,
-							'precision': val_metrics.precision,
-							'recall': val_metrics.recall,
-							'f1': val_metrics.f1,
-						},
-					},
-					save_path / f'checkpoint_{epoch + 1:04d}.pth',
-				)
+				torch.save(model.state_dict(), save_path / f'model_epoch_{epoch + 1}.pth')
 				print(f'Saved checkpoint at epoch {epoch + 1}')
 
 			# 保存最佳模型
@@ -735,3 +723,24 @@ def fast_eval(device, model, dataset, transform, batch_size=1, num_workers=0):
 			y_true.extend(label.cpu().numpy())
 
 	return y_true, y_pred
+
+
+def fast_calc_metrics(y_true, y_pred, num_classes=0):
+	"""快速计算评估指标"""
+	acc = accuracy_score(y_true, y_pred)
+	prec = precision_score(y_true, y_pred, average='macro', zero_division=0)
+	rec = recall_score(y_true, y_pred, average='macro', zero_division=0)
+	f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
+	if num_classes == 0:
+		matrix = None
+	else:
+		matrix = calc_confusion_matrix(y_true, y_pred, num_classes)
+
+	return EvalMetrics(
+		loss=0.0,
+		acc=float(acc),
+		precision=float(prec),
+		recall=float(rec),
+		f1=float(f1),
+		confusion_matrix=matrix,
+	)
