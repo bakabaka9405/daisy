@@ -1,0 +1,28 @@
+task_type = "moco_pretrain"
+engine = "v3"
+
+[meta]
+title = "MoCo v3 预训练"
+description = "MoCo v3 对比学习预训练"
+
+[dataset]
+root = "数据目录"
+
+[model]
+arch = "resnet50"
+moco_dim = 256
+moco_mlp_dim = 4096
+moco_t = 1.0
+moco_m = 0.99
+
+[training]
+epochs = 100
+batch_size = 256
+optimizer = "lars"
+lr = 0.6
+warmup_epochs = 10
+moco_m_cos = true
+lr_schedule = "cosine"
+use_amp = true
+num_workers = 4
+save_freq = 20

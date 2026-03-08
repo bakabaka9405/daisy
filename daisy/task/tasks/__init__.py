@@ -11,3 +11,5 @@
 from . import classification
 from . import mae_pretrain
 from . import mae_finetune
+from . import moco_pretrain
+from . import moco_lincls

@@ -17,6 +17,15 @@ class Feeder:
 	def fetch(self) -> tuple[list[Path], list[int]]:
 		return self.files, self.labels
 
+	def validate(self, num_classes=0) -> None:
+		if len(self.files) != len(self.labels):
+			raise ValueError('Files and labels must have the same length')
+		for file, label in zip(self.files, self.labels):
+			if not file.is_file():
+				raise ValueError(f'File {file} does not exist')
+			if num_classes > 0 and (label < 0 or label >= num_classes):
+				raise ValueError(f'Label {label} is out of range [0, {num_classes - 1}]')
+
 
 class FolderFeeder(Feeder):
 	class_dict: dict[str, int] = {}
@@ -99,3 +108,11 @@ def load_feeder_from_sheet(
 		list(map(lambda x: x + label_offset, df[column].astype(int).tolist())),
 	)
 
+
+def merge_feeders(feeders: list[Feeder]) -> Feeder:
+	files = []
+	labels = []
+	for feeder in feeders:
+		files.extend(feeder.files)
+		labels.extend(feeder.labels)
+	return Feeder(files, labels)

@@ -1,10 +1,11 @@
 """无标签数据集 (用于自监督学习)"""
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from torch import Tensor
 from torch.utils.data import Dataset
-from torchvision.transforms import v2 as transforms
 from torchvision.io import decode_image, ImageReadMode
 
 
@@ -17,7 +18,7 @@ class UnlabeledDiskDataset(Dataset):
 	def __init__(
 		self,
 		file_paths: list[Path],
-		transform: transforms.Compose | None = None,
+		transform: Callable[..., Any] | None = None,
 	):
 		self.file_paths = file_paths
 		self.transform = transform
@@ -25,7 +26,7 @@ class UnlabeledDiskDataset(Dataset):
 	def __len__(self) -> int:
 		return len(self.file_paths)
 
-	def __getitem__(self, index: int) -> tuple[Tensor, int]:
+	def __getitem__(self, index: int) -> tuple[Tensor | Any, int]:
 		tensor = decode_image(str(self.file_paths[index]), ImageReadMode.RGB)
 
 		if self.transform:
@@ -33,7 +34,7 @@ class UnlabeledDiskDataset(Dataset):
 
 		return tensor, 0
 
-	def set_transform(self, transform: transforms.Compose) -> None:
+	def set_transform(self, transform: Callable[..., Any]) -> None:
 		"""设置 transform"""
 		self.transform = transform
 
