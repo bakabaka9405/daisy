@@ -2,5 +2,3 @@
 __pycache__
 tmp/*
 *.egg-info
-.claude
-CLAUDE.md
