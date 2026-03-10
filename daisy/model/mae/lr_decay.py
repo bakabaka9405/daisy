@@ -8,6 +8,8 @@
 - ELECTRA: https://github.com/google-research/electra
 """
 
+from typing import Any
+
 import torch.nn as nn
 
 
@@ -39,7 +41,7 @@ def param_groups_lrd(
 	weight_decay: float = 0.05,
 	no_weight_decay_list: list[str] | None = None,
 	layer_decay: float = 0.75,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
 	"""创建带 layer-wise LR decay 的参数组
 
 	较早的层使用较小的学习率:
@@ -60,7 +62,7 @@ def param_groups_lrd(
 	if no_weight_decay_list is None:
 		no_weight_decay_list = []
 
-	param_groups = {}
+	param_groups: dict[str, dict[str, Any]] = {}
 
 	# 获取模型层数
 	num_layers = len(model.blocks) + 1  # type: ignore

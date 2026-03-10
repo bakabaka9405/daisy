@@ -4,7 +4,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import torch
 
-from typing import Any, Callable, Generic, TypeVar
+from collections.abc import Callable
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 

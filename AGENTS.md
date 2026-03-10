@@ -48,15 +48,9 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - Force CPU for a smoke run: `python -m daisy run tasks/example.toml --device cpu`
 - Start the UI: `python -m daisy ui`
 
-## Test Guidance
-- There is currently no formal `tests/` suite and no pytest config in the repo.
-- There is no endorsed single-test command for existing code because no real test suite exists yet.
-- Do not treat `tmp/*test.py` scripts as the preferred validation path; they are ad hoc and often machine-specific.
-
 ## Change Placement
 - Put reusable logic in `daisy/`.
 - Keep project orchestration in task files or batch launchers.
-- Keep project docs and concrete experiment assets in `proj/mae/`.
 - Avoid adding new mainline workflows under `tmp/`.
 - Do not hard-code machine-local paths in library code.
 - Preserve reproducibility metadata whenever you touch experiment flows.
@@ -92,15 +86,7 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - Use `model_dump(..., exclude_none=True)` when persisting config snapshots.
 - For small structured runtime containers, `@dataclass(slots=True)` is already used and is a good fit.
 - For task UI metadata, use `UIFieldConfig`; do not use `dict` or `json_schema_extra` as a parallel schema source.
-
-## Naming Conventions
-- Use `snake_case` for modules, files, functions, methods, and variables.
-- Use `PascalCase` for classes.
-- Use `UPPER_SNAKE_CASE` for module-level constants.
-- Config classes should end with `Config`.
-- Runner classes should end with `Runner`.
-- Task type strings are lowercase snake_case literals such as `classification`, `mae_pretrain`, and `predict_export`.
-- Keep naming stable when it affects task IDs, output paths, or registry keys.
+- Use `dataclass` instead of `dict` for structured data.
 
 ## Error Handling And Runtime Behavior
 - Fail fast on invalid config or protocol states.
@@ -140,20 +126,11 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - Mainline experiment execution should be callable through `python -m daisy run <task.toml>`.
 - Do not keep paper-grade or project-grade experiments as one-off scripts.
 
-## `proj/mae` Rules
-- `proj/mae/` is for docs, tasks, batch scripts, and archived assets; not reusable training logic.
-- Formal MAE experiments should run through `python -m daisy run <task.toml>`.
-- Keep `proj/mae/tasks/` task instances flat rather than deeply nested.
-- Keep templates separate from concrete task instances.
-- Phase-based naming is the documented convention: `p{phase}-{topic}-{variant}.toml`.
-- `outputs/mae/{phase}/{task_id}` is the documented project-specific output pattern.
-- Batch scripts should generate or fill TOML and invoke the CLI; they should not duplicate training logic.
-- Root `tmp/` is not the mainline entrypoint for MAE work.
 
 ## Verification Checklist
 - Run `ruff check .` if you changed Python code.
 - Run `ruff format .` if formatting drift is likely.
-- Run `pyright` if you changed typed library or task code.
+- Run `pyright daisy` if you changed typed library or task code.
 - Run the smallest relevant `python -m daisy ...` command for task, runner, or CLI changes.
 - If you add pytest tests, run the narrowest target first, then the full suite if practical.
 - Do not treat legacy `tmp/` scripts as proof that a new change is production-ready.

@@ -107,9 +107,9 @@ def launch_ui(port: int = 7860):
 
 			return f'创建任务失败: {e}\n\n{traceback.format_exc()}'
 
-	def clean_none_values(d: dict) -> dict:
+	def clean_none_values(d: dict[str, Any]) -> dict[str, Any]:
 		"""递归清理字典中的 None 值"""
-		result = {}
+		result: dict[str, Any] = {}
 		for k, v in d.items():
 			if v is None:
 				continue

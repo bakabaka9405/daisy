@@ -1,9 +1,7 @@
-import os
 import cv2
 import numpy as np
 from pathlib import Path
 from numpy.typing import NDArray
-from typing import cast
 
 
 def cv_imread(file_path):

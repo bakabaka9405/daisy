@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 from timm import create_model
@@ -13,15 +13,15 @@ from daisy.model.mae import create_vit_model
 from ..shared import get_classification_transform, get_mae_finetune_val_transform
 
 
-def load_checkpoint_state_dict(checkpoint_path: str | Path) -> dict:
+def load_checkpoint_state_dict(checkpoint_path: str | Path) -> dict[str, Any]:
 	"""加载 checkpoint 并提取 state_dict"""
 	checkpoint = torch.load(checkpoint_path, map_location='cpu')
 	if isinstance(checkpoint, dict):
 		if 'model' in checkpoint and isinstance(checkpoint['model'], dict):
-			return checkpoint['model']
+			return cast(dict[str, Any], checkpoint['model'])
 		if 'state_dict' in checkpoint and isinstance(checkpoint['state_dict'], dict):
-			return checkpoint['state_dict']
-	return checkpoint
+			return cast(dict[str, Any], checkpoint['state_dict'])
+	return cast(dict[str, Any], checkpoint)
 
 
 def create_inference_model(model_cfg):

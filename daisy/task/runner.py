@@ -1,6 +1,7 @@
 """任务执行引擎"""
 
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, ValidationError
 import tomli
@@ -21,7 +22,7 @@ def _get_nested_model_class(annotation: object) -> type[BaseModel] | None:
 	return None
 
 
-def _collect_unexpected_fields(data: dict, model_cls: type[BaseModel], *, prefix: str = '') -> list[str]:
+def _collect_unexpected_fields(data: dict[str, Any], model_cls: type[BaseModel], *, prefix: str = '') -> list[str]:
 	unexpected_fields: list[str] = []
 	for key, value in data.items():
 		field_info = model_cls.model_fields.get(key)
@@ -41,7 +42,7 @@ def _collect_unexpected_fields(data: dict, model_cls: type[BaseModel], *, prefix
 	return unexpected_fields
 
 
-def _resolve_task_type(data: dict, path: Path) -> tuple[str, dict]:
+def _resolve_task_type(data: dict[str, Any], path: Path) -> tuple[str, dict[str, Any]]:
 	"""解析任务类型，并兼容缺省的旧分类配置"""
 	task_type = data.get('task_type')
 	if task_type is not None:

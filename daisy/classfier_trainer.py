@@ -99,6 +99,9 @@ class EvalMetrics:
 			return 0.0
 
 
+TrainingHistoryEntry = dict[str, int | float]
+
+
 @dataclass
 class TrainResult:
 	"""训练结果"""
@@ -106,7 +109,7 @@ class TrainResult:
 	best_epoch: int
 	best_metrics: EvalMetrics
 	final_metrics: EvalMetrics
-	history: list[dict] = field(default_factory=list)
+	history: list[TrainingHistoryEntry] = field(default_factory=list)
 
 
 # ============================================================================
@@ -482,7 +485,7 @@ def train_classifier(
 	# ========== 训练状态 ==========
 	best_epoch = 0
 	best_metrics = EvalMetrics()
-	history: list[dict] = []
+	history: list[TrainingHistoryEntry] = []
 	val_metrics = None
 
 	for epoch in range(epochs):
