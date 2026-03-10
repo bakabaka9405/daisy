@@ -39,6 +39,7 @@ class MAEFinetuneAugConfig(BaseModel):
 class MAEFinetuneTrainingConfig(BaseModel):
 	"""MAE Finetune 训练配置"""
 
+	seed: int | None = None
 	epochs: int = 100
 	batch_size: int = 64
 	blr: float = 5e-4  # 基础学习率

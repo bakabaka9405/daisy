@@ -11,5 +11,7 @@
 from . import classification
 from . import mae_pretrain
 from . import mae_finetune
+from . import eval_checkpoint
+from . import predict_export
 from . import moco_pretrain
 from . import moco_lincls

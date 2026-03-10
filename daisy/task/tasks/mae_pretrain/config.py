@@ -13,6 +13,13 @@ class MAEDatasetConfig(BaseModel):
 	type: Literal['folder'] = 'folder'
 	root: str = ''
 	extensions: list[str] = Field(default_factory=lambda: ['.jpg', '.jpeg', '.png', '.bmp', '.webp'])
+	sample_manifest: str | None = None
+	sample_manifest_split: str | None = None
+	sample_id_type: Literal['relative_path', 'name', 'path'] = 'relative_path'
+	sample_ratio: float = 1.0
+	sample_seed: int | None = None
+	reference_manifests: list[str] = Field(default_factory=list)
+	source_tag: str = ''
 
 
 class MAEModelConfig(BaseModel):
@@ -39,6 +46,7 @@ class MAETransformConfig(BaseModel):
 class MAETrainingConfig(BaseModel):
 	"""MAE 训练配置"""
 
+	seed: int | None = None
 	epochs: int = 400
 	batch_size: int = 64
 	blr: float = 1.5e-4  # 基础学习率

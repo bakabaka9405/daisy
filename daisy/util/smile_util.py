@@ -7,8 +7,10 @@ from daisy.dataset.disk_dataset import DiskDataset
 def load_smile(
 	root: Path,
 	class_sheet: Path,
-	split_sheet: Path,
+	split_sheet: Path | None,
 	task: int,
+	*,
+	split_manifest: Path | None = None,
 ) -> tuple[DiskDataset, DiskDataset, DiskDataset]:
 	feeder = daisy.feeder.load_feeder_from_sheet(
 		dataset_root=root,
@@ -18,14 +20,31 @@ def load_smile(
 		label_offset=(0 if task in [2, 3] else -1),
 	)
 
+	files, labels = feeder.fetch()
+
+	if split_manifest is not None:
+		split_mapping, _ = daisy.protocol.apply_split_manifest(
+			files,
+			labels,
+			split_manifest,
+			dataset_root=root,
+			split_names=('train', 'val', 'test'),
+			strict=True,
+		)
+		train_dataset = DiskDataset(*split_mapping['train'])
+		val_dataset = DiskDataset(*split_mapping['val'])
+		test_dataset = DiskDataset(*split_mapping['test'])
+		return train_dataset, val_dataset, test_dataset
+
+	if split_sheet is None:
+		raise ValueError('split_sheet is required when split_manifest is not provided')
+
 	split_feeder = daisy.feeder.load_feeder_from_sheet(
 		dataset_root=root,
 		sheet_path=split_sheet,
 		column=task,
 		have_header=True,
 	)
-
-	files, labels = feeder.fetch()
 	_, split_labels = split_feeder.fetch()
 	train_files, train_labels = extract_by_label(split_labels, 1, files, labels)
 	train_dataset = DiskDataset(train_files, train_labels)

@@ -1,6 +1,5 @@
 """MAE Finetune 任务执行器"""
 
-from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -9,9 +8,11 @@ from timm.data.transforms_factory import create_transform
 
 import daisy
 from daisy.model.mae import create_vit_model, load_mae_pretrained_weights
+from daisy.protocol import apply_named_splits, apply_split_manifest, assert_collections_disjoint, collect_sample_ids, normalize_sample_id
 from daisy.util.transform import ZeroOneNormalize
 from ...base import TaskRunner
 from ...registry import TaskRegistry
+from ...runtime import resolve_output_path, save_json, save_task_snapshot
 from .config import MAEFinetuneConfig
 
 if TYPE_CHECKING:
@@ -69,6 +70,51 @@ def get_finetune_val_transform(input_size: int = 224):
 	)
 
 
+def load_labeled_samples(dataset_cfg) -> tuple[list[Path], list[int]]:
+	"""加载带标签样本"""
+	if dataset_cfg.type == 'sheet':
+		feeder = daisy.feeder.load_feeder_from_sheet(
+			dataset_root=Path(dataset_cfg.root),
+			sheet_path=Path(dataset_cfg.sheet),  # type: ignore[arg-type]
+			sheet_name=dataset_cfg.sheet_name,
+			column=dataset_cfg.column,
+			label_offset=dataset_cfg.label_offset,
+			have_header=dataset_cfg.have_header,
+		)
+		return feeder.fetch()
+	if dataset_cfg.type == 'folder':
+		feeder = daisy.feeder.load_feeder_from_folder(Path(dataset_cfg.root))
+		return feeder.fetch()
+	raise ValueError(f'Unknown dataset type: {dataset_cfg.type}')
+
+
+def build_split_snapshot(
+	*,
+	method: str,
+	root: Path,
+	train_files: list[Path],
+	val_files: list[Path],
+	id_type: str = 'relative_path',
+	extra: dict | None = None,
+) -> dict:
+	snapshot = {
+		'method': method,
+		'id_type': id_type,
+		'root': str(root),
+		'splits': {
+			'train': collect_sample_ids(train_files, id_type=id_type, root=root),
+			'val': collect_sample_ids(val_files, id_type=id_type, root=root),
+		},
+		'counts': {
+			'train': len(train_files),
+			'val': len(val_files),
+		},
+	}
+	if extra:
+		snapshot.update(extra)
+	return snapshot
+
+
 @TaskRegistry.register
 class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 	"""MAE Finetune 任务执行器"""
@@ -118,10 +164,16 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 
 	def run(self, config: MAEFinetuneConfig, device: 'torch.device') -> Path:
 		"""执行 MAE Finetune 任务"""
+		training_cfg = config.training
+		if training_cfg.seed is not None:
+			daisy.util.set_global_seed(training_cfg.seed)
+
 		print('=' * 60)
 		print(f'Task: {config.meta.title or config.task_id}')
 		print(f'Description: {config.meta.description}')
 		print(f'Device: {device}')
+		if training_cfg.seed is not None:
+			print(f'Seed: {training_cfg.seed}')
 		print('=' * 60)
 
 		# 获取 git commit
@@ -130,33 +182,14 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 		print(f'Git commit: {config.meta.commit}')
 
 		# 准备输出目录
-		output_path = config.output.save_path.format(
-			task_id=config.task_id,
-			date=datetime.now().strftime('%Y%m%d'),
-		)
-		output_path = Path(output_path)
-		output_path.mkdir(parents=True, exist_ok=True)
+		output_path = resolve_output_path(config.output.save_path, config.task_id)
 		print(f'Output path: {output_path}')
 
 		# 加载数据集
 		print('\nLoading dataset...')
 		dataset_cfg = config.dataset
-
-		if dataset_cfg.type == 'sheet':
-			feeder = daisy.feeder.load_feeder_from_sheet(
-				dataset_root=Path(dataset_cfg.root),
-				sheet=Path(dataset_cfg.sheet),  # type: ignore
-				sheet_name=dataset_cfg.sheet_name,
-				column=dataset_cfg.column,
-				label_offset=dataset_cfg.label_offset,
-				have_header=dataset_cfg.have_header,
-			)
-		elif dataset_cfg.type == 'folder':
-			feeder = daisy.feeder.load_feeder_from_folder(Path(dataset_cfg.root))
-		else:
-			raise ValueError(f'Unknown dataset type: {dataset_cfg.type}')
-
-		files, labels = feeder.fetch()
+		dataset_root = Path(dataset_cfg.root)
+		files, labels = load_labeled_samples(dataset_cfg)
 		print(f'Total samples: {len(files)}')
 
 		# 创建数据集
@@ -164,34 +197,149 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 
 		# 数据划分
 		split_cfg = dataset_cfg.split
+		split_seed = split_cfg.seed if split_cfg.seed is not None else training_cfg.seed
+		protocol_snapshot: dict
 		if split_cfg.method == 'ratio':
-			train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(
-				dataset, val_ratio=split_cfg.val_ratio
+			split_fn = daisy.dataset.dataset_split.stratified_data_split if split_cfg.stratified else daisy.dataset.dataset_split.default_data_split
+			train_dataset, val_dataset = split_fn(
+				dataset,
+				val_ratio=split_cfg.val_ratio,
+				seed=split_seed,
+			)
+			train_files, _ = train_dataset.getRawData()
+			val_files, _ = val_dataset.getRawData()
+			protocol_snapshot = build_split_snapshot(
+				method='ratio',
+				root=dataset_root,
+				train_files=train_files,
+				val_files=val_files,
+				extra={
+					'seed': split_seed,
+					'stratified': split_cfg.stratified,
+					'val_ratio': split_cfg.val_ratio,
+				},
 			)
 		elif split_cfg.method == 'sheet':
 			val_feeder = daisy.feeder.load_feeder_from_sheet(
-				dataset_root=Path(dataset_cfg.root),
-				sheet=Path(split_cfg.val_sheet),  # type: ignore
+				dataset_root=dataset_root,
+				sheet_path=Path(split_cfg.val_sheet),  # type: ignore[arg-type]
 				sheet_name=split_cfg.val_sheet_name,
 				column=dataset_cfg.column,
 				label_offset=dataset_cfg.label_offset,
 				have_header=dataset_cfg.have_header,
 			)
 			val_files, val_labels = val_feeder.fetch()
-			train_dataset = dataset
-			val_dataset = daisy.dataset.DiskDataset(val_files, val_labels)
-		elif split_cfg.method == 'preset':
-			# 使用预先划分的 train/val 目录
-			train_feeder = daisy.feeder.load_feeder_from_folder(
-				Path(dataset_cfg.root) / 'train'
-			)
-			val_feeder = daisy.feeder.load_feeder_from_folder(Path(dataset_cfg.root) / 'val')
-			train_files, train_labels = train_feeder.fetch()
-			val_files, val_labels = val_feeder.fetch()
+			val_file_ids = {normalize_sample_id(file_path, id_type='path') for file_path in val_files}
+			train_files = []
+			train_labels = []
+			for file_path, label in zip(files, labels):
+				if normalize_sample_id(file_path, id_type='path') in val_file_ids:
+					continue
+				train_files.append(file_path)
+				train_labels.append(label)
 			train_dataset = daisy.dataset.DiskDataset(train_files, train_labels)
 			val_dataset = daisy.dataset.DiskDataset(val_files, val_labels)
+			protocol_snapshot = build_split_snapshot(
+				method='sheet',
+				root=dataset_root,
+				train_files=train_files,
+				val_files=val_files,
+				extra={
+					'val_sheet': split_cfg.val_sheet,
+					'val_sheet_name': split_cfg.val_sheet_name,
+				},
+			)
+		elif split_cfg.method == 'preset':
+			if split_cfg.train_files or split_cfg.val_files:
+				split_mapping, report = apply_named_splits(
+					files,
+					labels,
+					{
+						'train': split_cfg.train_files,
+						'val': split_cfg.val_files,
+					},
+					id_type=split_cfg.manifest_id_type,
+					root=dataset_root,
+					strict=split_cfg.require_all_in_manifest,
+				)
+				train_dataset = daisy.dataset.DiskDataset(*split_mapping['train'])
+				val_dataset = daisy.dataset.DiskDataset(*split_mapping['val'])
+				protocol_snapshot = build_split_snapshot(
+					method='preset',
+					root=dataset_root,
+					train_files=split_mapping['train'][0],
+					val_files=split_mapping['val'][0],
+					id_type=split_cfg.manifest_id_type,
+					extra={
+						'selection_report': report,
+						'from_explicit_file_lists': True,
+					},
+				)
+			else:
+				train_feeder = daisy.feeder.load_feeder_from_folder(dataset_root / split_cfg.preset_train_dir)
+				val_feeder = daisy.feeder.load_feeder_from_folder(dataset_root / split_cfg.preset_val_dir)
+				train_files, train_labels = train_feeder.fetch()
+				val_files, val_labels = val_feeder.fetch()
+				train_dataset = daisy.dataset.DiskDataset(train_files, train_labels)
+				val_dataset = daisy.dataset.DiskDataset(val_files, val_labels)
+				protocol_snapshot = build_split_snapshot(
+					method='preset',
+					root=dataset_root,
+					train_files=train_files,
+					val_files=val_files,
+					extra={
+						'preset_train_dir': split_cfg.preset_train_dir,
+						'preset_val_dir': split_cfg.preset_val_dir,
+						'from_explicit_file_lists': False,
+					},
+				)
+		elif split_cfg.method == 'manifest':
+			if not split_cfg.manifest:
+				raise ValueError('dataset.split.manifest is required when split.method = "manifest"')
+			split_mapping, report = apply_split_manifest(
+				files,
+				labels,
+				split_cfg.manifest,
+				dataset_root=dataset_root,
+				split_names=(split_cfg.manifest_train_split, split_cfg.manifest_val_split),
+				strict=split_cfg.require_all_in_manifest,
+			)
+			train_dataset = daisy.dataset.DiskDataset(*split_mapping[split_cfg.manifest_train_split])
+			val_dataset = daisy.dataset.DiskDataset(*split_mapping[split_cfg.manifest_val_split])
+			protocol_snapshot = build_split_snapshot(
+				method='manifest',
+				root=dataset_root,
+				train_files=split_mapping[split_cfg.manifest_train_split][0],
+				val_files=split_mapping[split_cfg.manifest_val_split][0],
+				id_type=report['id_type'],
+				extra={
+					'manifest': split_cfg.manifest,
+					'manifest_train_split': split_cfg.manifest_train_split,
+					'manifest_val_split': split_cfg.manifest_val_split,
+					'selection_report': report,
+				},
+			)
 		else:
 			raise ValueError(f'Unknown split method: {split_cfg.method}')
+
+		assert_collections_disjoint(
+			{
+				'train': train_dataset.getRawData()[0],
+				'val': val_dataset.getRawData()[0],
+			},
+			id_type='path',
+			context='mae finetune splits',
+		)
+		save_json(output_path / 'split_protocol.json', protocol_snapshot)
+		save_task_snapshot(
+			output_path,
+			config,
+			extra={
+				'device': str(device),
+				'commit': config.meta.commit,
+				'seed': training_cfg.seed,
+			},
+		)
 
 		print(f'Train samples: {len(train_dataset)}')
 		print(f'Val samples: {len(val_dataset)}')
@@ -227,7 +375,6 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 
 		# 训练
 		print('\nStarting MAE finetuning...')
-		training_cfg = config.training
 
 		daisy.mae_finetune.mae_finetune(
 			device=device,

@@ -1,6 +1,5 @@
 """MAE 预训练任务执行器"""
 
-from datetime import datetime
 from pathlib import Path
 
 import torch
@@ -9,9 +8,11 @@ from torchvision.transforms import v2 as transforms, InterpolationMode
 import daisy
 from daisy.model.mae import create_mae_model
 from daisy.dataset import UnlabeledDiskDataset, load_files_from_folder
+from daisy.protocol import apply_split_manifest, assert_collections_disjoint, collect_sample_ids, load_split_manifest
 from daisy.util.transform import ZeroOneNormalize
 from ...base import TaskRunner
 from ...registry import TaskRegistry
+from ...runtime import resolve_output_path, save_json, save_task_snapshot
 from .config import MAEPretrainConfig
 
 
@@ -47,6 +48,29 @@ def get_mae_transform(
 	)
 
 	return transforms.Compose(trans)
+
+
+def sample_files_by_ratio(
+	files: list[Path],
+	*,
+	ratio: float,
+	seed: int | None = None,
+) -> list[Path]:
+	"""按比例采样文件列表"""
+	if not files:
+		return files
+	if ratio <= 0 or ratio > 1:
+		raise ValueError(f'sample_ratio must be in (0, 1], got {ratio}')
+	if ratio >= 1:
+		return files
+
+	rng = torch.Generator()
+	if seed is not None:
+		rng.manual_seed(seed)
+	indices = torch.randperm(len(files), generator=rng).tolist()
+	sample_size = max(1, int(round(len(files) * ratio)))
+	selected_indices = sorted(indices[:sample_size])
+	return [files[index] for index in selected_indices]
 
 
 @TaskRegistry.register
@@ -95,10 +119,16 @@ class MAEPretrainRunner(TaskRunner):
 
 	def run(self, config: MAEPretrainConfig, device: torch.device) -> Path:  # type: ignore[override]
 		"""执行 MAE 预训练任务"""
+		training_cfg = config.training
+		if training_cfg.seed is not None:
+			daisy.util.set_global_seed(training_cfg.seed)
+
 		print('=' * 60)
 		print(f'Task: {config.meta.title or config.task_id}')
 		print(f'Description: {config.meta.description}')
 		print(f'Device: {device}')
+		if training_cfg.seed is not None:
+			print(f'Seed: {training_cfg.seed}')
 		print('=' * 60)
 
 		# 获取 git commit
@@ -107,12 +137,7 @@ class MAEPretrainRunner(TaskRunner):
 		print(f'Git commit: {config.meta.commit}')
 
 		# 准备输出目录
-		output_path = config.output.save_path.format(
-			task_id=config.task_id,
-			date=datetime.now().strftime('%Y%m%d'),
-		)
-		output_path = Path(output_path)
-		output_path.mkdir(parents=True, exist_ok=True)
+		output_path = resolve_output_path(config.output.save_path, config.task_id)
 		print(f'Output path: {output_path}')
 
 		# 加载数据集
@@ -122,6 +147,9 @@ class MAEPretrainRunner(TaskRunner):
 		# 加载所有图像文件（支持多个文件夹，用分号分割）
 		files = []
 		roots = [r.strip() for r in dataset_cfg.root.split(';') if r.strip()]
+		if not roots:
+			raise ValueError('dataset.root is required for mae_pretrain')
+		root_paths = [Path(root) for root in roots]
 		for root in roots:
 			root_files = load_files_from_folder(
 				Path(root),
@@ -129,7 +157,71 @@ class MAEPretrainRunner(TaskRunner):
 			)
 			print(f'Loaded {len(root_files)} samples from {root}')
 			files.extend(root_files)
+
+		protocol_snapshot = {
+			'method': 'folder_scan',
+			'roots': roots,
+			'source_tag': dataset_cfg.source_tag,
+			'id_type': dataset_cfg.sample_id_type,
+		}
+
+		if dataset_cfg.sample_manifest:
+			manifest_splits, selection_report = apply_split_manifest(
+				files,
+				[0] * len(files),
+				dataset_cfg.sample_manifest,
+				dataset_root=root_paths,
+				split_names=[dataset_cfg.sample_manifest_split] if dataset_cfg.sample_manifest_split else None,
+				strict=True,
+			)
+			selected_files: list[Path] = []
+			for split_files, _ in manifest_splits.values():
+				selected_files.extend(split_files)
+			files = selected_files
+			protocol_snapshot['method'] = 'manifest'
+			protocol_snapshot['sample_manifest'] = dataset_cfg.sample_manifest
+			protocol_snapshot['sample_manifest_split'] = dataset_cfg.sample_manifest_split
+			protocol_snapshot['selection_report'] = selection_report
+
+		sample_seed = dataset_cfg.sample_seed if dataset_cfg.sample_seed is not None else training_cfg.seed
+		files = sample_files_by_ratio(files, ratio=dataset_cfg.sample_ratio, seed=sample_seed)
+		protocol_snapshot['sample_ratio'] = dataset_cfg.sample_ratio
+		protocol_snapshot['sample_seed'] = sample_seed
+		selected_ids = collect_sample_ids(
+			files,
+			id_type=dataset_cfg.sample_id_type,
+			root=root_paths,
+		)
+		protocol_snapshot['selected_ids'] = selected_ids
+		protocol_snapshot['selected_count'] = len(files)
+
+		if dataset_cfg.reference_manifests:
+			reference_collections = {
+				'unlabeled_pool': selected_ids,
+			}
+			for manifest_path in dataset_cfg.reference_manifests:
+				manifest = load_split_manifest(manifest_path)
+				if manifest.id_type != dataset_cfg.sample_id_type:
+					raise ValueError(f'Leakage reference manifest id_type does not match sample_id_type: {manifest_path}')
+				reference_collections[Path(manifest_path).stem] = manifest.all_ids()
+			assert_collections_disjoint(
+				reference_collections,
+				id_type=dataset_cfg.sample_id_type,
+				context='mae pretrain leakage references',
+			)
+			protocol_snapshot['reference_manifests'] = dataset_cfg.reference_manifests
 		print(f'Total samples: {len(files)}')
+
+		save_json(output_path / 'data_protocol.json', protocol_snapshot)
+		save_task_snapshot(
+			output_path,
+			config,
+			extra={
+				'device': str(device),
+				'commit': config.meta.commit,
+				'seed': training_cfg.seed,
+			},
+		)
 
 		# 获取 transform
 		transform_cfg = config.training.transform
@@ -156,7 +248,6 @@ class MAEPretrainRunner(TaskRunner):
 
 		# 训练
 		print('\nStarting MAE pretraining...')
-		training_cfg = config.training
 
 		daisy.mae_pretrain.mae_pretrain(
 			device=device,
