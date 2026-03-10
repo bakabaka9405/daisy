@@ -28,28 +28,24 @@ from .registry import TaskRegistry
 
 # 主要接口
 from .runner import load_config, run_task
-from .config import save_config
 
-# 导入任务模块以确保注册
-from . import tasks  # noqa: F401
-
-# 为向后兼容，导出分类任务相关类
+from .serialization import save_config
+from .shared import DatasetConfig, DatasetSplitConfig, InferenceModelConfig, InferenceRuntimeConfig
 from .tasks.classification.config import (
 	ClassificationConfig,
-	DatasetConfig,
-	DatasetSplitConfig,
 	ModelConfig,
 	TrainingConfig,
 	TransformConfig,
 )
+from .tasks.eval_checkpoint.config import EvalCheckpointConfig
+from .tasks.mae_finetune.config import MAEFinetuneConfig
+from .tasks.mae_pretrain.config import MAEPretrainConfig
+from .tasks.moco_lincls.config import MoCoLinclsConfig
+from .tasks.moco_pretrain.config import MoCoPretrainConfig
+from .tasks.predict_export.config import PredictExportConfig
 
-# 向后兼容：TaskConfig 作为 ClassificationConfig 的别名
-TaskConfig = ClassificationConfig
-
-# 为向后兼容，从分类任务配置导出 MetaConfig 和 OutputConfig
-# 注意：这些现在是 BaseMetaConfig 和 BaseOutputConfig 的别名
-MetaConfig = BaseMetaConfig
-OutputConfig = BaseOutputConfig
+# 导入任务模块以确保注册
+from . import tasks  # noqa: F401
 
 __all__ = [
 	# 基础类
@@ -63,14 +59,21 @@ __all__ = [
 	'load_config',
 	'run_task',
 	'save_config',
-	# 分类任务（向后兼容）
-	'TaskConfig',
-	'ClassificationConfig',
+	# 共享配置
 	'DatasetConfig',
 	'DatasetSplitConfig',
+	'InferenceModelConfig',
+	'InferenceRuntimeConfig',
+	# 任务配置
+	'ClassificationConfig',
+	'MAEFinetuneConfig',
+	'MAEPretrainConfig',
+	'EvalCheckpointConfig',
+	'PredictExportConfig',
+	'MoCoLinclsConfig',
+	'MoCoPretrainConfig',
+	# 分类任务细粒度配置
 	'ModelConfig',
 	'TrainingConfig',
 	'TransformConfig',
-	'MetaConfig',
-	'OutputConfig',
 ]

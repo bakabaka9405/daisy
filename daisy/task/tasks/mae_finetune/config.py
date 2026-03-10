@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ...base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
-from ..classification.config import DatasetConfig
+from ...shared import DatasetConfig
 
 
 class MAEFinetuneModelConfig(BaseModel):

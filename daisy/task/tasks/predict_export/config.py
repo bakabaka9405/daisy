@@ -2,22 +2,15 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from ...base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
-from ..classification.config import DatasetConfig
-from ..eval_checkpoint.config import EvalCheckpointModelConfig
+from ...shared import DatasetConfig, InferenceModelConfig, InferenceRuntimeConfig
 
 
-class PredictExportRuntimeConfig(BaseModel):
+class PredictExportRuntimeConfig(InferenceRuntimeConfig):
 	"""预测导出运行配置"""
 
-	split_name: str = 'val'
-	batch_size: int = 16
-	num_workers: int = 4
-	transform: str = 'rectangle_val'
-	input_size: int = 224
-	seed: int | None = None
 	include_logits: bool = True
 
 
@@ -36,7 +29,7 @@ class PredictExportConfig(BaseTaskConfig):
 	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
 	output: PredictExportOutputConfig = Field(default_factory=PredictExportOutputConfig)
 	dataset: DatasetConfig = Field(default_factory=DatasetConfig)
-	model: EvalCheckpointModelConfig = Field(default_factory=EvalCheckpointModelConfig)
+	model: InferenceModelConfig = Field(default_factory=InferenceModelConfig)
 	prediction: PredictExportRuntimeConfig = Field(default_factory=PredictExportRuntimeConfig)
 
 	@classmethod

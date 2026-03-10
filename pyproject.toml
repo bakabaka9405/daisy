@@ -34,4 +34,6 @@ default = true
 [tool.pyright]
 include = ["daisy"]
 exclude = ["**/node_modules", "**/__pycache__", ".venv"]
+venvPath = "C:/Users/WanYa/uv-venv"
+venv = "pytorch"
 typeCheckingMode = "standard"

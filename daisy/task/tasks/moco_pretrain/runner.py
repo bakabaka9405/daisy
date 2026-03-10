@@ -1,6 +1,5 @@
 """MoCo 预训练任务执行器"""
 
-from datetime import datetime
 from functools import partial
 from pathlib import Path
 
@@ -20,57 +19,79 @@ from daisy.dataset import UnlabeledDiskDataset, load_files_from_folder
 from daisy.util.transform import ZeroOneNormalize
 from ...base import TaskRunner
 from ...registry import TaskRegistry
+from ...runtime import TaskHeaderLine, prepare_task_run, print_task_completed, save_run_snapshot
 from .config import MoCoPretrainConfig
 
 
 def _build_v2_transform(input_size: int = 224) -> TwoCropsTransform:
 	"""MoCo v2: 对称增强"""
-	base_transform = transforms.Compose([
-		transforms.RandomResizedCrop(input_size, scale=(0.2, 1.0)),
-		transforms.RandomApply([
-			transforms.ColorJitter(0.4, 0.4, 0.4, 0.1),
-		], p=0.8),
-		transforms.RandomGrayscale(p=0.2),
-		transforms.RandomApply([
-			transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
-		], p=0.5),
-		transforms.RandomHorizontalFlip(),
-		ZeroOneNormalize(),
-		transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-	])
+	base_transform = transforms.Compose(
+		[
+			transforms.RandomResizedCrop(input_size, scale=(0.2, 1.0)),
+			transforms.RandomApply(
+				[
+					transforms.ColorJitter(0.4, 0.4, 0.4, 0.1),
+				],
+				p=0.8,
+			),
+			transforms.RandomGrayscale(p=0.2),
+			transforms.RandomApply(
+				[
+					transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
+				],
+				p=0.5,
+			),
+			transforms.RandomHorizontalFlip(),
+			ZeroOneNormalize(),
+			transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+		]
+	)
 	return TwoCropsTransform(base_transform)
 
 
 def _build_v3_transform(input_size: int = 224) -> TwoCropsTransform:
 	"""MoCo v3: 非对称增强"""
 	# aug1: stronger blur
-	aug1 = transforms.Compose([
-		transforms.RandomResizedCrop(input_size, scale=(0.2, 1.0)),
-		transforms.RandomApply([
-			transforms.ColorJitter(0.4, 0.4, 0.2, 0.1),
-		], p=0.8),
-		transforms.RandomGrayscale(p=0.2),
-		transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
-		transforms.RandomHorizontalFlip(),
-		ZeroOneNormalize(),
-		transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-	])
+	aug1 = transforms.Compose(
+		[
+			transforms.RandomResizedCrop(input_size, scale=(0.2, 1.0)),
+			transforms.RandomApply(
+				[
+					transforms.ColorJitter(0.4, 0.4, 0.2, 0.1),
+				],
+				p=0.8,
+			),
+			transforms.RandomGrayscale(p=0.2),
+			transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
+			transforms.RandomHorizontalFlip(),
+			ZeroOneNormalize(),
+			transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+		]
+	)
 	# aug2: weaker blur + solarize
 	# Solarize 需要 uint8 输入 (threshold=128)，所以放在 ZeroOneNormalize 之前
-	aug2 = transforms.Compose([
-		transforms.RandomResizedCrop(input_size, scale=(0.2, 1.0)),
-		transforms.RandomApply([
-			transforms.ColorJitter(0.4, 0.4, 0.2, 0.1),
-		], p=0.8),
-		transforms.RandomGrayscale(p=0.2),
-		transforms.RandomApply([
-			transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
-		], p=0.1),
-		transforms.RandomSolarize(threshold=128, p=0.2),
-		transforms.RandomHorizontalFlip(),
-		ZeroOneNormalize(),
-		transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-	])
+	aug2 = transforms.Compose(
+		[
+			transforms.RandomResizedCrop(input_size, scale=(0.2, 1.0)),
+			transforms.RandomApply(
+				[
+					transforms.ColorJitter(0.4, 0.4, 0.2, 0.1),
+				],
+				p=0.8,
+			),
+			transforms.RandomGrayscale(p=0.2),
+			transforms.RandomApply(
+				[
+					transforms.GaussianBlur(kernel_size=23, sigma=(0.1, 2.0)),
+				],
+				p=0.1,
+			),
+			transforms.RandomSolarize(threshold=128, p=0.2),
+			transforms.RandomHorizontalFlip(),
+			ZeroOneNormalize(),
+			transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+		]
+	)
 	return TwoCropsTransform(aug1, aug2)
 
 
@@ -92,26 +113,12 @@ class MoCoPretrainRunner(TaskRunner['MoCoPretrainConfig']):
 
 	def run(self, config: MoCoPretrainConfig, device: torch.device) -> Path:  # type: ignore[override]
 		"""执行 MoCo 预训练任务"""
-		print('=' * 60)
-		print(f'Task: {config.meta.title or config.task_id}')
-		print(f'Description: {config.meta.description}')
-		print(f'Engine: MoCo {config.engine}')
-		print(f'Device: {device}')
-		print('=' * 60)
-
-		# 获取 git commit
-		if config.meta.commit == 'auto':
-			config.meta.commit = daisy.util.get_git_commit()
-		print(f'Git commit: {config.meta.commit}')
-
-		# 准备输出目录
-		output_path = config.output.save_path.format(
-			task_id=config.task_id,
-			date=datetime.now().strftime('%Y%m%d'),
+		run_context = prepare_task_run(
+			config,
+			device,
+			header_lines=[TaskHeaderLine(label='Engine', value=f'MoCo {config.engine}')],
 		)
-		output_path = Path(output_path)
-		output_path.mkdir(parents=True, exist_ok=True)
-		print(f'Output path: {output_path}')
+		output_path = run_context.output_path
 
 		# 加载数据集
 		print('\nLoading dataset...')
@@ -126,6 +133,7 @@ class MoCoPretrainRunner(TaskRunner['MoCoPretrainConfig']):
 			print(f'Loaded {len(root_files)} samples from {root}')
 			files.extend(root_files)
 		print(f'Total samples: {len(files)}')
+		save_run_snapshot(output_path, config, run_context)
 
 		# 构建 transform
 		input_size = config.training.input_size
@@ -207,9 +215,6 @@ class MoCoPretrainRunner(TaskRunner['MoCoPretrainConfig']):
 			resume=training_cfg.resume,
 		)
 
-		print('\n' + '=' * 60)
-		print('Task completed!')
-		print(f'Output saved to: {output_path}')
-		print('=' * 60)
+		print_task_completed(output_path)
 
 		return output_path

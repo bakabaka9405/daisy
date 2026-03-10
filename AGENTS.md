@@ -1,38 +1,38 @@
 # AGENTS.md
 
-Repository guidance for coding agents working in `E:\Working\proj\daisy`.
+Repository guidance for coding agents working in `daisy`.
 
 ## Scope
-- This repo is a Python 3.12+ experiment library centered on `daisy/`.
+- This repo is a Python 3.13+ experiment library centered on `daisy/`.
 - The main user-facing entrypoint is the task CLI in `daisy/__main__.py`.
 - Formal experiments are configuration-driven and run from TOML task files.
 - Reusable computation belongs in `daisy/`.
 - Project-specific docs, task instances, and batch launchers live under `proj/mae/`.
 
-## Rule File Status
-- No existing `AGENTS.md` was present when this file was created.
-- No `.cursorrules`, `.cursor/rules/`, or `.github/copilot-instructions.md` files were found.
-- The strongest repo-specific instructions come from `docs/task 规范.md` and `proj/mae/docs/README.md`.
-
 ## Repository Layout
 - `daisy/`: reusable package code for datasets, models, task configs, runners, protocols, and utilities.
 - `daisy/task/`: registry-driven task system.
-- `daisy/task/tasks/<task_name>/`: each task type has a `config.py` and a `runner.py`.
+- `daisy/task/tasks/<task_name>/`: task-specific configs and runners.
+- `daisy/task/shared/`: shared task config models and reusable task helpers.
+- `daisy/task/data/`: shared labeled-data loading, split selection, and protocol snapshot helpers.
 - `daisy/protocol/`: split manifests, leakage checks, and other reproducibility helpers.
 - `tasks/`: example root-level TOML task files.
 - `docs/`: repository-wide task and workflow rules.
 - `proj/mae/`: MAE project workspace for docs, task instances, and batch orchestration.
 - `tmp/`: legacy and exploratory scripts; do not treat this as the mainline workflow.
-- `outputs/`: default output location for generated experiment artifacts.
 
 ## Architecture Notes
 - CLI commands live in `daisy/__main__.py`: `run`, `list`, and `ui`.
 - Config loading and task execution live in `daisy/task/runner.py`.
 - Task registration happens through `TaskRegistry` in `daisy/task/registry.py`.
-- Import side effects in `daisy/task/tasks/__init__.py` are required so runners register.
-- Runtime helpers such as output-path resolution and JSON snapshots live in `daisy/task/runtime.py`.
-- Formal task config models are defined with Pydantic under `daisy/task/tasks/*/config.py`.
+- Task discovery is handled by `discover_tasks()` in `daisy/task/tasks/__init__.py`; do not maintain a manual import list there.
+- Runtime helpers such as output-path resolution, run context, and JSON snapshots live in `daisy/task/runtime.py`.
+- Task serialization lives in `daisy/task/serialization.py`.
+- Shared config models and transforms live in `daisy/task/shared/`.
+- Shared labeled-data and split/protocol helpers live in `daisy/task/data/`.
+- Formal task config models are defined either in `daisy/task/shared/` or `daisy/task/tasks/*/config.py`.
 - Formal runners are under `daisy/task/tasks/*/runner.py`.
+- UI field metadata is centralized in `daisy/task/ui_config.py` and consumed by `daisy/task/ui_builder.py`.
 
 ## Core Commands
 Use direct Python tooling; there is no custom script runner in `pyproject.toml`.
@@ -52,10 +52,6 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - There is currently no formal `tests/` suite and no pytest config in the repo.
 - There is no endorsed single-test command for existing code because no real test suite exists yet.
 - Do not treat `tmp/*test.py` scripts as the preferred validation path; they are ad hoc and often machine-specific.
-- For current changes, validate through the smallest relevant CLI or module-level smoke command.
-- If you add formal pytest tests, use `python -m pytest`.
-- For a single pytest test, use `python -m pytest path/to/test_file.py::test_name -q`.
-- Prefer adding new automated checks as real pytest tests rather than more `tmp/` scripts.
 
 ## Change Placement
 - Put reusable logic in `daisy/`.
@@ -64,6 +60,7 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - Avoid adding new mainline workflows under `tmp/`.
 - Do not hard-code machine-local paths in library code.
 - Preserve reproducibility metadata whenever you touch experiment flows.
+- Do not place privacy-sensitive information in the repo, especially in version control; use environment variables or secure vaults instead.
 
 ## Formatting Conventions
 - Follow Ruff settings from `pyproject.toml`.
@@ -82,6 +79,7 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - Prefer relative imports for close intra-package references inside task modules.
 - If an import is needed only for typing, prefer `TYPE_CHECKING` blocks when that avoids runtime imports.
 - Newer core files often use `from __future__ import annotations`; follow the style of the file you edit.
+- Public task APIs should be imported from `daisy.task`; do not reintroduce removed compatibility modules like `daisy.task.config` or `daisy.task.compat`.
 
 ## Type And Data Modeling
 - Use modern Python typing such as `list[str]`, `dict[str, Any]`, and `A | B` unions.
@@ -93,6 +91,7 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - Use `model_validate()` when loading structured config data.
 - Use `model_dump(..., exclude_none=True)` when persisting config snapshots.
 - For small structured runtime containers, `@dataclass(slots=True)` is already used and is a good fit.
+- For task UI metadata, use `UIFieldConfig`; do not use `dict` or `json_schema_extra` as a parallel schema source.
 
 ## Naming Conventions
 - Use `snake_case` for modules, files, functions, methods, and variables.
@@ -116,9 +115,12 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - New task types belong in `daisy/task/tasks/<task_name>/`.
 - Each task type should provide `config.py` and `runner.py`.
 - Register runners with `@TaskRegistry.register`.
-- Ensure the task module is imported from `daisy/task/tasks/__init__.py` so registration happens.
+- New task packages are auto-discovered; do not edit `daisy/task/tasks/__init__.py` to add manual imports.
 - Keep `get_task_type()`, the registry key, and the config `Literal[...]` value in sync.
-- Prefer reusing shared helpers in `daisy/task/runtime.py`, `daisy/task/runner.py`, and `daisy/task/tasks/inference_common.py`.
+- Put cross-task config models in `daisy/task/shared/`, not inside another task's `config.py`.
+- Put reusable labeled-data split and protocol logic in `daisy/task/data/`.
+- Prefer reusing shared helpers in `daisy/task/runtime.py`, `daisy/task/runner.py`, `daisy/task/data/`, `daisy/task/shared/`, and `daisy/task/tasks/inference_common.py`.
+- Runner UI configuration should go through `get_ui_field_overrides()` and `UIFieldConfig`.
 
 ## Task File Rules
 - Formal task files use TOML, not YAML.
@@ -128,6 +130,7 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - Once a formal task has produced official outputs, do not edit it in place; create a new task file instead.
 - Prefer explicit seeds, manifests, and protocol parameters over hidden defaults.
 - Avoid machine-specific notes or assumptions inside task files.
+- Only legacy classification-style task files may omit `task_type`; new task files must declare it explicitly.
 
 ## Formal Experiment Rules
 - Formal experiments should be reproducible, reviewable, and configuration-driven.
@@ -157,7 +160,7 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 
 ## Practical Defaults For Agents
 - Read `pyproject.toml` first when you need tooling truth.
-- Read `docs/task 规范.md` before changing task-file structure or experiment workflow.
+- Read `docs/task 规范.md` before changing task-file structure, task module architecture, or experiment workflow.
 - Read `proj/mae/docs/README.md` before reorganizing MAE project assets.
 - Prefer minimal, local edits that match the touched file's style.
 - When in doubt, choose reproducibility and explicit configuration over convenience.

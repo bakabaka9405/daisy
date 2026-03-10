@@ -12,7 +12,8 @@ from daisy.protocol import apply_split_manifest, assert_collections_disjoint, co
 from daisy.util.transform import ZeroOneNormalize
 from ...base import TaskRunner
 from ...registry import TaskRegistry
-from ...runtime import resolve_output_path, save_json, save_task_snapshot
+from ...runtime import prepare_task_run, print_task_completed, save_json, save_run_snapshot
+from ...ui_config import UIFieldConfig
 from .config import MAEPretrainConfig
 
 
@@ -90,55 +91,32 @@ class MAEPretrainRunner(TaskRunner):
 		return 'MAE 预训练'
 
 	@classmethod
-	def get_ui_field_overrides(cls) -> dict[str, dict]:
+	def get_ui_field_overrides(cls) -> dict[str, UIFieldConfig]:
 		return {
-			'meta.title': {'label': '任务标题'},
-			'meta.description': {'label': '描述', 'component': 'textarea'},
-			'meta.created_at': {'hidden': True},
-			'meta.commit': {'hidden': True},
-			'dataset.root': {'label': '数据目录'},
-			'model.name': {
-				'label': '模型',
-				'component': 'dropdown',
-				'choices': ['mae_vit_base_patch16', 'mae_vit_large_patch16', 'mae_vit_huge_patch14'],
-				'allow_custom': True,
-			},
-			'training.epochs': {'label': '训练轮数'},
-			'training.batch_size': {'label': 'Batch Size'},
-			'training.blr': {'label': '基础学习率'},
-			'training.warmup_epochs': {'label': 'Warmup 轮数'},
-			'training.mask_ratio': {
-				'label': 'Mask 比例',
-				'component': 'slider',
-				'min_value': 0.5,
-				'max_value': 0.9,
-				'step': 0.05,
-			},
-			'output.save_path': {'hidden': True},
+			'meta.title': UIFieldConfig(label='任务标题'),
+			'meta.description': UIFieldConfig(label='描述', component='textarea'),
+			'meta.created_at': UIFieldConfig(hidden=True),
+			'meta.commit': UIFieldConfig(hidden=True),
+			'dataset.root': UIFieldConfig(label='数据目录'),
+			'model.name': UIFieldConfig(
+				label='模型',
+				component='dropdown',
+				choices=('mae_vit_base_patch16', 'mae_vit_large_patch16', 'mae_vit_huge_patch14'),
+				allow_custom=True,
+			),
+			'training.epochs': UIFieldConfig(label='训练轮数'),
+			'training.batch_size': UIFieldConfig(label='Batch Size'),
+			'training.blr': UIFieldConfig(label='基础学习率'),
+			'training.warmup_epochs': UIFieldConfig(label='Warmup 轮数'),
+			'training.mask_ratio': UIFieldConfig(label='Mask 比例', component='slider', min_value=0.5, max_value=0.9, step=0.05),
+			'output.save_path': UIFieldConfig(hidden=True),
 		}
 
 	def run(self, config: MAEPretrainConfig, device: torch.device) -> Path:  # type: ignore[override]
 		"""执行 MAE 预训练任务"""
 		training_cfg = config.training
-		if training_cfg.seed is not None:
-			daisy.util.set_global_seed(training_cfg.seed)
-
-		print('=' * 60)
-		print(f'Task: {config.meta.title or config.task_id}')
-		print(f'Description: {config.meta.description}')
-		print(f'Device: {device}')
-		if training_cfg.seed is not None:
-			print(f'Seed: {training_cfg.seed}')
-		print('=' * 60)
-
-		# 获取 git commit
-		if config.meta.commit == 'auto':
-			config.meta.commit = daisy.util.get_git_commit()
-		print(f'Git commit: {config.meta.commit}')
-
-		# 准备输出目录
-		output_path = resolve_output_path(config.output.save_path, config.task_id)
-		print(f'Output path: {output_path}')
+		run_context = prepare_task_run(config, device, seed=training_cfg.seed)
+		output_path = run_context.output_path
 
 		# 加载数据集
 		print('\nLoading dataset...')
@@ -213,14 +191,10 @@ class MAEPretrainRunner(TaskRunner):
 		print(f'Total samples: {len(files)}')
 
 		save_json(output_path / 'data_protocol.json', protocol_snapshot)
-		save_task_snapshot(
+		save_run_snapshot(
 			output_path,
 			config,
-			extra={
-				'device': str(device),
-				'commit': config.meta.commit,
-				'seed': training_cfg.seed,
-			},
+			run_context,
 		)
 
 		# 获取 transform
@@ -270,9 +244,6 @@ class MAEPretrainRunner(TaskRunner):
 			resume=training_cfg.resume,
 		)
 
-		print('\n' + '=' * 60)
-		print('Task completed!')
-		print(f'Output saved to: {output_path}')
-		print('=' * 60)
+		print_task_completed(output_path)
 
 		return output_path

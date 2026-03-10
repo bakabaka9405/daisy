@@ -10,7 +10,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 import daisy
 import torch
@@ -30,7 +30,7 @@ from daisy.dataset import IndexDataset
 
 
 class LRScheduler:
-	"""学习率调度器，支持 warmup + cosine decay，可选 per-iteration 调整"""
+	"""学习率调度"""
 
 	def __init__(
 		self,
@@ -164,7 +164,7 @@ def build_optimizer(
 
 def evaluate(
 	model: nn.Module,
-	data_loader,
+	data_loader: torch.utils.data.DataLoader,
 	criterion: nn.Module,
 	device: torch.device,
 	num_classes: int,
@@ -232,7 +232,7 @@ def evaluate(
 
 def train_one_epoch(
 	model: nn.Module,
-	data_loader,
+	data_loader: torch.utils.data.DataLoader,
 	criterion: nn.Module,
 	optimizer: torch.optim.Optimizer,
 	lr_scheduler: LRScheduler,
@@ -392,7 +392,7 @@ def train_classifier(
 		if isinstance(log_dir, str):
 			log_dir = Path(log_dir)
 		log_dir.mkdir(parents=True, exist_ok=True)
-		log_file = log_dir / f"log_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+		log_file = log_dir / f'log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
 		# 构建 CSV 表头
 		header_parts = ['epoch', 'lr', 'train_loss', 'train_acc', 'val_loss', 'val_acc']
 		if compute_metrics:
@@ -598,8 +598,6 @@ def train_classifier(
 			best_epoch = epoch
 
 		# ===== Early Stopping =====
-		early_metric = val_metrics.get_metric(early_stop_metric)
-		best_early_metric = best_metrics.get_metric(early_stop_metric)
 		if early_stop and epoch - best_epoch >= early_stop_patience:
 			print(f'Early stopping at epoch {epoch + 1}')
 			if log_file is not None:
@@ -728,9 +726,10 @@ def fast_eval(device, model, dataset, transform, batch_size=1, num_workers=0):
 def fast_calc_metrics(y_true, y_pred, num_classes=0):
 	"""快速计算评估指标"""
 	acc = accuracy_score(y_true, y_pred)
-	prec = precision_score(y_true, y_pred, average='macro', zero_division=0)
-	rec = recall_score(y_true, y_pred, average='macro', zero_division=0)
-	f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
+	zero_division = cast(Any, 0)
+	prec = precision_score(y_true, y_pred, average='macro', zero_division=zero_division)
+	rec = recall_score(y_true, y_pred, average='macro', zero_division=zero_division)
+	f1 = f1_score(y_true, y_pred, average='macro', zero_division=zero_division)
 	if num_classes == 0:
 		matrix = None
 	else:

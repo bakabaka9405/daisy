@@ -8,20 +8,7 @@ from typing import Any, Literal, get_args, get_origin
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
-from .ui_schema import UIFieldMeta
-
-
-def get_ui_meta(field_info: FieldInfo) -> UIFieldMeta | None:
-	"""从 Field 的 json_schema_extra 中提取 UI 元数据"""
-	extra = field_info.json_schema_extra
-	if extra is None:
-		return None
-	# json_schema_extra 可以是 dict 或 callable
-	if callable(extra):
-		return None
-	if 'ui' in extra and isinstance(extra['ui'], dict):
-		return UIFieldMeta.from_dict(extra['ui'])
-	return None
+from .ui_config import UIFieldConfig
 
 
 def infer_component_type(
@@ -77,22 +64,16 @@ def create_gradio_component(
 	field_name: str,
 	field_info: FieldInfo,
 	field_type: type,
-	ui_override: dict[str, Any] | None = None,
+	ui_override: UIFieldConfig | None = None,
 ):
 	"""创建单个 Gradio 组件
 
 	返回 (component, component_type)
 	"""
-	# 获取 UI 元数据
-	ui_meta = get_ui_meta(field_info)
-
-	# 合并覆盖配置
-	override = ui_override or {}
-	if ui_meta:
-		override = {**ui_meta.to_dict(), **override}
+	override = ui_override or UIFieldConfig()
 
 	# 检查是否隐藏
-	if override.get('hidden'):
+	if override.hidden:
 		return None, 'hidden'
 
 	# 获取默认值
@@ -106,8 +87,8 @@ def create_gradio_component(
 			pass
 
 	# 推断组件类型
-	if 'component' in override:
-		component_type = override['component']
+	if override.component is not None:
+		component_type = override.component
 		extra_kwargs = {}
 		# 如果是 dropdown，尝试从类型推断 choices
 		if component_type == 'dropdown':
@@ -121,8 +102,8 @@ def create_gradio_component(
 		return None, ('nested', extra_kwargs['model_class'])
 
 	# 准备组件参数
-	label = override.get('label', field_name)
-	info = override.get('info', extra_kwargs.get('info'))
+	label = override.label or field_name
+	info = override.info or extra_kwargs.get('info')
 
 	component = None
 
@@ -143,12 +124,12 @@ def create_gradio_component(
 
 	elif component_type == 'number':
 		num_kwargs = {}
-		if 'min_value' in override:
-			num_kwargs['minimum'] = override['min_value']
-		if 'max_value' in override:
-			num_kwargs['maximum'] = override['max_value']
-		if 'step' in override:
-			num_kwargs['step'] = override['step']
+		if override.min_value is not None:
+			num_kwargs['minimum'] = override.min_value
+		if override.max_value is not None:
+			num_kwargs['maximum'] = override.max_value
+		if override.step is not None:
+			num_kwargs['step'] = override.step
 		component = gr.Number(
 			label=label,
 			value=default_value if default_value is not None else 0,
@@ -157,9 +138,9 @@ def create_gradio_component(
 		)
 
 	elif component_type == 'slider':
-		min_val = override.get('min_value', 0)
-		max_val = override.get('max_value', 1)
-		step_val = override.get('step', 0.01)
+		min_val = override.min_value if override.min_value is not None else 0
+		max_val = override.max_value if override.max_value is not None else 1
+		step_val = override.step if override.step is not None else 0.01
 		component = gr.Slider(
 			label=label,
 			minimum=min_val,
@@ -170,8 +151,8 @@ def create_gradio_component(
 		)
 
 	elif component_type == 'dropdown':
-		choices = override.get('choices', extra_kwargs.get('choices', []))
-		allow_custom = override.get('allow_custom', False)
+		choices = list(override.choices) if override.choices else extra_kwargs.get('choices', [])
+		allow_custom = override.allow_custom
 		component = gr.Dropdown(
 			label=label,
 			choices=choices,
@@ -200,7 +181,7 @@ def create_gradio_component(
 def build_config_ui(
 	gr,
 	config_class: type[BaseModel],
-	overrides: dict[str, dict] | None = None,
+	overrides: dict[str, UIFieldConfig] | None = None,
 	prefix: str = '',
 	exclude_fields: set[str] | None = None,
 ) -> dict[str, Any]:
@@ -237,9 +218,7 @@ def build_config_ui(
 			override = overrides.get(field_path)
 			if field_type is None:
 				continue
-			comp, _ = create_gradio_component(
-				gr, field_name, field_info, field_type, override
-			)
+			comp, _ = create_gradio_component(gr, field_name, field_info, field_type, override)
 			if comp is not None:
 				components[field_path] = comp
 
@@ -294,7 +273,7 @@ def _render_groups(
 	group_names: list[str],
 	groups: dict[str, list[tuple[str, FieldInfo, type | None]]],
 	group_labels: dict[str, str],
-	overrides: dict[str, dict],
+	overrides: dict[str, UIFieldConfig],
 	all_components: dict[str, Any],
 ) -> None:
 	"""渲染一组分组的 UI 组件"""
@@ -305,18 +284,13 @@ def _render_groups(
 		gr.Markdown(f'### {label}')
 		for field_name, field_info, field_type in groups[group_name]:
 			if isinstance(field_type, type) and issubclass(field_type, BaseModel):
-				nested = build_config_ui(
-					gr, field_type, overrides,
-					prefix=f'{field_name}.', exclude_fields=set()
-				)
+				nested = build_config_ui(gr, field_type, overrides, prefix=f'{field_name}.', exclude_fields=set())
 				all_components.update(nested)
 			else:
 				if field_type is None:
 					continue
 				override = overrides.get(field_name)
-				comp, _ = create_gradio_component(
-					gr, field_name, field_info, field_type, override
-				)
+				comp, _ = create_gradio_component(gr, field_name, field_info, field_type, override)
 				if comp:
 					all_components[field_name] = comp
 

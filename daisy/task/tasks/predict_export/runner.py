@@ -8,11 +8,11 @@ from pathlib import Path
 
 import torch
 
-import daisy
 from ...base import TaskRunner
+from ...data import select_dataset_split
 from ...registry import TaskRegistry
-from ...runtime import resolve_output_path, save_json, save_task_snapshot
-from ..inference_common import build_prediction_rows, create_inference_model, get_inference_transform, select_inference_dataset
+from ...runtime import prepare_task_run, print_task_completed, save_json, save_run_snapshot
+from ..inference_common import build_prediction_rows, create_inference_model, get_inference_transform
 from .config import PredictExportConfig
 
 
@@ -34,35 +34,19 @@ class PredictExportRunner(TaskRunner['PredictExportConfig']):
 
 	def run(self, config: PredictExportConfig, device: torch.device) -> Path:
 		runtime_cfg = config.prediction
-		if runtime_cfg.seed is not None:
-			daisy.util.set_global_seed(runtime_cfg.seed)
+		run_context = prepare_task_run(config, device, seed=runtime_cfg.seed)
+		output_path = run_context.output_path
 
-		print('=' * 60)
-		print(f'Task: {config.meta.title or config.task_id}')
-		print(f'Description: {config.meta.description}')
-		print(f'Device: {device}')
-		print('=' * 60)
-
-		if config.meta.commit == 'auto':
-			config.meta.commit = daisy.util.get_git_commit()
-		print(f'Git commit: {config.meta.commit}')
-
-		output_path = resolve_output_path(config.output.save_path, config.task_id)
-		print(f'Output path: {output_path}')
-
-		eval_dataset, protocol_snapshot = select_inference_dataset(
+		selection = select_dataset_split(
 			config.dataset,
 			split_name=runtime_cfg.split_name,
 		)
-		save_json(output_path / 'predict_protocol.json', protocol_snapshot)
-		save_task_snapshot(
+		eval_dataset = selection.to_dataset()
+		save_json(output_path / 'predict_protocol.json', selection.protocol.to_dict())
+		save_run_snapshot(
 			output_path,
 			config,
-			extra={
-				'device': str(device),
-				'commit': config.meta.commit,
-				'seed': runtime_cfg.seed,
-			},
+			run_context,
 		)
 
 		eval_files, eval_labels = eval_dataset.getRawData()
@@ -121,5 +105,5 @@ class PredictExportRunner(TaskRunner['PredictExportConfig']):
 		)
 
 		print(f'Exported {len(rows)} predictions to {output_path / config.output.filename}')
-		print('Task completed!')
+		print_task_completed(output_path)
 		return output_path

@@ -8,6 +8,8 @@ from typing import Any, Callable, Generic, TypeVar
 
 from pydantic import BaseModel, Field
 
+from .ui_config import UIFieldConfig
+
 
 class BaseMetaConfig(BaseModel):
 	"""任务元信息配置"""
@@ -81,15 +83,15 @@ class TaskRunner(ABC, Generic[T_Config]):
 		return cls.get_task_type()
 
 	@classmethod
-	def get_ui_field_overrides(cls) -> dict[str, dict]:
+	def get_ui_field_overrides(cls) -> dict[str, UIFieldConfig]:
 		"""字段 UI 配置覆盖
 
 		返回字典，键格式: 'section.field' 或 'section.subsection.field'
 
 		示例:
 			return {
-				'training.lr': {'label': '学习率', 'component': 'number'},
-				'dataset.split.val_ratio': {'component': 'slider', 'min_value': 0.05, 'max_value': 0.3},
+				'training.lr': UIFieldConfig(label='学习率', component='number'),
+				'dataset.split.val_ratio': UIFieldConfig(component='slider', min_value=0.05, max_value=0.3),
 			}
 		"""
 		return {}

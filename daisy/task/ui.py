@@ -1,8 +1,7 @@
 """Gradio Web UI - 动态生成任务类型的 UI"""
 
-import gradio as gr
-
 from datetime import datetime
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +14,7 @@ from .ui_builder import build_task_ui
 
 def launch_ui(port: int = 7860):
 	"""启动 Gradio Web UI"""
+	gr = import_module('gradio')
 
 	def list_tasks():
 		"""列出所有任务"""
@@ -32,10 +32,7 @@ def launch_ui(port: int = 7860):
 		for f in task_files[:20]:  # 只显示最近 20 个
 			try:
 				cfg = load_config(f)
-				lines.append(
-					f'{cfg.task_id:<30} {cfg.task_type:<15} '
-					f'{cfg.meta.title[:18]:<20} {cfg.meta.created_at}'
-				)
+				lines.append(f'{cfg.task_id:<30} {cfg.task_type:<15} {cfg.meta.title[:18]:<20} {cfg.meta.created_at}')
 			except Exception as e:
 				lines.append(f'{f.stem:<30} [Error: {str(e)[:30]}]')
 
@@ -107,6 +104,7 @@ def launch_ui(port: int = 7860):
 			return f'任务配置已保存: {output_file}\n\n运行命令:\npython -m daisy run {output_file}'
 		except Exception as e:
 			import traceback
+
 			return f'创建任务失败: {e}\n\n{traceback.format_exc()}'
 
 	def clean_none_values(d: dict) -> dict:
