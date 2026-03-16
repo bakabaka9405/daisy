@@ -7,6 +7,7 @@ from torchvision.transforms import InterpolationMode, v2 as transforms
 
 import daisy
 from daisy.util.transform import ZeroOneNormalize
+from typing import Literal
 
 
 def get_classification_transform(name: str):
@@ -47,14 +48,15 @@ def get_mae_finetune_train_transform(
 	)
 
 
-def get_mae_finetune_val_transform(input_size: int = 224):
+def get_mae_finetune_val_transform(
+	input_size: int | tuple[int, int] = 224,
+	backend: Literal['pil', 'tensor'] = 'tensor',
+):
 	"""获取 MAE Finetune 验证 transform"""
-	resize_size = int(input_size / 0.875)
 	return transforms.Compose(
 		[
-			transforms.Resize(resize_size, interpolation=InterpolationMode.BICUBIC),
-			transforms.CenterCrop(input_size),
-			ZeroOneNormalize(),
+			transforms.Resize(input_size, interpolation=InterpolationMode.BICUBIC),
+			ZeroOneNormalize() if backend == 'tensor' else transforms.ToTensor(),
 			transforms.Normalize(
 				mean=[0.485, 0.456, 0.406],
 				std=[0.229, 0.224, 0.225],

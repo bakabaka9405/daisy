@@ -9,7 +9,7 @@ import daisy
 from ...base import TaskRunner
 from ...data import build_train_val_selection
 from ...registry import TaskRegistry
-from ...runtime import prepare_task_run, print_task_completed, save_json, save_run_snapshot
+from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from ...shared import get_classification_transform
 from ...ui_config import UIFieldConfig
 from .config import ClassificationConfig
@@ -95,7 +95,6 @@ class ClassificationRunner(TaskRunner['ClassificationConfig']):
 		)
 		print(f'Total samples: {split_selection.source_count}')
 		train_dataset, val_dataset = split_selection.to_datasets()
-		save_json(output_path / 'split_protocol.json', split_selection.protocol.to_dict())
 		save_run_snapshot(
 			output_path,
 			config,

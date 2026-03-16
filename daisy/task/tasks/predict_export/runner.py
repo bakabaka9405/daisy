@@ -42,7 +42,6 @@ class PredictExportRunner(TaskRunner['PredictExportConfig']):
 			split_name=runtime_cfg.split_name,
 		)
 		eval_dataset = selection.to_dataset()
-		save_json(output_path / 'predict_protocol.json', selection.protocol.to_dict())
 		save_run_snapshot(
 			output_path,
 			config,

@@ -8,7 +8,7 @@ from daisy.model.mae import create_vit_model, load_mae_pretrained_weights
 from ...base import TaskRunner
 from ...data import build_train_val_selection
 from ...registry import TaskRegistry
-from ...runtime import prepare_task_run, print_task_completed, save_json, save_run_snapshot
+from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from ...shared import get_mae_finetune_train_transform, get_mae_finetune_val_transform
 from ...ui_config import UIFieldConfig
 from .config import MAEFinetuneConfig
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 
 @TaskRegistry.register
-class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
+class MAEFinetuneRunner(TaskRunner[MAEFinetuneConfig]):
 	"""MAE Finetune 任务执行器"""
 
 	@classmethod
@@ -53,7 +53,13 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 			'training.epochs': UIFieldConfig(label='训练轮数'),
 			'training.batch_size': UIFieldConfig(label='Batch Size'),
 			'training.blr': UIFieldConfig(label='基础学习率'),
-			'training.layer_decay': UIFieldConfig(label='Layer Decay', component='slider', min_value=0.5, max_value=0.9, step=0.05),
+			'training.layer_decay': UIFieldConfig(
+				label='Layer Decay',
+				component='slider',
+				min_value=0.5,
+				max_value=0.9,
+				step=0.05,
+			),
 			'training.warmup_epochs': UIFieldConfig(label='Warmup 轮数'),
 			'output.save_path': UIFieldConfig(hidden=True),
 		}
@@ -74,7 +80,6 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 		)
 		print(f'Total samples: {split_selection.source_count}')
 		train_dataset, val_dataset = split_selection.to_datasets()
-		save_json(output_path / 'split_protocol.json', split_selection.protocol.to_dict())
 		save_run_snapshot(
 			output_path,
 			config,
@@ -119,12 +124,12 @@ class MAEFinetuneRunner(TaskRunner['MAEFinetuneConfig']):
 		daisy.mae_finetune.mae_finetune(
 			device=device,
 			model=model,
-			train_dataset=train_dataset,
-			val_dataset=val_dataset,
+			dataset=(train_dataset, val_dataset),
 			num_classes=model_cfg.num_classes,
 			epochs=training_cfg.epochs,
 			batch_size=training_cfg.batch_size,
 			blr=training_cfg.blr,
+			lr=training_cfg.lr,
 			layer_decay=training_cfg.layer_decay,
 			weight_decay=training_cfg.weight_decay,
 			warmup_epochs=training_cfg.warmup_epochs,

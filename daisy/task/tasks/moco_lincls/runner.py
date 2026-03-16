@@ -11,7 +11,7 @@ from daisy.util import get_model_classifier, change_model_classifier
 from ...base import TaskRunner
 from ...data import build_train_val_selection
 from ...registry import TaskRegistry
-from ...runtime import prepare_task_run, print_task_completed, save_json, save_run_snapshot
+from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from .config import MoCoLinclsConfig
 
 
@@ -45,7 +45,6 @@ class MoCoLinclsRunner(TaskRunner['MoCoLinclsConfig']):
 		)
 		print(f'Total samples: {split_selection.source_count}')
 		train_dataset, val_dataset = split_selection.to_datasets()
-		save_json(output_path / 'split_protocol.json', split_selection.protocol.to_dict())
 		save_run_snapshot(
 			output_path,
 			config,

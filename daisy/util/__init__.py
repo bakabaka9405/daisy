@@ -12,7 +12,6 @@ from .util import (
 	filter_by_label,
 )
 from .transform import get_default_val_transform, get_default_train_transform
-from .smile_util import load_smile
 
 __all__ = [
 	'set_global_seed',
@@ -28,5 +27,4 @@ __all__ = [
 	'extract_by_label',
 	'exclude_by_label',
 	'filter_by_label',
-	'load_smile',
 ]

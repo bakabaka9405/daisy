@@ -392,8 +392,7 @@ def train_classifier(
 
 	# ========== 日志处理 ==========
 	if log_dir is not None:
-		if isinstance(log_dir, str):
-			log_dir = Path(log_dir)
+		log_dir = Path(log_dir)
 		log_dir.mkdir(parents=True, exist_ok=True)
 		log_file = log_dir / f'log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
 		# 构建 CSV 表头

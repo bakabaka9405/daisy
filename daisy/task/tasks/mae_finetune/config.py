@@ -42,7 +42,8 @@ class MAEFinetuneTrainingConfig(BaseModel):
 	seed: int | None = None
 	epochs: int = 100
 	batch_size: int = 64
-	blr: float = 5e-4  # 基础学习率
+	lr: float = 0.0
+	blr: float | None = 5e-4  # 基础学习率
 	layer_decay: float = 0.65  # ViT-Base 推荐 0.65, ViT-Large/Huge 推荐 0.75
 	weight_decay: float = 0.05
 	warmup_epochs: int = 5

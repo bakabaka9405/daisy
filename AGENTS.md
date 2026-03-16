@@ -10,12 +10,11 @@ Repository guidance for coding agents working in `daisy`.
 - Project-specific docs, task instances, and batch launchers live under `proj/mae/`.
 
 ## Repository Layout
-- `daisy/`: reusable package code for datasets, models, task configs, runners, protocols, and utilities.
+- `daisy/`: reusable package code for datasets, models, task configs, runners, data helpers, and utilities.
 - `daisy/task/`: registry-driven task system.
 - `daisy/task/tasks/<task_name>/`: task-specific configs and runners.
 - `daisy/task/shared/`: shared task config models and reusable task helpers.
-- `daisy/task/data/`: shared labeled-data loading, split selection, and protocol snapshot helpers.
-- `daisy/protocol/`: split manifests, leakage checks, and other reproducibility helpers.
+- `daisy/task/data/`: shared labeled-data loading and split selection helpers.
 - `tasks/`: example root-level TOML task files.
 - `docs/`: repository-wide task and workflow rules.
 - `proj/mae/`: MAE project workspace for docs, task instances, and batch orchestration.
@@ -29,7 +28,7 @@ Repository guidance for coding agents working in `daisy`.
 - Runtime helpers such as output-path resolution, run context, and JSON snapshots live in `daisy/task/runtime.py`.
 - Task serialization lives in `daisy/task/serialization.py`.
 - Shared config models and transforms live in `daisy/task/shared/`.
-- Shared labeled-data and split/protocol helpers live in `daisy/task/data/`.
+- Shared labeled-data and split helpers live in `daisy/task/data/`.
 - Formal task config models are defined either in `daisy/task/shared/` or `daisy/task/tasks/*/config.py`.
 - Formal runners are under `daisy/task/tasks/*/runner.py`.
 - UI field metadata is centralized in `daisy/task/ui_config.py` and consumed by `daisy/task/ui_builder.py`.
@@ -69,7 +68,7 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 ## Import Conventions
 - Group imports as standard library, third-party packages, then local imports.
 - Separate import groups with blank lines.
-- Prefer absolute imports for cross-package references such as `import daisy` or `from daisy.protocol import ...`.
+- Prefer absolute imports for cross-package references such as `import daisy` or `from daisy.task.data import ...`.
 - Prefer relative imports for close intra-package references inside task modules.
 - If an import is needed only for typing, prefer `TYPE_CHECKING` blocks when that avoids runtime imports.
 - Newer core files often use `from __future__ import annotations`; follow the style of the file you edit.
@@ -89,12 +88,12 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - Use `dataclass` instead of `dict` for structured data.
 
 ## Error Handling And Runtime Behavior
-- Fail fast on invalid config or protocol states.
+- Fail fast on invalid config or split states.
 - Prefer explicit exceptions such as `ValueError`, `FileNotFoundError`, and `RuntimeError`.
 - Keep error messages concrete and parameterized with the invalid value when helpful.
 - Avoid broad `except Exception` unless you are at a user-facing boundary such as CLI or UI glue.
 - In runners, concise `print()` progress output is the established pattern; there is no logging framework standard here.
-- When a task runs, preserve or extend the pattern of writing JSON snapshots and protocol metadata.
+- When a task runs, preserve or extend the pattern of writing JSON snapshots and output metadata.
 
 ## Task System Rules
 - The task registry is the extension point.
@@ -104,7 +103,7 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - New task packages are auto-discovered; do not edit `daisy/task/tasks/__init__.py` to add manual imports.
 - Keep `get_task_type()`, the registry key, and the config `Literal[...]` value in sync.
 - Put cross-task config models in `daisy/task/shared/`, not inside another task's `config.py`.
-- Put reusable labeled-data split and protocol logic in `daisy/task/data/`.
+- Put reusable labeled-data split logic in `daisy/task/data/`.
 - Prefer reusing shared helpers in `daisy/task/runtime.py`, `daisy/task/runner.py`, `daisy/task/data/`, `daisy/task/shared/`, and `daisy/task/tasks/inference_common.py`.
 - Runner UI configuration should go through `get_ui_field_overrides()` and `UIFieldConfig`.
 
@@ -114,15 +113,15 @@ Use uv as virtual env manager. There's a alias `uvac` for activating the uv envi
 - A formal task should explicitly declare `task_type`, `[meta]`, task-specific config, and `[output]`.
 - Formal task metadata should include `title`, `description`, `created_at`, and `commit`; `creator` is strongly recommended.
 - Once a formal task has produced official outputs, do not edit it in place; create a new task file instead.
-- Prefer explicit seeds, manifests, and protocol parameters over hidden defaults.
+- Prefer explicit seeds and split parameters over hidden defaults.
 - Avoid machine-specific notes or assumptions inside task files.
 - Only legacy classification-style task files may omit `task_type`; new task files must declare it explicitly.
 
 ## Formal Experiment Rules
 - Formal experiments should be reproducible, reviewable, and configuration-driven.
-- Prefer explicit seeds, manifests, fixed splits, and recorded protocol parameters over hidden defaults.
+- Prefer explicit seeds, fixed splits, and recorded split parameters over hidden defaults.
 - Output directories should stay traceable to the task file and commit.
-- Preserve task snapshots, protocol snapshots, metrics, and related JSON metadata.
+- Preserve task snapshots, metrics, and related JSON metadata.
 - Mainline experiment execution should be callable through `python -m daisy run <task.toml>`.
 - Do not keep paper-grade or project-grade experiments as one-off scripts.
 

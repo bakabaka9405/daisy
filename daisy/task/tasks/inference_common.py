@@ -8,9 +8,15 @@ from typing import Any, cast
 import torch
 from timm import create_model
 
-from daisy.protocol import normalize_sample_id
 from daisy.model.mae import create_vit_model
 from ..shared import get_classification_transform, get_mae_finetune_val_transform
+
+
+def _relative_sample_id(file_path: Path, *, root: Path) -> str:
+	try:
+		return file_path.resolve().relative_to(root.resolve()).as_posix()
+	except ValueError:
+		return file_path.as_posix()
 
 
 def load_checkpoint_state_dict(checkpoint_path: str | Path) -> dict[str, Any]:
@@ -70,7 +76,7 @@ def build_prediction_rows(
 	for index, (file_path, true_label, pred_label) in enumerate(zip(files, labels, preds)):
 		row: dict[str, Any] = {
 			'file': str(file_path),
-			'sample_id': normalize_sample_id(file_path, id_type='relative_path', root=root),
+			'sample_id': _relative_sample_id(file_path, root=root),
 			'true': int(true_label),
 			'pred': int(pred_label),
 		}

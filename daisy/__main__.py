@@ -3,6 +3,7 @@
 用法:
 	python -m daisy run <task.toml>     # 运行任务
 	python -m daisy list                # 列出所有任务
+	python -m daisy example <task_type> [output]  # 导出示例配置
 	python -m daisy ui                  # 启动 Web UI
 """
 
@@ -22,6 +23,7 @@ def cmd_run(args):
 
 	run_task(task_file, device=args.device)
 
+
 def cmd_list(args):
 	"""列出所有任务"""
 	from daisy.task import load_config
@@ -32,8 +34,6 @@ def cmd_list(args):
 		return
 
 	task_files = sorted(tasks_dir.glob('*.toml'), reverse=True)
-
-
 
 	if not task_files:
 		print('没有找到任务文件')
@@ -61,6 +61,18 @@ def cmd_ui(args):
 		sys.exit(1)
 
 
+def cmd_example(args):
+	"""导出任务示例配置"""
+	from daisy.task import export_example_config
+
+	try:
+		output_path = export_example_config(args.task_type, args.output, force=args.force)
+		print(f'已导出示例配置: {output_path}')
+	except (FileExistsError, ValueError) as e:
+		print(f'导出示例配置失败: {e}')
+		sys.exit(1)
+
+
 def main():
 	parser = argparse.ArgumentParser(
 		description='Daisy - 深度学习训练任务管理工具',
@@ -81,12 +93,20 @@ def main():
 	ui_parser = subparsers.add_parser('ui', help='启动 Web UI')
 	ui_parser.add_argument('--port', '-p', type=int, default=7860, help='端口号')
 
+	# example 命令
+	example_parser = subparsers.add_parser('example', help='导出任务示例配置')
+	example_parser.add_argument('task_type', help='任务类型')
+	example_parser.add_argument('output', nargs='?', help='输出文件路径 (.toml)')
+	example_parser.add_argument('--force', '-f', action='store_true', help='覆盖已存在的文件')
+
 	args = parser.parse_args()
 
 	if args.command == 'run':
 		cmd_run(args)
 	elif args.command == 'list':
 		cmd_list(args)
+	elif args.command == 'example':
+		cmd_example(args)
 	elif args.command == 'ui':
 		cmd_ui(args)
 	else:

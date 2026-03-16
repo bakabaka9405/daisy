@@ -8,11 +8,10 @@ from torchvision.transforms import v2 as transforms, InterpolationMode
 import daisy
 from daisy.model.mae import create_mae_model
 from daisy.dataset import UnlabeledDiskDataset, load_files_from_folder
-from daisy.protocol import apply_split_manifest, assert_collections_disjoint, collect_sample_ids, load_split_manifest
 from daisy.util.transform import ZeroOneNormalize
 from ...base import TaskRunner
 from ...registry import TaskRegistry
-from ...runtime import prepare_task_run, print_task_completed, save_json, save_run_snapshot
+from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from ...ui_config import UIFieldConfig
 from .config import MAEPretrainConfig
 
@@ -127,7 +126,6 @@ class MAEPretrainRunner(TaskRunner):
 		roots = [r.strip() for r in dataset_cfg.root.split(';') if r.strip()]
 		if not roots:
 			raise ValueError('dataset.root is required for mae_pretrain')
-		root_paths = [Path(root) for root in roots]
 		for root in roots:
 			root_files = load_files_from_folder(
 				Path(root),
@@ -136,61 +134,9 @@ class MAEPretrainRunner(TaskRunner):
 			print(f'Loaded {len(root_files)} samples from {root}')
 			files.extend(root_files)
 
-		protocol_snapshot = {
-			'method': 'folder_scan',
-			'roots': roots,
-			'source_tag': dataset_cfg.source_tag,
-			'id_type': dataset_cfg.sample_id_type,
-		}
-
-		if dataset_cfg.sample_manifest:
-			manifest_splits, selection_report = apply_split_manifest(
-				files,
-				[0] * len(files),
-				dataset_cfg.sample_manifest,
-				dataset_root=root_paths,
-				split_names=[dataset_cfg.sample_manifest_split] if dataset_cfg.sample_manifest_split else None,
-				strict=True,
-			)
-			selected_files: list[Path] = []
-			for split_files, _ in manifest_splits.values():
-				selected_files.extend(split_files)
-			files = selected_files
-			protocol_snapshot['method'] = 'manifest'
-			protocol_snapshot['sample_manifest'] = dataset_cfg.sample_manifest
-			protocol_snapshot['sample_manifest_split'] = dataset_cfg.sample_manifest_split
-			protocol_snapshot['selection_report'] = selection_report
-
 		sample_seed = dataset_cfg.sample_seed if dataset_cfg.sample_seed is not None else training_cfg.seed
 		files = sample_files_by_ratio(files, ratio=dataset_cfg.sample_ratio, seed=sample_seed)
-		protocol_snapshot['sample_ratio'] = dataset_cfg.sample_ratio
-		protocol_snapshot['sample_seed'] = sample_seed
-		selected_ids = collect_sample_ids(
-			files,
-			id_type=dataset_cfg.sample_id_type,
-			root=root_paths,
-		)
-		protocol_snapshot['selected_ids'] = selected_ids
-		protocol_snapshot['selected_count'] = len(files)
-
-		if dataset_cfg.reference_manifests:
-			reference_collections = {
-				'unlabeled_pool': selected_ids,
-			}
-			for manifest_path in dataset_cfg.reference_manifests:
-				manifest = load_split_manifest(manifest_path)
-				if manifest.id_type != dataset_cfg.sample_id_type:
-					raise ValueError(f'Leakage reference manifest id_type does not match sample_id_type: {manifest_path}')
-				reference_collections[Path(manifest_path).stem] = manifest.all_ids()
-			assert_collections_disjoint(
-				reference_collections,
-				id_type=dataset_cfg.sample_id_type,
-				context='mae pretrain leakage references',
-			)
-			protocol_snapshot['reference_manifests'] = dataset_cfg.reference_manifests
 		print(f'Total samples: {len(files)}')
-
-		save_json(output_path / 'data_protocol.json', protocol_snapshot)
 		save_run_snapshot(
 			output_path,
 			config,

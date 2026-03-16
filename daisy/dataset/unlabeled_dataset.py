@@ -61,6 +61,6 @@ def load_files_from_folder(root: Path | str, extensions: tuple[str, ...] | None 
 	files = []
 	for ext in extensions:
 		files.extend(root.rglob(f'*{ext}'))
-		files.extend(root.rglob(f'*{ext.upper()}'))
+		# files.extend(root.rglob(f'*{ext.upper()}'))
 
 	return sorted(files)

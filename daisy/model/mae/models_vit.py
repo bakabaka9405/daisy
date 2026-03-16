@@ -89,6 +89,7 @@ def load_mae_pretrained_weights(
 	model: VisionTransformer,
 	checkpoint_path: str,
 	init_head: bool = True,
+	verbose: bool = True,
 ) -> None:
 	"""从 MAE 预训练 checkpoint 加载权重到 ViT 模型
 
@@ -96,6 +97,7 @@ def load_mae_pretrained_weights(
 		model: ViT 模型
 		checkpoint_path: MAE 预训练权重路径
 		init_head: 是否重新初始化分类头
+		verbose: 是否打印加载信息
 	"""
 	checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
 
@@ -119,7 +121,8 @@ def load_mae_pretrained_weights(
 
 	# 加载权重
 	msg = model.load_state_dict(checkpoint_model, strict=False)
-	print(f'Loaded pretrained weights: {msg}')
+	if verbose:
+		print(f'Loaded pretrained weights: {msg}')
 
 	# 重新初始化分类头
 	if init_head:

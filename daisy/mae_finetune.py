@@ -57,13 +57,13 @@ def load_mae_pretrain_checkpoint(
 def mae_finetune(
 	device: torch.device,
 	model: nn.Module,
-	train_dataset: IndexDataset,
-	val_dataset: IndexDataset,
+	dataset: tuple[IndexDataset, IndexDataset] | IndexDataset,
 	num_classes: int,
 	epochs: int,
 	# MAE 特定默认值
 	batch_size: int = 64,
-	blr: float = 1e-3,
+	blr: float | None = 1e-3,
+	lr: float = 0,
 	layer_decay: float = 0.75,
 	weight_decay: float = 0.05,
 	warmup_epochs: int = 5,
@@ -93,7 +93,7 @@ def mae_finetune(
 	Args:
 		device: 训练设备
 		model: ViT 模型 (已加载 MAE 预训练权重)
-		train_dataset: 训练数据集
+		dataset: 数据集 (训练和验证)
 		val_dataset: 验证数据集
 		num_classes: 分类数
 		epochs: 训练轮数
@@ -126,9 +126,10 @@ def mae_finetune(
 		model=model,
 		num_classes=num_classes,
 		epochs=epochs,
-		dataset=(train_dataset, val_dataset),
+		dataset=dataset,
 		# MAE 特定配置
 		blr=blr,
+		lr=lr,
 		layer_decay=layer_decay,
 		weight_decay=weight_decay,
 		warmup_epochs=warmup_epochs,
@@ -145,12 +146,11 @@ def mae_finetune(
 		save_path=save_path,
 		save_freq=save_freq,
 		log_dir=log_dir,
-		drop_last=True,  # MAE finetune 需要 drop_last
-		# MAE 默认启用的功能
-		compute_metrics=False,  # MAE 只关注 acc
-		save_best_metric='acc',
+		drop_last=True,
+		compute_metrics=True,
+		save_best_metric='f1',
 		early_stop=early_stop,
-		early_stop_metric='acc',
+		early_stop_metric='f1',
 		early_stop_patience=early_stop_patience,
 		**kwargs,
 	)

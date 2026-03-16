@@ -29,7 +29,7 @@ from .registry import TaskRegistry
 # 主要接口
 from .runner import load_config, run_task
 
-from .serialization import save_config
+from .serialization import build_example_config, export_example_config, save_config
 from .shared import DatasetConfig, DatasetSplitConfig, InferenceModelConfig, InferenceRuntimeConfig
 from .tasks.classification.config import (
 	ClassificationConfig,
@@ -58,6 +58,8 @@ __all__ = [
 	# 主要接口
 	'load_config',
 	'run_task',
+	'build_example_config',
+	'export_example_config',
 	'save_config',
 	# 共享配置
 	'DatasetConfig',
