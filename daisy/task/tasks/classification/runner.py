@@ -127,7 +127,7 @@ class ClassificationRunner(TaskRunner['ClassificationConfig']):
 		# 训练
 		print('\nStarting training...')
 
-		daisy.classfier_trainer.fast_train_smile(
+		daisy.classifier_trainer.fast_train_smile(
 			device=device,
 			model=model,
 			dataset=(train_dataset, val_dataset),

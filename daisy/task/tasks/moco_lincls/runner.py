@@ -83,7 +83,7 @@ class MoCoLinclsRunner(TaskRunner['MoCoLinclsConfig']):
 		print('\nStarting linear evaluation...')
 		training_cfg = config.training
 
-		daisy.classfier_trainer.train_classifier(
+		daisy.classifier_trainer.train_classifier(
 			device=device,
 			model=model,
 			num_classes=model_cfg.num_classes,

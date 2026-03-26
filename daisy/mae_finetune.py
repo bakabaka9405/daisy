@@ -14,7 +14,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-from daisy.classfier_trainer import TrainResult, train_classifier
+from daisy.classifier_trainer import TrainResult, train_classifier
 from daisy.dataset.index_dataset import IndexDataset
 
 

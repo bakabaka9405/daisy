@@ -89,6 +89,7 @@ def load_mae_pretrained_weights(
 	model: VisionTransformer,
 	checkpoint_path: str,
 	init_head: bool = True,
+	head_init_std: float = 2e-5,
 	verbose: bool = True,
 ) -> None:
 	"""从 MAE 预训练 checkpoint 加载权重到 ViT 模型
@@ -126,6 +127,6 @@ def load_mae_pretrained_weights(
 
 	# 重新初始化分类头
 	if init_head:
-		trunc_normal_(model.head.weight, std=2e-5)  # type: ignore
+		trunc_normal_(model.head.weight, std=head_init_std)  # type: ignore
 		if model.head.bias is not None:
 			nn.init.zeros_(model.head.bias)  # type: ignore
