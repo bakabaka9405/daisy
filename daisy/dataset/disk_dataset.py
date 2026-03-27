@@ -9,6 +9,11 @@ from .index_dataset import IndexDataset
 
 
 class DiskDataset(IndexDataset):
+	file_paths: list[Path]
+	labels: list[int]
+	transform: transforms.Compose | None
+	backend: Literal['pil', 'tensor']
+
 	def __init__(
 		self,
 		file_paths: list[Path],
@@ -47,3 +52,8 @@ class DiskDataset(IndexDataset):
 
 	def take(self, k: int) -> 'DiskDataset':
 		return DiskDataset(self.file_paths[:k], self.labels[:k], self.transform)
+
+	def subset(self, indices: list[int]) -> 'DiskDataset':
+		sub_file_paths = [self.file_paths[i] for i in indices]
+		sub_labels = [self.labels[i] for i in indices]
+		return DiskDataset(sub_file_paths, sub_labels, self.transform, self.backend)

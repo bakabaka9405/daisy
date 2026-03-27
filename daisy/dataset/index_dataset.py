@@ -1,7 +1,9 @@
 from torch import Tensor
 from torch.utils.data import Dataset
 from abc import abstractmethod
-from typing import Any
+from typing import Any, TypeVar
+
+T = TypeVar('T', bound='IndexDataset')
 
 
 class IndexDataset(Dataset):
@@ -35,5 +37,9 @@ class IndexDataset(Dataset):
 		pass
 
 	@abstractmethod
-	def take(self, k: int) -> 'IndexDataset':
+	def take(self: T, k: int) -> T:
+		pass
+
+	@abstractmethod
+	def subset(self: T, indices: list[int]) -> T:
 		pass
