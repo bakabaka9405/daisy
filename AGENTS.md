@@ -11,6 +11,8 @@ Repository guidance for coding agents working in `daisy`.
 
 ## Repository Layout
 - `daisy/`: reusable package code for datasets, models, task configs, runners, data helpers, and utilities.
+- `daisy/analysis/`: analysis utilities for interpretability, statistics, and visualization.
+- `daisy/analysis/mae/`: MAE project-specific analysis tools including ViT Grad Rollout interpretability.
 - `daisy/task/`: registry-driven task system.
 - `daisy/task/tasks/<task_name>/`: task-specific configs and runners.
 - `daisy/task/shared/`: shared task config models and reusable task helpers.
@@ -32,6 +34,7 @@ Repository guidance for coding agents working in `daisy`.
 - Formal task config models are defined either in `daisy/task/shared/` or `daisy/task/tasks/*/config.py`.
 - Formal runners are under `daisy/task/tasks/*/runner.py`.
 - UI field metadata is centralized in `daisy/task/ui_config.py` and consumed by `daisy/task/ui_builder.py`.
+- ViT interpretability (Grad Rollout) is implemented in `daisy/analysis/mae/interpretability.py` for avgpool-based ViT models.
 
 ## Core Commands
 Use direct Python tooling; there is no custom script runner in `pyproject.toml`.
