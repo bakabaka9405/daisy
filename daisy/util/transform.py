@@ -123,7 +123,7 @@ def get_pad_val_transform():
 def get_stretch_train_transform():
 	return transforms.Compose(
 		[
-			transforms.Resize((224, 224)),
+			transforms.RandomResizedCrop((224, 224), scale=(0.8, 1.0), ratio=(1.9, 2.1)),
 			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
 			transforms.RandomHorizontalFlip(),
 			ZeroOneNormalize(),
@@ -131,6 +131,7 @@ def get_stretch_train_transform():
 			# transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
 		]
 	)
+
 
 def get_stretch_linprobe_transform():
 	return transforms.Compose(
@@ -142,6 +143,7 @@ def get_stretch_linprobe_transform():
 			# transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
 		]
 	)
+
 
 def get_stretch_val_transform():
 	return transforms.Compose(

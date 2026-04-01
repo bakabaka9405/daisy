@@ -1,6 +1,7 @@
-from . import classifier_trainer, dataset, feeder, mae_finetune, mae_pretrain, moco_pretrain, util, task, model
+from . import analysis, classifier_trainer, dataset, feeder, mae_finetune, mae_pretrain, moco_pretrain, util, task, model
 
 __all__ = [
+	'analysis',
 	'dataset',
 	'feeder',
 	'util',
