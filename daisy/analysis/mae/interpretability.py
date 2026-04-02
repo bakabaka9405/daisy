@@ -152,7 +152,7 @@ def _compute_patch_query_weights(
 	return weights
 
 
-def _show_cam_on_image(
+def show_cam_on_image(
 	image: torch.Tensor,
 	heatmap: np.ndarray,
 	input_size: int,
@@ -245,6 +245,6 @@ def generate_vit_grad_rollout_heatmap(
 	mask = (mask - mask.min()) / (mask.max() - mask.min() + 1e-8)
 	heatmap = mask.detach().cpu().numpy()
 
-	overlay = _show_cam_on_image(image, heatmap, input_size)
+	overlay = show_cam_on_image(image, heatmap, input_size)
 
 	return heatmap, overlay
