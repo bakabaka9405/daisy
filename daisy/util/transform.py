@@ -159,8 +159,7 @@ def get_stretch_val_transform():
 def get_rectangle_train_transform_slight():
 	return transforms.Compose(
 		[
-			transforms.Resize((120, 230)),
-			transforms.RandomCrop((112, 224)),
+			transforms.RandomResizedCrop((112, 224), scale=(0.9, 1.0), ratio=(1.9, 2.1)),
 			transforms.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.05, hue=0.02),
 			transforms.RandomHorizontalFlip(),
 			ZeroOneNormalize(),
@@ -175,8 +174,7 @@ def get_rectangle_train_transform():
 		[
 			transforms.RandomZoomOut(),
 			transforms.RandomRotation(degrees=(-10, 10), interpolation=InterpolationMode.BILINEAR),
-			transforms.Resize((120, 230)),
-			transforms.RandomCrop((112, 224)),
+			transforms.RandomResizedCrop((112, 224), scale=(0.9, 1.0), ratio=(1.9, 2.1)),
 			transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.2),
 			transforms.RandomHorizontalFlip(),
 			ZeroOneNormalize(),

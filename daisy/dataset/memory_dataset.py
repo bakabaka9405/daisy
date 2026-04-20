@@ -1,9 +1,9 @@
 from torch import Tensor
-from torchvision import transforms
+import torchvision.transforms.v2 as transforms
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
 from .index_dataset import IndexDataset
-from typing import cast
+from typing import cast, Literal
 
 
 class MemoryDataset(IndexDataset):
@@ -16,6 +16,7 @@ class MemoryDataset(IndexDataset):
 		data: list[Path] | list[Tensor],
 		labels: list[int],
 		transform: transforms.Compose | None = None,
+		backend: Literal['pil', 'tensor'] = 'tensor',
 	):
 		if len(data) == 0:
 			self.tensors = []

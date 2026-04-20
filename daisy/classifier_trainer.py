@@ -694,9 +694,10 @@ def fast_train_smile(
 # ============================================================================
 
 
-def fast_eval(device, model, dataset, transform, batch_size=1, num_workers=0):
+def fast_eval(device, model, dataset, transform=None, batch_size=1, num_workers=0):
 	"""快速评估函数"""
-	dataset.setTransform(transform)
+	if transform:
+		dataset.applyTransform(transform)
 	data_loader = MultiEpochsDataLoader(
 		dataset,
 		batch_size=batch_size,
@@ -709,6 +710,7 @@ def fast_eval(device, model, dataset, transform, batch_size=1, num_workers=0):
 	model.eval()
 	y_pred = []
 	y_true = []
+	y_outputs = []
 	with torch.no_grad():
 		for images, label in data_loader:
 			images, label = (
@@ -717,12 +719,14 @@ def fast_eval(device, model, dataset, transform, batch_size=1, num_workers=0):
 			)
 
 			outputs = model(images)
+
 			preds = torch.argmax(outputs, dim=1)
 
 			y_pred.extend(preds.cpu().numpy())
 			y_true.extend(label.cpu().numpy())
+			y_outputs.extend(outputs.cpu().numpy())
 
-	return y_true, y_pred
+	return y_true, y_pred, y_outputs
 
 
 def fast_calc_metrics(y_true, y_pred, num_classes=0):
