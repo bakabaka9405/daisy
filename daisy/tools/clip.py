@@ -3,24 +3,29 @@ import numpy as np
 from pathlib import Path
 
 
-def cv_imread(file_path):
-	cv_img = cv2.imdecode(np.fromfile(file_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+def cv_imread(path: str | Path):
+	cv_img = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_COLOR)
 	return cv_img
 
 
 class ImageClipper:
-	def __init__(self, input_folder, output_folder, max_display_size=800):
-		self.input_folder = Path(input_folder)
-		self.output_folder = Path(output_folder)
+	def __init__(
+		self,
+		input_dir: str | Path,
+		output_dir: str | Path,
+		max_display_size=800,
+	):
+		self.input_dir = Path(input_dir)
+		self.output_dir = Path(output_dir)
 		self.max_display_size = max_display_size
 
 		# 创建输出文件夹
-		self.output_folder.mkdir(exist_ok=True)
+		self.output_dir.mkdir(parents=True, exist_ok=True)
 
 		# 获取所有图片文件
-		self.image_files = []
+		self.img_files = []
 		for ext in ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff']:
-			self.image_files.extend(self.input_folder.glob(ext))
+			self.img_files.extend(self.input_dir.glob(ext))
 
 		self.current_index = 0
 		self.original_image = None
@@ -35,17 +40,17 @@ class ImageClipper:
 
 	def is_current_file_cropped(self):
 		"""检查当前文件是否已被裁剪"""
-		if self.image_files:
-			input_file = self.image_files[self.current_index]
-			output_file = self.output_folder / input_file.name
+		if self.img_files:
+			input_file = self.img_files[self.current_index]
+			output_file = self.output_dir / input_file.name
 			return output_file.exists()
 		return False
 
-	def load_image(self, index):
+	def load_image(self, index: int):
 		"""加载指定索引的图片"""
-		if 0 <= index < len(self.image_files):
+		if 0 <= index < len(self.img_files):
 			self.current_index = index
-			self.original_image = cv_imread(str(self.image_files[index]))
+			self.original_image = cv_imread(self.img_files[index])
 			if self.original_image is not None:
 				self.prepare_display_image()
 				self.reset_crop()
@@ -171,12 +176,12 @@ class ImageClipper:
 			cv2.putText(canvas, orig_text, (10, canvas_height - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
 		# 显示当前文件信息和裁剪状态
-		if self.image_files:
-			filename = self.image_files[self.current_index].name
+		if self.img_files:
+			filename = self.img_files[self.current_index].name
 			cropped_status = '[已裁剪]' if self.is_current_file_cropped() else '[未裁剪]'
 			status_color = (0, 255, 0) if self.is_current_file_cropped() else (0, 255, 255)
 
-			file_text = f'File: {filename} ({self.current_index + 1}/{len(self.image_files)}) {cropped_status}'
+			file_text = f'File: {filename} ({self.current_index + 1}/{len(self.img_files)}) {cropped_status}'
 			cv2.putText(canvas, file_text, (10, canvas_height - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
 
 		# 显示操作提示
@@ -195,15 +200,12 @@ class ImageClipper:
 		cropped_image = self.original_image[top:bottom, left:right]
 
 		# 保存文件
-		input_file = self.image_files[self.current_index]
-		output_file = self.output_folder / input_file.name
+		input_file = self.img_files[self.current_index]
+		output_file = self.output_dir / input_file.name
 
 		# 使用cv2.imencode处理中文路径
 		ext = input_file.suffix.lower()
-		if ext == '.jpg' or ext == '.jpeg':
-			encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
-			ret, encimg = cv2.imencode('.jpg', cropped_image, encode_param)
-		elif ext == '.png':
+		if ext == '.png':
 			encode_param = [int(cv2.IMWRITE_PNG_COMPRESSION), 3]
 			ret, encimg = cv2.imencode('.png', cropped_image, encode_param)
 		else:
@@ -227,8 +229,8 @@ class ImageClipper:
 
 	def run(self):
 		"""运行裁剪工具"""
-		if not self.image_files:
-			print(f'在文件夹 {self.input_folder} 中未找到图片文件')
+		if not self.img_files:
+			print(f'在文件夹 {self.input_dir} 中未找到图片文件')
 			return
 
 		# 加载第一张图片
@@ -259,7 +261,7 @@ class ImageClipper:
 				if self.current_index > 0:
 					self.load_image(self.current_index - 1)
 			elif key == ord('d'):  # D键 - 下一张图片
-				if self.current_index < len(self.image_files) - 1:
+				if self.current_index < len(self.img_files) - 1:
 					self.load_image(self.current_index + 1)
 
 		cv2.destroyAllWindows()

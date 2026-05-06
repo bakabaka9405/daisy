@@ -184,6 +184,7 @@ def exclude_by_label(labels: list[int], target: int, *args: list):
 def filter_by_label(labels: list[int], cond: Any, *args: list):
 	return ([j for j, k in zip(i, labels) if cond(k)] for i in args)
 
+
 if __name__ == '__main__':
 	files = [1, 2, 3, 4]
 	labels = [1, 1, 2, 2]
