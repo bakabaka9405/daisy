@@ -12,10 +12,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
 
+import numpy as np
+
 import daisy
 import torch
 import torch.nn as nn
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+
+from daisy.metrics import auroc_score
 from timm.data.loader import MultiEpochsDataLoader
 from timm.data.mixup import Mixup
 from timm.loss.cross_entropy import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
@@ -83,6 +87,7 @@ class EvalMetrics:
 	precision: float = 0.0
 	recall: float = 0.0
 	f1: float = 0.0
+	auroc: float = 0.0
 	confusion_matrix: list[list[int]] | None = None
 
 	def get_metric(self, name: str) -> float:
@@ -95,6 +100,8 @@ class EvalMetrics:
 			return self.recall
 		elif name == 'f1':
 			return self.f1
+		elif name == 'auroc':
+			return self.auroc
 		else:
 			return 0.0
 
@@ -184,6 +191,7 @@ def evaluate(
 	total_loss = 0.0
 	y_pred = []
 	y_true = []
+	y_outputs_list: list = []
 	num_batches = len(data_loader)
 
 	with torch.no_grad():
@@ -201,6 +209,7 @@ def evaluate(
 			preds = torch.argmax(outputs, dim=1)
 			y_pred.extend(preds.cpu().numpy())
 			y_true.extend(targets.cpu().numpy())
+			y_outputs_list.append(outputs.cpu().numpy())
 
 	# 计算平均值
 	avg_loss = total_loss / num_batches
@@ -214,9 +223,18 @@ def evaluate(
 		rec = recall_score(y_true, y_pred, average='macro', zero_division=0)  # type: ignore[arg-type]
 		f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)  # type: ignore[arg-type]
 		matrix = calc_confusion_matrix(y_true, y_pred, num_classes)
+
+		# 计算 AUROC
+		y_outputs = np.concatenate(y_outputs_list, axis=0)
+		try:
+			auroc_result = auroc_score(y_true, y_outputs, num_classes=num_classes, mode='macro')
+			auroc_val = auroc_result if isinstance(auroc_result, float) else float(auroc_result['macro'])
+		except Exception:
+			auroc_val = 0.0
 	else:
 		prec = rec = f1 = 0.0
 		matrix = None
+		auroc_val = 0.0
 
 	return EvalMetrics(
 		loss=avg_loss,
@@ -224,6 +242,7 @@ def evaluate(
 		precision=float(prec),
 		recall=float(rec),
 		f1=float(f1),
+		auroc=auroc_val,
 		confusion_matrix=matrix,
 	)
 
@@ -361,12 +380,12 @@ def train_classifier(
 	# ========== Early Stopping ==========
 	early_stop: bool = False,
 	early_stop_patience: int = 5,
-	early_stop_metric: Literal['acc', 'acc1', 'prec', 'recall', 'f1'] = 'f1',
+	early_stop_metric: Literal['acc', 'acc1', 'prec', 'recall', 'f1', 'auroc'] = 'f1',
 	# ========== 模型保存 ==========
 	save_path: Path | str | None = None,
 	save_freq: int = 0,  # 定期保存频率 (0 表示禁用)
 	save_best: bool = True,
-	save_best_metric: Literal['acc', 'acc1', 'prec', 'recall', 'f1'] = 'f1',
+	save_best_metric: Literal['acc', 'acc1', 'prec', 'recall', 'f1', 'auroc'] = 'f1',
 	keep_recent: int = 0,  # 保留最近 N 个 checkpoint (0 表示禁用)
 	# ========== 日志 ==========
 	log_dir: Path | str | None = None,
@@ -398,7 +417,7 @@ def train_classifier(
 		# 构建 CSV 表头
 		header_parts = ['epoch', 'lr', 'train_loss', 'train_acc', 'val_loss', 'val_acc']
 		if compute_metrics:
-			header_parts.extend(['precision', 'recall', 'f1'])
+			header_parts.extend(['precision', 'recall', 'f1', 'auroc'])
 		header_parts.append('confusion_matrix')
 		with open(log_file, 'w', encoding='utf-8') as f:
 			f.write(','.join(header_parts) + '\n')
@@ -532,7 +551,7 @@ def train_classifier(
 
 		# 其他指标
 		if compute_metrics:
-			result_str += f', Precision: {val_metrics.precision:.4f}, Recall: {val_metrics.recall:.4f}, F1: {val_metrics.f1:.4f}'
+			result_str += f', Precision: {val_metrics.precision:.4f}, Recall: {val_metrics.recall:.4f}, F1: {val_metrics.f1:.4f}, AUROC: {val_metrics.auroc:.4f}'
 
 		print(result_str)
 
@@ -550,6 +569,7 @@ def train_classifier(
 			'precision': val_metrics.precision,
 			'recall': val_metrics.recall,
 			'f1': val_metrics.f1,
+			'auroc': val_metrics.auroc,
 		}
 		history.append(epoch_record)
 
@@ -564,7 +584,7 @@ def train_classifier(
 				f'{val_metrics.acc:.4f}',
 			]
 			if compute_metrics:
-				log_parts.extend([f'{val_metrics.precision:.4f}', f'{val_metrics.recall:.4f}', f'{val_metrics.f1:.4f}'])
+				log_parts.extend([f'{val_metrics.precision:.4f}', f'{val_metrics.recall:.4f}', f'{val_metrics.f1:.4f}', f'{val_metrics.auroc:.4f}'])
 			log_parts.append(f'"{val_metrics.confusion_matrix}"' if val_metrics.confusion_matrix else '""')
 			with open(log_file, 'a', encoding='utf-8') as f:
 				f.write(','.join(log_parts) + '\n')
@@ -651,7 +671,7 @@ def fast_train_smile(
 	save_path: Path | str | None = None,
 	keep_count: int = 0,
 	save_best: bool = True,
-	cmp_obj: Literal['acc', 'prec', 'recall', 'f1'] = 'f1',
+	cmp_obj: Literal['acc', 'prec', 'recall', 'f1', 'auroc'] = 'f1',
 	show_matrix: bool = True,
 	log_dir: Path | str | None = None,
 ):
