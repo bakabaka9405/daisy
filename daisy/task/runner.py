@@ -56,12 +56,12 @@ def _resolve_task_type(data: dict[str, Any], path: Path) -> tuple[str, dict[str,
 	if unexpected_fields:
 		unexpected_preview = ', '.join(unexpected_fields[:3])
 		raise ValueError(
-			f'Missing task_type in task file: {path}. ' f'Found non-classification fields: {unexpected_preview}. ' 'Please add an explicit task_type.'
+			f'Missing task_type in task file: {path}. Found non-classification fields: {unexpected_preview}. Please add an explicit task_type.'
 		)
 	try:
 		classification_config.model_validate(legacy_data)
 	except ValidationError as exc:
-		raise ValueError(f'Missing task_type in task file: {path}. ' 'Please add an explicit task_type for non-legacy task files.') from exc
+		raise ValueError(f'Missing task_type in task file: {path}. Please add an explicit task_type for non-legacy task files.') from exc
 	return LEGACY_DEFAULT_TASK_TYPE, legacy_data
 
 

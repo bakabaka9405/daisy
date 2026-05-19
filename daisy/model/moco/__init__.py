@@ -31,7 +31,7 @@ def load_moco_pretrained_weights(model: nn.Module, checkpoint_path: str, engine:
 		prefix = 'encoder_q.'
 		for k, v in state_dict.items():
 			if k.startswith(prefix):
-				new_key = k[len(prefix):]
+				new_key = k[len(prefix) :]
 				# 跳过 MLP head (fc.0.*, fc.1.*, fc.2.* 等 Sequential 层)
 				if new_key.startswith('fc.') and new_key.split('.')[1].isdigit():
 					continue
@@ -41,7 +41,7 @@ def load_moco_pretrained_weights(model: nn.Module, checkpoint_path: str, engine:
 		prefix = 'base_encoder.'
 		for k, v in state_dict.items():
 			if k.startswith(prefix):
-				new_key = k[len(prefix):]
+				new_key = k[len(prefix) :]
 				# 跳过 projector head (fc.*, head.* 中的 Sequential 层)
 				parts = new_key.split('.')
 				if len(parts) >= 2 and parts[1].isdigit():

@@ -64,7 +64,7 @@ def mae_pretrain(
 		if isinstance(log_dir, str):
 			log_dir = Path(log_dir)
 		log_dir.mkdir(parents=True, exist_ok=True)
-		log_file = log_dir / f"mae_log_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+		log_file = log_dir / f'mae_log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
 		if not log_file.exists():
 			with open(log_file, 'w', encoding='utf-8') as f:
 				f.write('epoch,lr,train_loss\n')
@@ -160,10 +160,7 @@ def mae_pretrain(
 			# 打印进度
 			if (i + 1) % 20 == 0 or (i + 1) == num_batches:
 				current_lr = optimizer.param_groups[0]['lr']
-				print(
-					f'Epoch [{epoch + 1}/{epochs}] [{i + 1}/{num_batches}] '
-					f'Loss: {loss_value:.4f} LR: {current_lr:.6f}'
-				)
+				print(f'Epoch [{epoch + 1}/{epochs}] [{i + 1}/{num_batches}] Loss: {loss_value:.4f} LR: {current_lr:.6f}')
 
 		train_loss /= num_batches
 		print(f'Epoch {epoch + 1}/{epochs}, Train Loss: {train_loss:.4f}')

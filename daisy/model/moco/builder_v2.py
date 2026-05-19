@@ -85,7 +85,7 @@ class MoCoV2(nn.Module):
 	def _momentum_update_key_encoder(self):
 		"""Momentum update of the key encoder"""
 		for param_q, param_k in zip(self.encoder_q.parameters(), self.encoder_k.parameters()):
-			param_k.data = param_k.data * self.m + param_q.data * (1. - self.m)
+			param_k.data = param_k.data * self.m + param_q.data * (1.0 - self.m)
 
 	@torch.no_grad()
 	def _dequeue_and_enqueue(self, keys: torch.Tensor):
@@ -99,7 +99,7 @@ class MoCoV2(nn.Module):
 			overflow = batch_size - remaining
 			self.queue[:, :overflow] = keys[remaining:].T
 		else:
-			self.queue[:, ptr:ptr + batch_size] = keys.T
+			self.queue[:, ptr : ptr + batch_size] = keys.T
 
 		ptr = (ptr + batch_size) % self.K
 		self.queue_ptr[0] = ptr

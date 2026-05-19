@@ -77,7 +77,7 @@ def moco_pretrain(
 		if isinstance(log_dir, str):
 			log_dir = Path(log_dir)
 		log_dir.mkdir(parents=True, exist_ok=True)
-		log_file = log_dir / f"moco_log_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+		log_file = log_dir / f'moco_log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
 		if not log_file.exists():
 			with open(log_file, 'w', encoding='utf-8') as f:
 				f.write('epoch,lr,train_loss,moco_m\n')
@@ -101,14 +101,21 @@ def moco_pretrain(
 	# ========== 优化器 ==========
 	if optimizer_type == 'lars':
 		from daisy.model.moco.lars import LARS
+
 		optimizer: torch.optim.Optimizer = LARS(
-			model.parameters(), lr=lr, weight_decay=weight_decay, momentum=momentum,
+			model.parameters(),
+			lr=lr,
+			weight_decay=weight_decay,
+			momentum=momentum,
 		)
 	elif optimizer_type == 'adamw':
 		optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 	else:
 		optimizer = torch.optim.SGD(
-			model.parameters(), lr=lr, momentum=momentum, weight_decay=weight_decay,
+			model.parameters(),
+			lr=lr,
+			momentum=momentum,
+			weight_decay=weight_decay,
 		)
 
 	# ========== 学习率调度函数 ==========
@@ -207,10 +214,7 @@ def moco_pretrain(
 			# 打印进度
 			if (i + 1) % 20 == 0 or (i + 1) == num_batches:
 				current_m = get_moco_momentum(epoch, i) if engine == 'v3' else moco_m
-				print(
-					f'Epoch [{epoch + 1}/{epochs}] [{i + 1}/{num_batches}] '
-					f'Loss: {loss_value:.4f} LR: {current_lr:.6f} M: {current_m:.4f}'
-				)
+				print(f'Epoch [{epoch + 1}/{epochs}] [{i + 1}/{num_batches}] Loss: {loss_value:.4f} LR: {current_lr:.6f} M: {current_m:.4f}')
 
 		train_loss /= num_batches
 		current_m = get_moco_momentum(epoch) if engine == 'v3' else moco_m

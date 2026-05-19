@@ -53,7 +53,9 @@ def _warn_undefined_specificity(undefined_count: int, average: AverageMode) -> N
 	if average == 'samples':
 		message = 'Specificity is ill-defined and being set to 0.0 in samples with no negative labels. Use `zero_division` parameter to control this behavior.'
 	elif average == 'binary' or undefined_count == 1:
-		message = 'Specificity is ill-defined and being set to 0.0 due to no negative samples. Use `zero_division` parameter to control this behavior.'
+		message = (
+			'Specificity is ill-defined and being set to 0.0 due to no negative samples. Use `zero_division` parameter to control this behavior.'
+		)
 	else:
 		message = 'Specificity is ill-defined and being set to 0.0 in labels with no negative samples. Use `zero_division` parameter to control this behavior.'
 
@@ -110,7 +112,7 @@ def _resolve_labels(
 
 	if pos_label not in (None, 1):
 		warnings.warn(
-			f'Note that pos_label (set to {pos_label!r}) is ignored when average != \'binary\' (got {average!r}). '
+			f"Note that pos_label (set to {pos_label!r}) is ignored when average != 'binary' (got {average!r}). "
 			'You may use labels=[pos_label] to specify a single positive class.',
 			UserWarning,
 			stacklevel=3,

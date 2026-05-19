@@ -32,20 +32,14 @@ class TaskRegistry:
 	def get_runner(cls, task_type: str) -> type[TaskRunner]:
 		"""获取任务执行器类"""
 		if task_type not in cls._runners:
-			raise ValueError(
-				f'Unknown task type: {task_type}. '
-				f'Available types: {list(cls._runners.keys())}'
-			)
+			raise ValueError(f'Unknown task type: {task_type}. Available types: {list(cls._runners.keys())}')
 		return cls._runners[task_type]
 
 	@classmethod
 	def get_config_class(cls, task_type: str) -> type[BaseTaskConfig]:
 		"""获取任务配置类"""
 		if task_type not in cls._configs:
-			raise ValueError(
-				f'Unknown task type: {task_type}. '
-				f'Available types: {list(cls._configs.keys())}'
-			)
+			raise ValueError(f'Unknown task type: {task_type}. Available types: {list(cls._configs.keys())}')
 		return cls._configs[task_type]
 
 	@classmethod

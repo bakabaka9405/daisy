@@ -63,7 +63,7 @@ class MoCoV3(nn.Module):
 	def _update_momentum_encoder(self, m: float):
 		"""Momentum update of the momentum encoder"""
 		for param_b, param_m in zip(self.base_encoder.parameters(), self.momentum_encoder.parameters()):
-			param_m.data = param_m.data * m + param_b.data * (1. - m)
+			param_m.data = param_m.data * m + param_b.data * (1.0 - m)
 
 	def contrastive_loss(self, q: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
 		# normalize

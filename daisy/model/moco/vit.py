@@ -39,7 +39,7 @@ class VisionTransformerMoCo(VisionTransformer):
 			if isinstance(m, nn.Linear):
 				if 'qkv' in name:
 					# treat the weights of Q, K, V separately
-					val = math.sqrt(6. / float(m.weight.shape[0] // 3 + m.weight.shape[1]))
+					val = math.sqrt(6.0 / float(m.weight.shape[0] // 3 + m.weight.shape[1]))
 					nn.init.uniform_(m.weight, -val, val)
 				else:
 					nn.init.xavier_uniform_(m.weight)
@@ -50,7 +50,7 @@ class VisionTransformerMoCo(VisionTransformer):
 
 		if isinstance(self.patch_embed, PatchEmbed):
 			# xavier_uniform initialization
-			val = math.sqrt(6. / float(3 * reduce(mul, self.patch_embed.patch_size, 1) + self.embed_dim))
+			val = math.sqrt(6.0 / float(3 * reduce(mul, self.patch_embed.patch_size, 1) + self.embed_dim))
 			nn.init.uniform_(self.patch_embed.proj.weight, -val, val)
 			if self.patch_embed.proj.bias is not None:
 				nn.init.zeros_(self.patch_embed.proj.bias)
@@ -60,7 +60,7 @@ class VisionTransformerMoCo(VisionTransformer):
 				if self.patch_embed.proj.bias is not None:
 					self.patch_embed.proj.bias.requires_grad = False
 
-	def build_2d_sincos_position_embedding(self, temperature: float = 10000.):
+	def build_2d_sincos_position_embedding(self, temperature: float = 10000.0):
 		h, w = self.patch_embed.grid_size
 		grid_w = torch.arange(w, dtype=torch.float32)
 		grid_h = torch.arange(h, dtype=torch.float32)
@@ -68,7 +68,7 @@ class VisionTransformerMoCo(VisionTransformer):
 		assert self.embed_dim % 4 == 0, 'Embed dimension must be divisible by 4 for 2D sin-cos position embedding'
 		pos_dim = self.embed_dim // 4
 		omega = torch.arange(pos_dim, dtype=torch.float32) / pos_dim
-		omega = 1. / (temperature ** omega)
+		omega = 1.0 / (temperature**omega)
 		out_w = torch.einsum('m,d->md', [grid_w.flatten(), omega])
 		out_h = torch.einsum('m,d->md', [grid_h.flatten(), omega])
 		pos_emb = torch.cat([torch.sin(out_w), torch.cos(out_w), torch.sin(out_h), torch.cos(out_h)], dim=1)[None, :, :]
@@ -124,8 +124,9 @@ class ConvStem(nn.Module):
 
 	def forward(self, x: torch.Tensor) -> torch.Tensor:
 		B, C, H, W = x.shape
-		assert H == self.img_size[0] and W == self.img_size[1], \
+		assert H == self.img_size[0] and W == self.img_size[1], (
 			f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
+		)
 		x = self.proj(x)
 		if self.flatten:
 			x = x.flatten(2).transpose(1, 2)  # BCHW -> BNC
@@ -135,31 +136,47 @@ class ConvStem(nn.Module):
 
 def vit_small(**kwargs: Any) -> VisionTransformerMoCo:
 	model = VisionTransformerMoCo(
-		patch_size=16, embed_dim=384, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
-		norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+		patch_size=16, embed_dim=384, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs
+	)
 	return model
 
 
 def vit_base(**kwargs: Any) -> VisionTransformerMoCo:
 	model = VisionTransformerMoCo(
-		patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True,
-		norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+		patch_size=16, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4, qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs
+	)
 	return model
 
 
 def vit_conv_small(**kwargs: Any) -> VisionTransformerMoCo:
 	# minus one ViT block
 	model = VisionTransformerMoCo(
-		patch_size=16, embed_dim=384, depth=11, num_heads=12, mlp_ratio=4, qkv_bias=True,
-		norm_layer=partial(nn.LayerNorm, eps=1e-6), embed_layer=ConvStem, **kwargs)
+		patch_size=16,
+		embed_dim=384,
+		depth=11,
+		num_heads=12,
+		mlp_ratio=4,
+		qkv_bias=True,
+		norm_layer=partial(nn.LayerNorm, eps=1e-6),
+		embed_layer=ConvStem,
+		**kwargs,
+	)
 	return model
 
 
 def vit_conv_base(**kwargs: Any) -> VisionTransformerMoCo:
 	# minus one ViT block
 	model = VisionTransformerMoCo(
-		patch_size=16, embed_dim=768, depth=11, num_heads=12, mlp_ratio=4, qkv_bias=True,
-		norm_layer=partial(nn.LayerNorm, eps=1e-6), embed_layer=ConvStem, **kwargs)
+		patch_size=16,
+		embed_dim=768,
+		depth=11,
+		num_heads=12,
+		mlp_ratio=4,
+		qkv_bias=True,
+		norm_layer=partial(nn.LayerNorm, eps=1e-6),
+		embed_layer=ConvStem,
+		**kwargs,
+	)
 	return model
 
 

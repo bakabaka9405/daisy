@@ -145,9 +145,9 @@ def show_image_comparison(
 
 	# 确保标题列表长度与图片数量相同
 	if titles is None:
-		titles = [f'Image {i+1}' for i in range(len(images))]
+		titles = [f'Image {i + 1}' for i in range(len(images))]
 	elif len(titles) < len(images):
-		titles.extend([f'Image {i+1}' for i in range(len(titles), len(images))])
+		titles.extend([f'Image {i + 1}' for i in range(len(titles), len(images))])
 
 	# 如果指定了尺寸，则调整所有图片大小
 	if image_size is not None:
