@@ -71,6 +71,7 @@ def load_feeder_from_sheet(
 	have_header: bool = False,
 	column: int | str = 1,
 	label_offset: int = 0,
+	label_dtype: type = int,
 ):
 	if isinstance(dataset_root, str):
 		dataset_root = Path(dataset_root)
@@ -105,7 +106,7 @@ def load_feeder_from_sheet(
 
 	return Feeder(
 		list(map(lambda x: dataset_root / x, df[df.columns[0]].astype(str).tolist())),
-		list(map(lambda x: x + label_offset, df[column].astype(int).tolist())),
+		list(map(lambda x: x + label_offset, df[column].astype(label_dtype).tolist())),
 	)
 
 

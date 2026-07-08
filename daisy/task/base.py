@@ -76,7 +76,6 @@ class TaskRunner(ABC, Generic[T_Config]):
 		"""执行任务，返回输出路径"""
 		pass
 
-	# ========== UI 钩子方法 ==========
 
 	@classmethod
 	def get_ui_display_name(cls) -> str:

@@ -98,7 +98,7 @@ def moco_pretrain(
 	model.to(device)
 	num_batches = len(data_loader)
 
-	# ========== 优化器 ==========
+	# 优化器
 	if optimizer_type == 'lars':
 		from daisy.model.moco.lars import LARS
 
@@ -118,7 +118,7 @@ def moco_pretrain(
 			weight_decay=weight_decay,
 		)
 
-	# ========== 学习率调度函数 ==========
+	# 学习率调度函数
 	if lr_milestones is None:
 		lr_milestones = [120, 160]
 
@@ -146,7 +146,7 @@ def moco_pretrain(
 				return lr * epoch / max(warmup_epochs, 1e-8)
 			return lr * factor
 
-	# ========== Momentum schedule (v3) ==========
+	# Momentum schedule (v3)
 	def get_moco_momentum(epoch: int, step: int = 0) -> float:
 		if not moco_m_cos:
 			return moco_m
@@ -154,7 +154,7 @@ def moco_pretrain(
 		current = epoch + step / num_batches
 		return 1 - (1 - moco_m) * (1 + math.cos(math.pi * current / epochs)) / 2
 
-	# ========== Loss (v2) ==========
+	# Loss (v2)
 	criterion = nn.CrossEntropyLoss().to(device) if engine == 'v2' else None
 
 	print(f'MoCo {engine} pretraining: {epochs} epochs, lr={lr}, batch_size={batch_size}')

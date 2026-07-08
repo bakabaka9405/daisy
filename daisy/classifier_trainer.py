@@ -28,9 +28,6 @@ from torch.optim import AdamW
 from daisy.dataset import IndexDataset
 
 
-# ============================================================================
-# 辅助类
-# ============================================================================
 
 
 class LRScheduler:
@@ -119,9 +116,6 @@ class TrainResult:
 	history: list[TrainingHistoryEntry] = field(default_factory=list)
 
 
-# ============================================================================
-# 工具函数
-# ============================================================================
 
 
 def calc_confusion_matrix(y_true, y_pred, num_classes: int) -> list[list[int]]:
@@ -167,9 +161,6 @@ def build_optimizer(
 	return AdamW(param_groups, lr=lr, betas=(0.9, 0.999))
 
 
-# ============================================================================
-# 评估函数
-# ============================================================================
 
 
 def evaluate(
@@ -247,9 +238,6 @@ def evaluate(
 	)
 
 
-# ============================================================================
-# 训练循环
-# ============================================================================
 
 
 def train_one_epoch(
@@ -336,9 +324,6 @@ def train_one_epoch(
 	return avg_loss, train_acc
 
 
-# ============================================================================
-# 主训练函数
-# ============================================================================
 
 
 def train_classifier(
@@ -347,47 +332,47 @@ def train_classifier(
 	num_classes: int,
 	epochs: int,
 	dataset: IndexDataset | tuple[IndexDataset, IndexDataset],
-	# ========== 学习率配置 ==========
+	# 学习率配置
 	lr: float = 1e-3,
 	blr: float | None = None,  # 基础学习率 (若提供则 lr = blr * batch_size / 256)
 	min_lr: float = 1e-6,  # 最小学习率 (cosine decay 终点)
 	warmup_epochs: int = 0,
 	weight_decay: float = 1e-4,
-	# ========== Layer-wise LR Decay (MAE finetune) ==========
+	# Layer-wise LR Decay (MAE finetune)
 	layer_decay: float | None = None,  # 若提供则启用 layer-wise lr decay
-	# ========== 数据增强 ==========
+	# 数据增强
 	mixup: float = 0.0,  # Mixup alpha (0 表示禁用)
 	cutmix: float = 0.0,  # CutMix alpha (0 表示禁用)
 	mixup_prob: float = 1.0,  # Mixup/CutMix 应用概率
 	mixup_switch_prob: float = 0.5,  # Mixup 和 CutMix 切换概率
-	# ========== 损失函数 ==========
+	# 损失函数
 	smoothing: float = 0.1,  # Label smoothing
-	# ========== 训练配置 ==========
+	# 训练配置
 	batch_size: int = 128,
 	accum_iter: int = 1,
 	use_amp: bool = True,
 	clip_grad: float | None = None,  # 梯度裁剪 (None 表示禁用)
-	# ========== 数据加载 ==========
+	# 数据加载
 	train_transform=None,
 	val_transform=None,
 	val_ratio: float = 0.1,
 	num_workers: int | tuple[int, int] = 4,
 	pin_memory: bool = True,
 	drop_last: bool = False,
-	# ========== 评估配置 ==========
+	# 评估配置
 	compute_metrics: bool = True,  # 是否计算 precision/recall/f1
 	show_confusion_matrix: bool = False,
-	# ========== Early Stopping ==========
+	# Early Stopping
 	early_stop: bool = False,
 	early_stop_patience: int = 5,
 	early_stop_metric: Literal['acc', 'acc1', 'prec', 'recall', 'f1', 'auroc'] = 'f1',
-	# ========== 模型保存 ==========
+	# 模型保存
 	save_path: Path | str | None = None,
 	save_freq: int = 0,  # 定期保存频率 (0 表示禁用)
 	save_best: bool = True,
 	save_best_metric: Literal['acc', 'acc1', 'prec', 'recall', 'f1', 'auroc'] = 'f1',
 	keep_recent: int = 0,  # 保留最近 N 个 checkpoint (0 表示禁用)
-	# ========== 日志 ==========
+	# 日志
 	log_dir: Path | str | None = None,
 	print_freq: int = 20,  # 训练进度打印频率
 ) -> TrainResult:
@@ -397,19 +382,19 @@ def train_classifier(
 	Returns:
 		TrainResult 包含最佳指标和训练历史
 	"""
-	# ========== 默认 transform ==========
+	# 默认 transform
 	if train_transform is None:
 		train_transform = daisy.util.transform.get_rectangle_train_transform()
 	if val_transform is None:
 		val_transform = daisy.util.transform.get_rectangle_val_transform()
 
-	# ========== 路径处理 ==========
+	# 路径处理
 	if save_path is not None:
 		if isinstance(save_path, str):
 			save_path = Path(save_path)
 		save_path.mkdir(parents=True, exist_ok=True)
 
-	# ========== 日志处理 ==========
+	# 日志处理
 	if log_dir is not None:
 		log_dir = Path(log_dir)
 		log_dir.mkdir(parents=True, exist_ok=True)
@@ -424,7 +409,7 @@ def train_classifier(
 	else:
 		log_file = None
 
-	# ========== 数据集划分 ==========
+	# 数据集划分
 	if isinstance(dataset, tuple):
 		train_dataset, val_dataset = dataset
 	else:
@@ -437,7 +422,7 @@ def train_classifier(
 	if isinstance(num_workers, int):
 		num_workers = (num_workers, num_workers)
 
-	# ========== DataLoader ==========
+	# DataLoader
 	print('Loading dataloaders...')
 	train_loader = MultiEpochsDataLoader(
 		train_dataset,
@@ -458,16 +443,16 @@ def train_classifier(
 
 	model.to(device)
 
-	# ========== 计算实际学习率 ==========
+	# 计算实际学习率
 	if blr is not None:
 		eff_batch_size = batch_size * accum_iter
 		lr = blr * eff_batch_size / 256
 		print(f'Base LR: {blr:.2e}, Effective batch size: {eff_batch_size}, Actual LR: {lr:.2e}')
 
-	# ========== 优化器 ==========
+	# 优化器
 	optimizer = build_optimizer(model, lr=lr, weight_decay=weight_decay, layer_decay=layer_decay)
 
-	# ========== 学习率调度器 ==========
+	# 学习率调度器
 	# 判断是否使用 per-iteration 调整 (MAE 风格)
 	per_iteration = layer_decay is not None or mixup > 0 or cutmix > 0
 	lr_scheduler = LRScheduler(
@@ -480,7 +465,7 @@ def train_classifier(
 		per_iteration=per_iteration,
 	)
 
-	# ========== Mixup/CutMix ==========
+	# Mixup/CutMix
 	mixup_fn = None
 	if mixup > 0 or cutmix > 0:
 		mixup_fn = Mixup(
@@ -493,23 +478,23 @@ def train_classifier(
 			num_classes=num_classes,
 		)
 
-	# ========== 损失函数 ==========
+	# 损失函数
 	criterion = create_criterion(mixup_fn is not None, smoothing)
 	val_criterion = nn.CrossEntropyLoss()  # 验证时不使用 mixup/smoothing
 
 	print('Ready to train...')
 	scaler = torch.GradScaler(enabled=use_amp) if use_amp else None
 
-	# ========== 训练状态 ==========
+	# 训练状态
 	best_epoch = 0
 	best_metrics = EvalMetrics()
 	history: list[TrainingHistoryEntry] = []
 	val_metrics = None
 
 	for epoch in range(epochs):
-		print(f'\n========== Epoch {epoch + 1}/{epochs} ==========')
+		print(f'\n--- Epoch {epoch + 1}/{epochs} ---')
 
-		# ===== Training =====
+		# Training
 		train_loss, train_acc = train_one_epoch(
 			model=model,
 			data_loader=train_loader,
@@ -530,7 +515,7 @@ def train_classifier(
 		if not per_iteration:
 			lr_scheduler.step(epoch + 1)
 
-		# ===== Validation =====
+		# Validation
 		val_metrics = evaluate(
 			model=model,
 			data_loader=val_loader,
@@ -541,7 +526,7 @@ def train_classifier(
 			use_amp=use_amp,
 		)
 
-		# ===== 打印结果 =====
+		# 打印结果
 		current_lr = optimizer.param_groups[0]['lr']
 		result_str = (
 			f'Epoch {epoch + 1}/{epochs}, LR: {current_lr:.6f}, '
@@ -558,7 +543,7 @@ def train_classifier(
 		if show_confusion_matrix and val_metrics.confusion_matrix:
 			print(val_metrics.confusion_matrix)
 
-		# ===== 记录历史 =====
+		# 记录历史
 		epoch_record = {
 			'epoch': epoch + 1,
 			'lr': current_lr,
@@ -573,7 +558,7 @@ def train_classifier(
 		}
 		history.append(epoch_record)
 
-		# ===== 写入日志 =====
+		# 写入日志
 		if log_file is not None:
 			log_parts = [
 				str(epoch + 1),
@@ -589,12 +574,12 @@ def train_classifier(
 			with open(log_file, 'a', encoding='utf-8') as f:
 				f.write(','.join(log_parts) + '\n')
 
-		# ===== 判断是否更好 =====
+		# 判断是否更好
 		current_metric = val_metrics.get_metric(save_best_metric)
 		best_metric = best_metrics.get_metric(save_best_metric)
 		is_better = current_metric > best_metric
 
-		# ===== 保存模型 =====
+		# 保存模型
 		if save_path is not None:
 			# 保留最近 N 个 checkpoint
 			if keep_recent > 0:
@@ -614,12 +599,12 @@ def train_classifier(
 				torch.save(model.state_dict(), save_path / 'best_model.pth')
 				print(f'Saved best model with {save_best_metric}: {current_metric:.4f}')
 
-		# ===== 更新最佳 =====
+		# 更新最佳
 		if is_better:
 			best_metrics = val_metrics
 			best_epoch = epoch
 
-		# ===== Early Stopping =====
+		# Early Stopping
 		if early_stop and epoch - best_epoch >= early_stop_patience:
 			print(f'Early stopping at epoch {epoch + 1}')
 			if log_file is not None:
@@ -640,9 +625,6 @@ def train_classifier(
 	)
 
 
-# ============================================================================
-# 向后兼容别名
-# ============================================================================
 
 
 def fast_train_smile(
@@ -709,9 +691,6 @@ def fast_train_smile(
 	return result
 
 
-# ============================================================================
-# 快速评估函数
-# ============================================================================
 
 
 def fast_eval(device, model, dataset, transform=None, batch_size=1, num_workers=0):

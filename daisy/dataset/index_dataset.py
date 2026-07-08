@@ -1,17 +1,18 @@
 from torch import Tensor
 from torch.utils.data import Dataset
 from abc import abstractmethod
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
+LabelT = TypeVar('LabelT')
 T = TypeVar('T', bound='IndexDataset')
 
 
-class IndexDataset(Dataset):
+class IndexDataset(Dataset, Generic[LabelT]):
 	@abstractmethod
 	def __init__(
 		self,
 		data: list,
-		labels: list,
+		labels: list[LabelT],
 		**kwargs,
 	):
 		pass
@@ -21,11 +22,11 @@ class IndexDataset(Dataset):
 		pass
 
 	@abstractmethod
-	def __getitem__(self, index: int) -> tuple[Tensor, int]:
+	def __getitem__(self, index: int) -> tuple[Tensor, LabelT]:
 		pass
 
 	@abstractmethod
-	def getRawData(self) -> tuple[list, list[int]]:
+	def getRawData(self) -> tuple[list, list[LabelT]]:
 		pass
 
 	@abstractmethod

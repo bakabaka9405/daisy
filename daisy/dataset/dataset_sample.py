@@ -7,7 +7,7 @@ def _get_rng(seed: int | None = None):
 	return numpy.random.default_rng(seed)
 
 
-T = TypeVar('T', bound=IndexDataset)
+T = TypeVar('T', bound='IndexDataset[int]')
 
 
 def balanced_sample(

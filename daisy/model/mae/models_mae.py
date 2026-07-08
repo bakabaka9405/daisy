@@ -40,7 +40,6 @@ class MaskedAutoencoderViT(nn.Module):
 	):
 		super().__init__()
 
-		# --------------------------------------------------------------------------
 		# MAE encoder specifics
 		self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
 		num_patches = self.patch_embed.num_patches
@@ -64,9 +63,7 @@ class MaskedAutoencoderViT(nn.Module):
 			]
 		)
 		self.norm = norm_layer(embed_dim)
-		# --------------------------------------------------------------------------
 
-		# --------------------------------------------------------------------------
 		# MAE decoder specifics
 		self.decoder_embed = nn.Linear(embed_dim, decoder_embed_dim, bias=True)
 
@@ -91,7 +88,6 @@ class MaskedAutoencoderViT(nn.Module):
 
 		self.decoder_norm = norm_layer(decoder_embed_dim)
 		self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True)  # decoder to patch
-		# --------------------------------------------------------------------------
 
 		self.norm_pix_loss = norm_pix_loss
 

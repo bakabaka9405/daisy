@@ -2,19 +2,20 @@ from torch import Tensor
 import torchvision.transforms.v2 as transforms
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
-from .index_dataset import IndexDataset
-from typing import cast, Literal
+from typing import Generic, cast, Literal
+
+from .index_dataset import IndexDataset, LabelT
 
 
-class MemoryDataset(IndexDataset):
+class MemoryDataset(IndexDataset[LabelT], Generic[LabelT]):
 	tensors: list[Tensor]
-	labels: list[int]
+	labels: list[LabelT]
 	transform: transforms.Compose | None
 
 	def __init__(
 		self,
 		data: list[Path] | list[Tensor],
-		labels: list[int],
+		labels: list[LabelT],
 		transform: transforms.Compose | None = None,
 		backend: Literal['pil', 'tensor'] = 'tensor',
 	):
@@ -40,7 +41,7 @@ class MemoryDataset(IndexDataset):
 	def __len__(self) -> int:
 		return len(self.tensors)
 
-	def __getitem__(self, index: int) -> tuple[Tensor, int]:
+	def __getitem__(self, index: int) -> tuple[Tensor, LabelT]:
 		tensor = self.tensors[index]
 		label = self.labels[index]
 
@@ -49,7 +50,7 @@ class MemoryDataset(IndexDataset):
 
 		return tensor, label
 
-	def getRawData(self) -> tuple[list, list[int]]:
+	def getRawData(self) -> tuple[list, list[LabelT]]:
 		return self.tensors, self.labels
 
 	def setTransform(self, transform: transforms.Compose) -> None:
@@ -58,5 +59,5 @@ class MemoryDataset(IndexDataset):
 	def applyTransform(self, transform: transforms.Compose) -> None:
 		self.tensors = [transform(tensor) for tensor in self.tensors]
 
-	def take(self, k: int) -> 'MemoryDataset':
+	def take(self, k: int) -> 'MemoryDataset[LabelT]':
 		return MemoryDataset(self.tensors[:k], self.labels[:k], self.transform)

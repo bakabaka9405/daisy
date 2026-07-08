@@ -2,22 +2,22 @@ from torch import Tensor
 from torchvision.transforms import v2 as transforms
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
-from typing import Literal, Any
+from typing import Generic, Literal, Any, TypeVar
 from PIL import Image
 
-from .index_dataset import IndexDataset
+from .index_dataset import IndexDataset, LabelT
 
 
-class DiskDataset(IndexDataset):
+class DiskDataset(IndexDataset[LabelT], Generic[LabelT]):
 	file_paths: list[Path]
-	labels: list[int]
+	labels: list[LabelT]
 	transform: transforms.Compose | None
 	backend: Literal['pil', 'tensor']
 
 	def __init__(
 		self,
 		file_paths: list[Path],
-		labels: list[int],
+		labels: list[LabelT],
 		transform: transforms.Compose | None = None,
 		backend: Literal['pil', 'tensor'] = 'tensor',
 	):
@@ -29,7 +29,7 @@ class DiskDataset(IndexDataset):
 	def __len__(self) -> int:
 		return len(self.file_paths)
 
-	def __getitem__(self, index: int) -> tuple[Any, int]:
+	def __getitem__(self, index: int) -> tuple[Any, LabelT]:
 		if self.backend == 'pil':
 			img = Image.open(self.file_paths[index])
 		else:
@@ -41,7 +41,7 @@ class DiskDataset(IndexDataset):
 
 		return img, label
 
-	def getRawData(self) -> tuple[list, list[int]]:
+	def getRawData(self) -> tuple[list, list[LabelT]]:
 		return self.file_paths, self.labels
 
 	def setTransform(self, transform: transforms.Compose) -> None:
@@ -50,10 +50,10 @@ class DiskDataset(IndexDataset):
 	def applyTransform(self, transform: transforms.Compose) -> None:
 		self.transform = transform
 
-	def take(self, k: int) -> 'DiskDataset':
+	def take(self, k: int) -> 'DiskDataset[LabelT]':
 		return DiskDataset(self.file_paths[:k], self.labels[:k], self.transform)
 
-	def subset(self, indices: list[int]) -> 'DiskDataset':
+	def subset(self, indices: list[int]) -> 'DiskDataset[LabelT]':
 		sub_file_paths = [self.file_paths[i] for i in indices]
 		sub_labels = [self.labels[i] for i in indices]
 		return DiskDataset(sub_file_paths, sub_labels, self.transform, self.backend)

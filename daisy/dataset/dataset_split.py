@@ -1,19 +1,22 @@
-from .index_dataset import IndexDataset
+from .index_dataset import IndexDataset, LabelT
 import numpy
 from ..util import (
 	gather_list_by_indexes as gather,
 	shuffle_correlated_lists,
 )
 from collections.abc import Generator
+from typing import TypeVar
+
+T = TypeVar('T', bound=IndexDataset)
 
 
 def _get_rng(seed: int | None = None):
 	return numpy.random.default_rng(seed)
 
 
-def split_by_label(dataset: IndexDataset) -> dict[int, list]:
+def split_by_label(dataset: IndexDataset[LabelT]) -> dict[LabelT, list]:
 	"""将数据集按标签分割为多个子集"""
-	label_to_indices: dict[int, list] = {}
+	label_to_indices: dict[LabelT, list] = {}
 	data, labels = dataset.getRawData()
 	for i, j in zip(data, labels):
 		if j not in label_to_indices:
@@ -23,10 +26,10 @@ def split_by_label(dataset: IndexDataset) -> dict[int, list]:
 
 
 def default_data_split(
-	dataset: IndexDataset,
+	dataset: T,
 	val_ratio: float = 0.1,
 	seed: int | None = None,
-) -> tuple[IndexDataset, IndexDataset]:
+) -> tuple[T, T]:
 	dataset_type = type(dataset)
 
 	data, labels = dataset.getRawData()
@@ -43,19 +46,19 @@ def default_data_split(
 
 
 def stratified_data_split(
-	dataset: IndexDataset,
+	dataset: T,
 	val_ratio: float = 0.1,
 	seed: int | None = None,
 	shuffle: bool = True,
-) -> tuple[IndexDataset, IndexDataset]:
+) -> tuple[T, T]:
 	"""按类别分层划分训练/验证集"""
 	dataset_type = type(dataset)
 	data, labels = dataset.getRawData()
 	label_dict = split_by_label(dataset)
 	rng = _get_rng(seed)
 
-	train_pairs: list[tuple[object, int]] = []
-	val_pairs: list[tuple[object, int]] = []
+	train_pairs: list[tuple[object, object]] = []
+	val_pairs: list[tuple[object, object]] = []
 
 	for label, items in label_dict.items():
 		if len(items) < 2:
@@ -83,11 +86,11 @@ def stratified_data_split(
 
 
 def split_by_groups(
-	dataset: IndexDataset,
+	dataset: T,
 	groups: list[str | int],
 	val_ratio: float = 0.1,
 	seed: int | None = None,
-) -> tuple[IndexDataset, IndexDataset]:
+) -> tuple[T, T]:
 	"""按 group 划分，保证同组样本不会跨 split 泄露"""
 	if len(groups) != len(dataset):
 		raise ValueError('groups length must match dataset length')
@@ -123,14 +126,14 @@ def split_by_groups(
 
 
 def minimum_class_proportional_split(
-	dataset: IndexDataset,
+	dataset: T,
 	val_ratio: float = 0.1,
 	val_minimum_size: int = 100,
 	force_fetch_minimum_size: bool = False,
 	val_maximum_ratio: float = 0.5,
 	shuffle: bool = True,
 	seed: int | None = None,
-) -> tuple[IndexDataset, IndexDataset]:
+) -> tuple[T, T]:
 	dataset_type = type(dataset)
 	rng = _get_rng(seed)
 
@@ -176,10 +179,10 @@ def minimum_class_proportional_split(
 
 
 def balanced_k_fold(
-	dataset: IndexDataset,
+	dataset: T,
 	k: int,
 	seed: int | None = None,
-) -> Generator[tuple[IndexDataset, IndexDataset]]:
+) -> Generator[tuple[T, T]]:
 	"""K 折验证，保证同类别样本均匀分布在每一折中"""
 
 	dataset_type = type(dataset)
@@ -202,10 +205,10 @@ def balanced_k_fold(
 
 
 def k_fold(
-	dataset: IndexDataset,
+	dataset: T,
 	k: int,
 	seed: int | None = None,
-) -> Generator[tuple[IndexDataset, IndexDataset]]:
+) -> Generator[tuple[T, T]]:
 	"""K 折验证，类别不均匀的情况下不保证同类别样本均匀分布在每一折中"""
 
 	dataset_type = type(dataset)
@@ -222,7 +225,7 @@ def k_fold(
 		yield dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
 
 
-def trunc_max_class(dataset: IndexDataset):
+def trunc_max_class(dataset: T) -> T:
 	dataset_type = type(dataset)
 	label_dict = split_by_label(dataset)
 	minimum_size = min(len(i) for _, i in label_dict.items())
