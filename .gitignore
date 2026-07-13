@@ -4,3 +4,4 @@ tmp/
 *.egg-info
 proj/
 *.pt
+.slim/deepwork/
