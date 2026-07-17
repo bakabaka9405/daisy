@@ -1,8 +1,9 @@
+from collections.abc import Callable
+
 from torch import Tensor
-import torchvision.transforms.v2 as transforms
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
-from typing import Generic, cast, Literal
+from typing import Any, Generic, cast, Literal
 
 from .index_dataset import IndexDataset, LabelT
 
@@ -10,13 +11,13 @@ from .index_dataset import IndexDataset, LabelT
 class MemoryDataset(IndexDataset[LabelT], Generic[LabelT]):
 	tensors: list[Tensor]
 	labels: list[LabelT]
-	transform: transforms.Compose | None
+	transform: Callable[..., Any] | None
 
 	def __init__(
 		self,
 		data: list[Path] | list[Tensor],
 		labels: list[LabelT],
-		transform: transforms.Compose | None = None,
+		transform: Callable[..., Any] | None = None,
 		backend: Literal['pil', 'tensor'] = 'tensor',
 	):
 		if len(data) == 0:
@@ -53,10 +54,10 @@ class MemoryDataset(IndexDataset[LabelT], Generic[LabelT]):
 	def getRawData(self) -> tuple[list, list[LabelT]]:
 		return self.tensors, self.labels
 
-	def setTransform(self, transform: transforms.Compose) -> None:
+	def setTransform(self, transform: Callable[..., Any]) -> None:
 		self.transform = transform
 
-	def applyTransform(self, transform: transforms.Compose) -> None:
+	def applyTransform(self, transform: Callable[..., Any]) -> None:
 		self.tensors = [transform(tensor) for tensor in self.tensors]
 
 	def take(self, k: int) -> 'MemoryDataset[LabelT]':

@@ -1,5 +1,5 @@
+from collections.abc import Callable
 from torch import Tensor
-from torchvision.transforms import v2 as transforms
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
 from typing import Generic, Literal, Any, TypeVar
@@ -11,14 +11,14 @@ from .index_dataset import IndexDataset, LabelT
 class DiskDataset(IndexDataset[LabelT], Generic[LabelT]):
 	file_paths: list[Path]
 	labels: list[LabelT]
-	transform: transforms.Compose | None
+	transform: Callable[..., Any] | None
 	backend: Literal['pil', 'tensor']
 
 	def __init__(
 		self,
 		file_paths: list[Path],
 		labels: list[LabelT],
-		transform: transforms.Compose | None = None,
+		transform: Callable[..., Any] | None = None,
 		backend: Literal['pil', 'tensor'] = 'tensor',
 	):
 		self.file_paths = file_paths
@@ -44,10 +44,10 @@ class DiskDataset(IndexDataset[LabelT], Generic[LabelT]):
 	def getRawData(self) -> tuple[list, list[LabelT]]:
 		return self.file_paths, self.labels
 
-	def setTransform(self, transform: transforms.Compose) -> None:
+	def setTransform(self, transform: Callable[..., Any]) -> None:
 		self.transform = transform
 
-	def applyTransform(self, transform: transforms.Compose) -> None:
+	def applyTransform(self, transform: Callable[..., Any]) -> None:
 		self.transform = transform
 
 	def take(self, k: int) -> 'DiskDataset[LabelT]':
