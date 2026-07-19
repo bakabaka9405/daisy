@@ -1,11 +1,8 @@
-"""ViT 注意力热力图可视化
+"""ViT token diagnostic 与 avg-pool Chefer attention visualization。
 
-基于 Transformer-Explainability (CVPR 2021) 的 Gradient-weighted Attention Rollout 方法，
-适配 timm VisionTransformer，支持 global_pool='avg' 模式。
-
-参考:
-- Chefer et al., "Transformer Interpretability Beyond Attention Visualization", CVPR 2021
-- https://github.com/hila-chefer/Transformer-Explainability
+官方部分使用 Chefer 的 ``R_A × target gradient`` 与无 row-normalization rollout；
+Daisy 新增 MeanPool relprop 与多 query ``uᵀ(J-I)`` readout。这是 attention
+visualization，不是 input attribution 或因果解释。
 """
 
 from __future__ import annotations
@@ -18,6 +15,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from timm.layers.attention import Attention
+
+from .lrp import ViTAttentionRelevanceExplainer
 
 if TYPE_CHECKING:
 	from timm.models.vision_transformer import VisionTransformer
@@ -165,26 +164,32 @@ def generate_vit_grad_rollout_heatmap(
 	input_size: int = 224,
 	start_layer: int = 0,
 ) -> tuple[np.ndarray, np.ndarray]:
-	"""生成 ViT Gradient-weighted Attention Rollout 热力图。
+	"""生成 token-only legacy gradient-weighted attention rollout 诊断图。
 
-	自动检测 model.global_pool 模式，支持 'avg' 和 'token'。
+	该函数使用原始 softmax attention 与普通 autograd gradient，未执行 attention
+	relprop；它不是 Chefer 论文或官方 Transformer-Explainability 的忠实实现。
 
 	Args:
 		model: timm VisionTransformer 实例（需处于 eval 模式）
 		image: 输入图像 tensor，shape (3, H, W)，已预处理
 		target_class: 目标类别索引
 		input_size: 输出热力图尺寸
-		start_layer: 从哪一层开始 rollout（默认 0，即所有层）
+		start_layer: 从哪一层开始 rollout
 
 	Returns:
 		(heatmap, overlay):
 			- heatmap: ndarray shape (input_size, input_size)，范围 [0, 1]
 			- overlay: ndarray shape (input_size, input_size, 3)，范围 [0, 1]
 	"""
+	if model.global_pool == 'avg':
+		raise ValueError("global_pool='avg' 必须使用 ViTAttentionRelevanceExplainer 与 generate_vit_attention_relevance_heatmap。")
+	if model.global_pool != 'token':
+		raise ValueError(f"Unsupported global_pool={model.global_pool!r}; expected 'token'.")
+
 	device = next(model.parameters()).device
 	input_tensor = image.unsqueeze(0).to(device)
-
 	model.zero_grad()
+	num_prefix = model.num_prefix_tokens
 
 	with torch.enable_grad(), _hook_attention_weights(model) as (all_attentions, all_gradients):
 		tokens = model.forward_features(input_tensor)
@@ -194,29 +199,38 @@ def generate_vit_grad_rollout_heatmap(
 		one_hot[0, target_class] = 1
 		output.backward(gradient=one_hot, retain_graph=False)
 
-	# 梯度通过 backward hook 收集，顺序为反向（最后一层先到）
-	all_gradients = all_gradients[::-1]
-
-	rollout = _compute_grad_rollout(all_attentions, all_gradients, start_layer)
-
-	num_prefix = model.num_prefix_tokens
-	if model.global_pool == 'token':
+		# 梯度通过 backward hook 收集，顺序为反向（最后一层先到）
+		all_gradients = all_gradients[::-1]
+		rollout = _compute_grad_rollout(all_attentions, all_gradients, start_layer)
 		mask = rollout[0, 0, num_prefix:]
-	elif model.global_pool == 'avg':
-		# 完成完整 rollout 后，按分类 head 的 mean pooling 语义聚合 query 行
-		query_start = 0 if model.pool_include_prefix else num_prefix
-		mask = rollout[0, query_start:, num_prefix:].mean(dim=0)
-	else:
-		raise ValueError(f"Unsupported global_pool={model.global_pool!r}; expected 'token' or 'avg'.")
 
 	grid_size = model.patch_embed.grid_size
 	mask = mask.reshape(1, 1, grid_size[0], grid_size[1])
 	mask = F.interpolate(mask, size=(input_size, input_size), mode='bilinear', align_corners=False)
 	mask = mask.squeeze()
-	mask = torch.max(torch.zeros_like(mask), mask)
 	mask = (mask - mask.min()) / (mask.max() - mask.min() + 1e-8)
 	heatmap = mask.detach().cpu().numpy()
 
 	overlay = show_cam_on_image(image, heatmap, input_size)
 
+	return heatmap, overlay
+
+
+def generate_vit_attention_relevance_heatmap(
+	explainer: ViTAttentionRelevanceExplainer,
+	image: torch.Tensor,
+	target_class: int,
+	start_layer: int = 0,
+	input_size: int = 224,
+) -> tuple[np.ndarray, np.ndarray]:
+	"""仅以 bilinear 将 normalized attention relevance 对齐到显示尺寸。"""
+	mask = explainer.generate(image, target_class, start_layer).heatmap
+	if mask.shape != (input_size, input_size):
+		mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=(input_size, input_size), mode='bilinear', align_corners=False).squeeze()
+	maximum = mask.max()
+	mask = mask / maximum if maximum.item() > 0 else torch.zeros_like(mask)
+
+	heatmap = mask.detach().cpu().numpy().astype(np.float32, copy=False)
+	display_image = image[0] if image.ndim == 4 else image
+	overlay = show_cam_on_image(display_image, heatmap, input_size)
 	return heatmap, overlay
