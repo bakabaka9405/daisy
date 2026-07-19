@@ -128,30 +128,6 @@ def _compute_grad_rollout(
 	return _compute_rollout(avg_matrices, start_layer)
 
 
-def _compute_patch_query_weights(
-	tokens: torch.Tensor,
-	token_grads: torch.Tensor,
-	num_prefix: int,
-) -> torch.Tensor:
-	"""基于 patch token 的 Grad x Activation 计算 query 聚合权重。
-
-	在 global_pool='avg' 等模式下，直接对所有 patch query 行做均值会退化为
-	“全局中心性”分布，容易出现热力图过于平坦或与视觉关注相反的现象。
-
-	这里使用每个 patch token 的 (grad * activation).sum 作为 query 权重，再对
-	rollout 的 patch-query 行做加权求和，使结果更接近目标类别的判别贡献。
-	"""
-	patch_tokens = tokens[0, num_prefix:, :]
-	patch_grads = token_grads[0, num_prefix:, :]
-
-	weights = (patch_tokens * patch_grads).sum(dim=-1).clamp(min=0)
-	if weights.sum().detach().item() <= 1e-12:
-		weights = torch.ones_like(weights)
-
-	weights = weights / (weights.sum() + 1e-8)
-	return weights
-
-
 def show_cam_on_image(
 	image: torch.Tensor,
 	heatmap: np.ndarray,
@@ -212,16 +188,11 @@ def generate_vit_grad_rollout_heatmap(
 
 	with torch.enable_grad(), _hook_attention_weights(model) as (all_attentions, all_gradients):
 		tokens = model.forward_features(input_tensor)
-		tokens.retain_grad()
 		output = model.forward_head(tokens)
 
 		one_hot = torch.zeros_like(output)
 		one_hot[0, target_class] = 1
 		output.backward(gradient=one_hot, retain_graph=False)
-
-	token_grads = tokens.grad
-	if token_grads is None:
-		raise RuntimeError('Failed to capture token gradients for ViT rollout heatmap.')
 
 	# 梯度通过 backward hook 收集，顺序为反向（最后一层先到）
 	all_gradients = all_gradients[::-1]
@@ -231,17 +202,18 @@ def generate_vit_grad_rollout_heatmap(
 	num_prefix = model.num_prefix_tokens
 	if model.global_pool == 'token':
 		mask = rollout[0, 0, num_prefix:]
+	elif model.global_pool == 'avg':
+		# 完成完整 rollout 后，按分类 head 的 mean pooling 语义聚合 query 行
+		query_start = 0 if model.pool_include_prefix else num_prefix
+		mask = rollout[0, query_start:, num_prefix:].mean(dim=0)
 	else:
-		# avg / avgmax / max: 使用 Grad x Activation 作为 patch-query 加权
-		patch_rollout = rollout[0, num_prefix:, num_prefix:]
-		patch_query_weights = _compute_patch_query_weights(tokens, token_grads, num_prefix)
-		mask = torch.matmul(patch_query_weights.unsqueeze(0), patch_rollout).squeeze(0)
+		raise ValueError(f"Unsupported global_pool={model.global_pool!r}; expected 'token' or 'avg'.")
 
 	grid_size = model.patch_embed.grid_size
 	mask = mask.reshape(1, 1, grid_size[0], grid_size[1])
 	mask = F.interpolate(mask, size=(input_size, input_size), mode='bilinear', align_corners=False)
 	mask = mask.squeeze()
-
+	mask = torch.max(torch.zeros_like(mask), mask)
 	mask = (mask - mask.min()) / (mask.max() - mask.min() + 1e-8)
 	heatmap = mask.detach().cpu().numpy()
 
