@@ -71,7 +71,10 @@ class Linear(RelProp):
 			first = F.linear(positive_input, first_weight)
 			second = F.linear(negative_input, second_weight)
 			scale = safe_divide(relevance, first + second)
-			return positive_input * torch.autograd.grad(first, positive_input, scale, retain_graph=True)[0] + negative_input * torch.autograd.grad(second, negative_input, scale, retain_graph=True)[0]
+			return (
+				positive_input * torch.autograd.grad(first, positive_input, scale, retain_graph=True)[0]
+				+ negative_input * torch.autograd.grad(second, negative_input, scale, retain_graph=True)[0]
+			)
 
 		return alpha * propagate(positive_weight, negative_weight) - beta * propagate(negative_weight, positive_weight)
 
@@ -103,7 +106,9 @@ class Clone(RelProp):
 		if not isinstance(self.X, torch.Tensor):
 			raise RuntimeError('Clone 缺少前向 activation。')
 		outputs = tuple(self.X for _ in range(self.count))
-		gradients = torch.autograd.grad(outputs, self.X, tuple(safe_divide(item, output) for item, output in zip(relevance, outputs, strict=True)), retain_graph=True)[0]
+		gradients = torch.autograd.grad(
+			outputs, self.X, tuple(safe_divide(item, output) for item, output in zip(relevance, outputs, strict=True)), retain_graph=True
+		)[0]
 		return self.X * gradients
 
 
@@ -211,12 +216,12 @@ class MeanPool(RelProp):
 
 	def forward(self, x: torch.Tensor) -> torch.Tensor:
 		self._capture(x)
-		return x[:, self.prefix_tokens:].mean(dim=1)
+		return x[:, self.prefix_tokens :].mean(dim=1)
 
 	def relprop(self, relevance: torch.Tensor, alpha: float = 1.0) -> torch.Tensor:
 		if not isinstance(self.X, torch.Tensor):
 			raise RuntimeError('MeanPool 缺少前向 activation。')
 		inputs = self.X
-		output = inputs[:, self.prefix_tokens:].mean(dim=1)
+		output = inputs[:, self.prefix_tokens :].mean(dim=1)
 		gradient = torch.autograd.grad(output, inputs, safe_divide(relevance, output), retain_graph=True)[0]
-		return torch.cat((torch.zeros_like(inputs[:, :self.prefix_tokens]), (inputs * gradient)[:, self.prefix_tokens:]), dim=1)
+		return torch.cat((torch.zeros_like(inputs[:, : self.prefix_tokens]), (inputs * gradient)[:, self.prefix_tokens :]), dim=1)
