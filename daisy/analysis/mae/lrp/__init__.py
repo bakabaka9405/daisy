@@ -1,5 +1,5 @@
-"""Avg-pool Chefer transformer-attribution core。"""
+"""Avg-pool Vision Transformer 的 attention relevance 解释器。"""
 
-from .explainer import AttentionRelevanceResult, ViTAttentionRelevanceExplainer
+from .explainer import ViTAttentionRelevanceExplainer
 
-__all__ = ['AttentionRelevanceResult', 'ViTAttentionRelevanceExplainer']
+__all__ = ['ViTAttentionRelevanceExplainer']

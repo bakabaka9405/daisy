@@ -73,7 +73,7 @@ def _hook_attention_weights(model: VisionTransformer):
 
 
 def _compute_rollout(
-	all_layer_matrices: list[torch.Tensor],
+	attention_matrices: list[torch.Tensor],
 	start_layer: int = 0,
 ) -> torch.Tensor:
 	"""Attention Rollout 算法。
@@ -81,13 +81,13 @@ def _compute_rollout(
 	对每层注意力矩阵加 Identity（残差连接），行归一化，然后逐层矩阵乘法。
 
 	Args:
-		all_layer_matrices: 每层的注意力矩阵，shape (batch, num_tokens, num_tokens)
+		attention_matrices: 每层的注意力矩阵，shape (batch, num_tokens, num_tokens)
 		start_layer: 从哪一层开始 rollout
 
 	Returns:
 		rollout 矩阵，shape (batch, num_tokens, num_tokens)
 	"""
-	matrices = all_layer_matrices[start_layer:]
+	matrices = attention_matrices[start_layer:]
 	for i, matrix in enumerate(matrices):
 		eye = torch.eye(matrix.size(-1), device=matrix.device, dtype=matrix.dtype)
 		matrix = matrix + eye
@@ -224,7 +224,7 @@ def generate_vit_attention_relevance_heatmap(
 	input_size: int = 224,
 ) -> tuple[np.ndarray, np.ndarray]:
 	"""仅以 bilinear 将 normalized attention relevance 对齐到显示尺寸。"""
-	mask = explainer.generate(image, target_class, start_layer).heatmap
+	mask = explainer.generate(image, target_class, start_layer)
 	if mask.shape != (input_size, input_size):
 		mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=(input_size, input_size), mode='bilinear', align_corners=False).squeeze()
 	maximum = mask.max()

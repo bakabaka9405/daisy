@@ -1,4 +1,4 @@
-"""timm avg ViT 的最小显式 attention-relevance mirror。"""
+"""在 timm VisionTransformer 上缓存中间量并传播 attention relevance。"""
 
 from __future__ import annotations
 
@@ -8,64 +8,248 @@ from typing import Any, cast
 
 import torch
 from torch import nn
-from torch.nn import functional as F
+from timm.layers.attention import Attention
+from timm.layers.mlp import Mlp
+from timm.models.vision_transformer import Block, VisionTransformer
 
-from .layers import Add, Clone, Dropout, GELU, LayerNorm, Linear, MatMul, MeanPool, RelProp, Sequential, Softmax
+from .layers import add_relprop, clone_relprop, linear_relprop, matmul_relprop, mean_pool_relprop
 
 
 @dataclass(frozen=True, slots=True)
-class ParameterMappingReport:
-	mapped: tuple[tuple[str, str], ...]
-	missing: tuple[str, ...]
-	unexpected: tuple[str, ...]
+class _AttentionCache:
+	qkv_input: torch.Tensor
+	qkv_output: torch.Tensor
+	attention: torch.Tensor
+	proj_input: torch.Tensor
+	output: torch.Tensor
 
 
-class _PatchEmbed(nn.Module):
-	def __init__(self, source: Any) -> None:
-		super().__init__()
-		self.weight = nn.Parameter(source.proj.weight.detach().clone(), requires_grad=False)
-		self.bias = nn.Parameter(source.proj.bias.detach().clone(), requires_grad=False) if source.proj.bias is not None else None
-		self.stride = source.proj.stride
-		self.padding = source.proj.padding
-		self.grid_size = source.grid_size
-
-	def forward(self, x: torch.Tensor) -> torch.Tensor:
-		return F.conv2d(x, self.weight, self.bias, self.stride, self.padding).flatten(2).transpose(1, 2)
+@dataclass(frozen=True, slots=True)
+class _MlpCache:
+	fc1_input: torch.Tensor
+	fc2_input: torch.Tensor
+	output: torch.Tensor
 
 
-class _Attention(nn.Module):
-	def __init__(self, source: Any) -> None:
-		super().__init__()
-		self.num_heads, self.head_dim, self.scale = source.num_heads, source.head_dim, source.scale
-		self.qkv, self.proj = Linear(source.qkv), Linear(source.proj)
-		self.softmax, self.attn_drop, self.proj_drop = Softmax(), Dropout(source.attn_drop), Dropout(source.proj_drop)
-		self.matmul_qk, self.matmul_av = MatMul(), MatMul()
-		self.attention: torch.Tensor | None = None
-		self.attention_gradient: torch.Tensor | None = None
-		self.attention_cam: torch.Tensor | None = None
+@dataclass(frozen=True, slots=True)
+class _BlockCache:
+	x0: torch.Tensor
+	x1: torch.Tensor
+	attention: _AttentionCache
+	mlp: _MlpCache
 
-	def forward(self, x: torch.Tensor) -> torch.Tensor:
-		batch, tokens, _ = x.shape
-		qkv = self.qkv(x).reshape(batch, tokens, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-		query, key, value = qkv.unbind(0)
-		attention = self.attn_drop(self.softmax(self.matmul_qk((query, key.transpose(-2, -1))) * self.scale)).detach().requires_grad_(True)
-		self.attention = attention
-		attention.register_hook(self._save_attention_gradient)
-		x = self.matmul_av((attention, value)).transpose(1, 2).reshape(batch, tokens, -1)
-		return self.proj_drop(self.proj(x))
 
-	def _save_attention_gradient(self, gradient: torch.Tensor) -> None:
-		self.attention_gradient = gradient.detach()
+@dataclass(frozen=True, slots=True)
+class _TimmForwardCache:
+	blocks: tuple[_BlockCache, ...]
+	tokens: torch.Tensor
+	head_inputs: tuple[torch.Tensor, ...]
 
-	def relprop(self, relevance: torch.Tensor) -> torch.Tensor:
-		relevance = self.proj_drop.relprop(relevance)
-		relevance = self.proj.relprop(relevance)
+
+@dataclass(frozen=True, slots=True)
+class _TimmForwardResult:
+	logits: torch.Tensor
+	cache: _TimmForwardCache
+	attention_gradients: tuple[torch.Tensor, ...]
+
+
+class _TimmForwardCapture:
+	"""捕获兼容 fixed-size avg-pool timm VisionTransformer 的前向量。
+
+	调用者须提供沿标准 blocks、avg pool、head 数据流执行的模型；attention 与 MLP 须提供 qkv、proj、fc1、fc2 及 dropout 节点。
+	解释时模型应处于 eval、float32 且关闭 gradient checkpointing；输入为位于模型设备上的单张固定尺寸 float32 图像。
+	LayerScale、q/k normalization、attention pooling 和其他改变该数据流的结构未实现。
+	head 必须可由其 Linear 层逆序传播，中间仅允许不改变 relevance 路径的 GELU 或 Dropout。
+	"""
+
+	def __init__(self, model: VisionTransformer) -> None:
+		self.model = model
+		self._active = False
+
+	def _validate_input(self, image: torch.Tensor, target_index: int) -> None:
+		patch_embed = self.model.patch_embed
+		expected_shape = (1, patch_embed.proj.in_channels, *tuple(patch_embed.img_size))
+		if tuple(image.shape) != expected_shape or image.dtype is not torch.float32:
+			raise ValueError('输入必须匹配固定 PatchEmbed 尺寸并使用 float32。')
+		parameter = next(self.model.parameters())
+		if image.device != parameter.device:
+			raise ValueError('输入必须位于 live 模型设备。')
+		if not isinstance(target_index, int) or target_index < 0:
+			raise ValueError('target_index 超出 logits 范围。')
+
+	def run(self, image: torch.Tensor, target_index: int) -> _TimmForwardResult:
+		if self._active:
+			raise RuntimeError('同一模型的 capture 正在运行。')
+		self._validate_input(image, target_index)
+
+		backbone = self.model
+		blocks = cast(Sequence[Block], backbone.blocks)
+		attention_modules = tuple(cast(Attention, block.attn) for block in blocks)
+		mlps = tuple(cast(Mlp, block.mlp) for block in blocks)
+		norm2s = tuple(cast(nn.LayerNorm, block.norm2) for block in blocks)
+		handles: list[Any] = []
+		fused_flags: list[tuple[Attention, bool]] = []
+		block_inputs: list[torch.Tensor | None] = [None] * len(blocks)
+		norm2_inputs: list[torch.Tensor | None] = [None] * len(blocks)
+		qkv_inputs: list[torch.Tensor | None] = [None] * len(blocks)
+		qkv_outputs: list[torch.Tensor | None] = [None] * len(blocks)
+		attentions: list[torch.Tensor | None] = [None] * len(blocks)
+		proj_inputs: list[torch.Tensor | None] = [None] * len(blocks)
+		attention_outputs: list[torch.Tensor | None] = [None] * len(blocks)
+		fc1_inputs: list[torch.Tensor | None] = [None] * len(blocks)
+		fc2_inputs: list[torch.Tensor | None] = [None] * len(blocks)
+		mlp_outputs: list[torch.Tensor | None] = [None] * len(blocks)
+		tokens: torch.Tensor | None = None
+		head_inputs: list[torch.Tensor] = []
+		expected_head_inputs = sum(isinstance(module, nn.Linear) for module in backbone.head.modules())
+
+		self._active = True
+		try:
+			for attention in attention_modules:
+				fused_flags.append((attention, attention.fused_attn))
+				attention.fused_attn = False  # type: ignore[misc]
+
+			for index, (block, norm2, attention, mlp) in enumerate(zip(blocks, norm2s, attention_modules, mlps, strict=True)):
+				handles.extend(
+					(
+						block.register_forward_pre_hook(
+							lambda _module, inputs, *, index=index: block_inputs.__setitem__(index, inputs[0].detach()), with_kwargs=False
+						),
+						norm2.register_forward_pre_hook(
+							lambda _module, inputs, *, index=index: norm2_inputs.__setitem__(index, inputs[0].detach()), with_kwargs=False
+						),
+						attention.qkv.register_forward_pre_hook(
+							lambda _module, inputs, *, index=index: qkv_inputs.__setitem__(index, inputs[0].detach()), with_kwargs=False
+						),
+						attention.qkv.register_forward_hook(
+							lambda _module, _inputs, output, *, index=index: qkv_outputs.__setitem__(index, output.detach()), with_kwargs=False
+						),
+						attention.proj.register_forward_pre_hook(
+							lambda _module, inputs, *, index=index: proj_inputs.__setitem__(index, inputs[0].detach()), with_kwargs=False
+						),
+						attention.register_forward_hook(
+							lambda _module, _inputs, output, *, index=index: attention_outputs.__setitem__(index, output.detach()), with_kwargs=False
+						),
+						mlp.fc1.register_forward_pre_hook(
+							lambda _module, inputs, *, index=index: fc1_inputs.__setitem__(index, inputs[0].detach()), with_kwargs=False
+						),
+						mlp.fc2.register_forward_pre_hook(
+							lambda _module, inputs, *, index=index: fc2_inputs.__setitem__(index, inputs[0].detach()), with_kwargs=False
+						),
+						mlp.register_forward_hook(
+							lambda _module, _inputs, output, *, index=index: mlp_outputs.__setitem__(index, output.detach()), with_kwargs=False
+						),
+					)
+				)
+
+				def capture_attention(_module: nn.Module, _inputs: tuple[Any, ...], output: Any, *, index: int = index) -> torch.Tensor:
+					leaf = output.detach().requires_grad_(True)
+					attentions[index] = leaf
+					return leaf
+
+				handles.append(attention.attn_drop.register_forward_hook(capture_attention, with_kwargs=False))
+
+			def capture_tokens(_module: nn.Module, _inputs: tuple[Any, ...], output: Any) -> None:
+				nonlocal tokens
+				tokens = output.detach()
+
+			handles.append(backbone.norm.register_forward_hook(capture_tokens, with_kwargs=False))
+			for module in backbone.head.modules():
+				if isinstance(module, nn.Linear):
+					handles.append(
+						module.register_forward_pre_hook(lambda _module, inputs: head_inputs.append(inputs[0].detach()), with_kwargs=False)
+					)
+
+			logits = self.model(image)
+			if logits.ndim != 2 or target_index >= logits.shape[1]:
+				raise ValueError('target_index 超出 logits 范围。')
+			expected_tokens = backbone.num_prefix_tokens + backbone.patch_embed.num_patches
+			if tokens is None or tuple(tokens.shape) != (image.shape[0], expected_tokens, backbone.embed_dim):
+				raise RuntimeError('前向 token 数量不匹配。')
+			if any(value is None for value in attentions):
+				raise RuntimeError('缺少 attention leaf。')
+			attention_leaves = tuple(cast(torch.Tensor, value) for value in attentions)
+			gradients = torch.autograd.grad(logits[0, target_index], attention_leaves)
+			all_cache_values = (
+				*block_inputs,
+				*norm2_inputs,
+				*qkv_inputs,
+				*qkv_outputs,
+				*proj_inputs,
+				*attention_outputs,
+				*fc1_inputs,
+				*fc2_inputs,
+				*mlp_outputs,
+				tokens,
+			)
+			if any(value is None for value in all_cache_values):
+				raise RuntimeError('前向 cache 不完整。')
+			if len(head_inputs) != expected_head_inputs:
+				raise RuntimeError('head 前向 cache 不完整。')
+			cache = _TimmForwardCache(
+				blocks=tuple(
+					_BlockCache(
+						x0=cast(torch.Tensor, block_inputs[index]),
+						x1=cast(torch.Tensor, norm2_inputs[index]),
+						attention=_AttentionCache(
+							cast(torch.Tensor, qkv_inputs[index]),
+							cast(torch.Tensor, qkv_outputs[index]),
+							attention_leaves[index],
+							cast(torch.Tensor, proj_inputs[index]),
+							cast(torch.Tensor, attention_outputs[index]),
+						),
+						mlp=_MlpCache(
+							cast(torch.Tensor, fc1_inputs[index]), cast(torch.Tensor, fc2_inputs[index]), cast(torch.Tensor, mlp_outputs[index])
+						),
+					)
+					for index in range(len(blocks))
+				),
+				tokens=cast(torch.Tensor, tokens),
+				head_inputs=tuple(head_inputs),
+			)
+			return _TimmForwardResult(logits.detach(), cache, tuple(gradient.detach() for gradient in gradients))
+		finally:
+			for handle in reversed(handles):
+				handle.remove()
+			for attention, fused_attn in fused_flags:
+				attention.fused_attn = fused_attn  # type: ignore[misc]
+			self._active = False
+
+
+@dataclass(frozen=True, slots=True)
+class _TimmRelpropResult:
+	attention_relevance: tuple[torch.Tensor, ...]
+	attention_gradients: tuple[torch.Tensor, ...]
+
+
+class _TimmRelpropEngine:
+	def __init__(self, model: VisionTransformer) -> None:
+		self.model = model
+		self._capture = _TimmForwardCapture(model)
+
+	@staticmethod
+	def _activation(value: torch.Tensor) -> torch.Tensor:
+		return value.detach().requires_grad_(True)
+
+	def _head_relprop(self, cache: _TimmForwardCache, relevance: torch.Tensor) -> torch.Tensor:
+		backbone = self.model
+		linears = tuple(module for module in backbone.head.modules() if isinstance(module, nn.Linear))
+		if len(linears) != len(cache.head_inputs):
+			raise RuntimeError('head cache 与 Linear 数量不一致。')
+		for module, inputs in zip(reversed(linears), reversed(cache.head_inputs), strict=True):
+			relevance = linear_relprop(self._activation(inputs), module.weight.detach(), relevance)
+		return relevance
+
+	def _attention_relprop(self, block: Block, cache: _AttentionCache, relevance: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+		attention_module = cast(Attention, block.attn)
+		relevance = linear_relprop(self._activation(cache.proj_input), attention_module.proj.weight.detach(), relevance)
 		batch, tokens, _ = relevance.shape
-		relevance = relevance.reshape(batch, tokens, self.num_heads, self.head_dim).transpose(1, 2)
-		relevance_attention, relevance_value = self.matmul_av.relprop(relevance)
-		relevance_attention, relevance_value = relevance_attention / 2, relevance_value / 2
-		self.attention_cam = relevance_attention.detach()
-		relevance_query, relevance_key = self.matmul_qk.relprop(self.softmax.relprop(self.attn_drop.relprop(relevance_attention)))
+		relevance = relevance.reshape(batch, tokens, attention_module.num_heads, attention_module.head_dim).transpose(1, 2)
+		qkv = cache.qkv_output.detach().reshape(batch, tokens, 3, attention_module.num_heads, attention_module.head_dim).permute(2, 0, 3, 1, 4)
+		query, key, value = (self._activation(item) for item in qkv.unbind(0))
+		attention, relevance_value = matmul_relprop(self._activation(cache.attention), value, relevance)
+		attention, relevance_value = attention / 2, relevance_value / 2
+		relevance_query, relevance_key = matmul_relprop(query, key.transpose(-2, -1), attention)
 		relevance_qkv = torch.cat(
 			(
 				relevance_query.transpose(1, 2).reshape(batch, tokens, -1) / 2,
@@ -74,174 +258,30 @@ class _Attention(nn.Module):
 			),
 			dim=-1,
 		)
-		return self.qkv.relprop(relevance_qkv)
+		return linear_relprop(self._activation(cache.qkv_input), attention_module.qkv.weight.detach(), relevance_qkv), attention.detach()
 
-	def clear_cache(self) -> None:
-		self.attention = self.attention_gradient = self.attention_cam = None
-		for module in self.modules():
-			if isinstance(module, RelProp):
-				module.clear_cache()
+	def _block_relprop(self, block: Block, cache: _BlockCache, relevance: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+		mlp = cast(Mlp, block.mlp)
+		left, right = add_relprop((self._activation(cache.x1), self._activation(cache.mlp.output)), relevance)
+		right = linear_relprop(self._activation(cache.mlp.fc2_input), mlp.fc2.weight.detach(), right)
+		right = linear_relprop(self._activation(cache.mlp.fc1_input), mlp.fc1.weight.detach(), right)
+		relevance = clone_relprop(self._activation(cache.x1), (left, right))
+		left, right = add_relprop((self._activation(cache.x0), self._activation(cache.attention.output)), relevance)
+		right, attention = self._attention_relprop(block, cache.attention, right)
+		return clone_relprop(self._activation(cache.x0), (left, right)), attention
 
-
-class _Mlp(nn.Module):
-	def __init__(self, source: Any) -> None:
-		super().__init__()
-		self.fc1, self.act, self.drop1 = Linear(source.fc1), GELU(), Dropout(source.drop1)
-		self.fc2, self.drop2 = Linear(source.fc2), Dropout(source.drop2)
-
-	def forward(self, x: torch.Tensor) -> torch.Tensor:
-		return self.drop2(self.fc2(self.drop1(self.act(self.fc1(x)))))
-
-	def relprop(self, relevance: torch.Tensor) -> torch.Tensor:
-		return self.fc1.relprop(self.act.relprop(self.drop1.relprop(self.fc2.relprop(self.drop2.relprop(relevance)))))
-
-
-class _Block(nn.Module):
-	def __init__(self, source: Any) -> None:
-		super().__init__()
-		self.norm1, self.attn, self.norm2, self.mlp = LayerNorm(source.norm1), _Attention(source.attn), LayerNorm(source.norm2), _Mlp(source.mlp)
-		self.clone1, self.add1, self.clone2, self.add2 = Clone(), Add(), Clone(), Add()
-
-	def forward(self, x: torch.Tensor) -> torch.Tensor:
-		left, right = self.clone1(x, 2)
-		x = self.add1((left, self.attn(self.norm1(right))))
-		left, right = self.clone2(x, 2)
-		return self.add2((left, self.mlp(self.norm2(right))))
-
-	def relprop(self, relevance: torch.Tensor) -> torch.Tensor:
-		left, right = self.add2.relprop(relevance)
-		relevance = self.clone2.relprop((left, self.norm2.relprop(self.mlp.relprop(right))))
-		left, right = self.add1.relprop(relevance)
-		return self.clone1.relprop((left, self.norm1.relprop(self.attn.relprop(right))))
-
-
-def _head(module: nn.Module) -> RelProp:
-	if isinstance(module, nn.Linear):
-		return Linear(module)
-	if isinstance(module, nn.GELU):
-		return GELU()
-	if isinstance(module, nn.Dropout):
-		return Dropout(module)
-	raise ValueError(f'不支持 head 模块 {type(module).__name__}。')
-
-
-class LRPVisionTransformer(nn.Module):
-	def __init__(self, source: Any, head_modules: Sequence[nn.Module]) -> None:
-		super().__init__()
-		self.num_prefix_tokens = source.num_prefix_tokens
-		self.patch_embed = _PatchEmbed(source.patch_embed)
-		self.cls_token = nn.Parameter(source.cls_token.detach().clone(), requires_grad=False)
-		self.pos_embed = nn.Parameter(source.pos_embed.detach().clone(), requires_grad=False)
-		self.pos_drop, self.blocks, self.norm = (
-			Dropout(source.pos_drop),
-			nn.ModuleList(_Block(block) for block in source.blocks),
-			LayerNorm(source.norm),
-		)
-		self.mean_pool, self.fc_norm, self.head_drop = MeanPool(self.num_prefix_tokens), LayerNorm(source.fc_norm), Dropout(source.head_drop)
-		converted = [_head(module) for module in head_modules]
-		self.head: RelProp | Sequential = converted[0] if len(converted) == 1 else Sequential(converted)
-		self.parameter_mapping = ParameterMappingReport((), (), ())
-
-	@classmethod
-	def from_timm(cls, model: nn.Module) -> LRPVisionTransformer:
-		if model.training:
-			raise ValueError('仅支持 eval 模型。')
-		if isinstance(model, nn.Sequential):
-			children = list(model.children())
-			if len(children) < 2:
-				raise ValueError('Sequential 必须包含 backbone 与 head。')
-			backbone: Any = children[0]
-			heads = children[1:]
-			prefix, head_prefixes = '0.', tuple(f'{index}.' for index in range(1, len(children)))
-		else:
-			backbone = model
-			source_head = cast(nn.Module, backbone.head)
-			heads = list(source_head.children()) if isinstance(source_head, nn.Sequential) else [source_head]
-			prefix, head_prefixes = (
-				'',
-				tuple(f'head.{index}.' for index in range(len(heads))) if isinstance(source_head, nn.Sequential) else ('head.',),
+	def run(self, image: torch.Tensor, target_index: int) -> _TimmRelpropResult:
+		with torch.enable_grad():
+			forward = self._capture.run(image, target_index)
+			seed = torch.zeros_like(forward.logits)
+			seed[0, target_index] = 1
+			relevance = mean_pool_relprop(
+				self._activation(forward.cache.tokens), self._head_relprop(forward.cache, seed), self.model.num_prefix_tokens
 			)
-		if (
-			backbone.global_pool != 'avg'
-			or backbone.num_prefix_tokens != 1
-			or backbone.pool_include_prefix is not False
-			or backbone.no_embed_class is not False
-		):
-			raise ValueError('仅支持单 CLS、global_pool=avg 的标准配置。')
-		if backbone.cls_token is None or backbone.pos_embed is None or not isinstance(backbone.patch_embed.norm, nn.Identity):
-			raise ValueError('需要 cls/pos embedding 与 Identity patch norm。')
-		if backbone.patch_drop.__class__ is not nn.Identity or backbone.norm_pre.__class__ is not nn.Identity:
-			raise ValueError('不支持 patch_drop 或 norm_pre。')
-		for block in backbone.blocks:
-			if (
-				not isinstance(block.ls1, nn.Identity)
-				or not isinstance(block.ls2, nn.Identity)
-				or not isinstance(block.attn.q_norm, nn.Identity)
-				or not isinstance(block.attn.k_norm, nn.Identity)
-				or not isinstance(block.attn.norm, nn.Identity)
-				or not isinstance(block.mlp.norm, nn.Identity)
-				or not isinstance(block.mlp.act, nn.GELU)
-			):
-				raise ValueError('不支持当前 ViT 结构变体。')
-		mirror = cls(backbone, heads).eval()
-		mirror._map(model, backbone, prefix, heads, head_prefixes)
-		return mirror
-
-	def _map(self, source: nn.Module, backbone: nn.Module, prefix: str, heads: Sequence[nn.Module], head_prefixes: Sequence[str]) -> None:
-		pairs = [
-			(f'{prefix}{name}', name.replace('patch_embed.proj.', 'patch_embed.'))
-			for name, _ in backbone.named_parameters()
-			if not name.startswith('head.')
-		]
-		for index, (module, source_prefix) in enumerate(zip(heads, head_prefixes, strict=True)):
-			for name, _ in module.named_parameters():
-				pairs.append((f'{source_prefix}{name}', f'head.{name}' if len(heads) == 1 else f'head.modules_list.{index}.{name}'))
-		source_parameters, mirror_parameters = dict(source.named_parameters()), dict(self.named_parameters())
-		mapped_source, mapped_mirror = {a for a, _ in pairs}, {b for _, b in pairs}
-		self.parameter_mapping = ParameterMappingReport(
-			tuple(pairs),
-			tuple(name for name in source_parameters if name not in mapped_source),
-			tuple(name for name in mirror_parameters if name not in mapped_mirror),
-		)
-		if self.parameter_mapping.missing or self.parameter_mapping.unexpected:
-			raise RuntimeError(f'参数映射不完整: {self.parameter_mapping}')
-		for source_name, mirror_name in pairs:
-			if source_parameters[source_name].shape != mirror_parameters[mirror_name].shape or not torch.equal(
-				source_parameters[source_name], mirror_parameters[mirror_name]
-			):
-				raise ValueError(f'参数映射不一致: {source_name}->{mirror_name}')
-
-	def forward_with_stages(self, image: torch.Tensor) -> dict[str, torch.Tensor]:
-		x = self.patch_embed(image)
-		stages = {'patch_embed': x}
-		x = self.pos_drop(torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), 1) + self.pos_embed)
-		stages['position'] = x
-		for index, block in enumerate(self.blocks):
-			x = block(x)
-			if index == 0:
-				stages['block0'] = x
-		stages['last_block'] = x
-		x = self.norm(x)
-		x = self.mean_pool(x)
-		stages['mean_pool'] = x
-		x = self.fc_norm(x)
-		stages['fc_norm'] = x
-		stages['logits'] = self.head(self.head_drop(x))
-		return stages
-
-	def forward(self, image: torch.Tensor) -> torch.Tensor:
-		return self.forward_with_stages(image)['logits']
-
-	def relprop_to_block0(self, relevance: torch.Tensor) -> torch.Tensor:
-		relevance = self.head.relprop(relevance)
-		relevance = self.head_drop.relprop(relevance)
-		relevance = self.fc_norm.relprop(relevance)
-		relevance = self.mean_pool.relprop(relevance)
-		relevance = self.norm.relprop(relevance)
-		for block in reversed(self.blocks):
-			relevance = cast(_Block, block).relprop(relevance)
-		return relevance
-
-	def clear_cache(self) -> None:
-		for module in self.blocks:
-			cast(_Block, module).attn.clear_cache()
+			blocks = cast(Sequence[Block], self.model.blocks)
+			attention_relevance: list[torch.Tensor | None] = [None] * len(blocks)
+			for index in reversed(range(len(blocks))):
+				relevance, attention_relevance[index] = self._block_relprop(blocks[index], forward.cache.blocks[index], relevance)
+			if any(value is None for value in attention_relevance):
+				raise RuntimeError('attention relevance 不完整。')
+			return _TimmRelpropResult(tuple(cast(torch.Tensor, value) for value in attention_relevance), forward.attention_gradients)
