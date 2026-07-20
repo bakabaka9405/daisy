@@ -132,6 +132,16 @@ def get_stretch_train_transform():
 		]
 	)
 
+def get_stretch_train_transform_slight():
+	return transforms.Compose(
+		[
+			transforms.Resize((224, 224)),
+			transforms.RandomHorizontalFlip(),
+			ZeroOneNormalize(),
+			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+			# transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+		]
+	)
 
 def get_stretch_linprobe_transform():
 	return transforms.Compose(

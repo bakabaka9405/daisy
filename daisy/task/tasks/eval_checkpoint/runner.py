@@ -53,7 +53,7 @@ class EvalCheckpointRunner(TaskRunner['EvalCheckpointConfig']):
 
 		model = create_inference_model(config.model)
 		transform = get_inference_transform(config.model, runtime_cfg)
-		y_true, y_pred = daisy.classifier_trainer.fast_eval(
+		y_true, y_pred, _ = daisy.classifier_trainer.fast_eval(
 			device,
 			model,
 			eval_dataset,

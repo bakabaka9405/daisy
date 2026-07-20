@@ -58,34 +58,42 @@ class CosineAnnealingLR(Plugin):
         return self.min_lr + (self.lr - self.min_lr) * 0.5 * (1.0 + math.cos(math.pi * progress))
 
     def _step(self, state: TrainState) -> None:
+        optimizer = state.optimizer
+        if optimizer is None:
+            raise RuntimeError('CosineAnnealingLR 需要 optimizer。')
+
         if self.per_iteration:
             frac = state.epoch + state.batch_idx / max(state.total_batches, 1)
         else:
             frac = float(state.epoch)
         lr = self._calc_lr(frac, state.total_epochs)
-        for pg in state.optimizer.param_groups:
+        for pg in optimizer.param_groups:
             pg['lr'] = lr * pg.get('lr_scale', 1.0)
 
 
 class Eval(Plugin):
-    """每个 epoch 后调用 ``eval_fn(model, device)`` 执行验证。
+    """每个 epoch 后调用 ``eval_fn(trainer)`` 执行验证。
 
     结果保存在 ``metrics`` 中，供依赖此实例的插件读取。
 
     用法：
-        evaluator = Eval(eval_fn=lambda model, device: {'pc': ..., 'mae': ...})
+        evaluator = Eval(eval_fn=lambda trainer: {'pc': ..., 'mae': ...})
         best = BestModel(evaluator, watch_metric='pc')
     """
 
-    def __init__(self, eval_fn: Callable):
+    def __init__(self, eval_fn: Callable[[Trainer], dict[str, float]]):
         self.eval_fn = eval_fn
         self.metrics: dict[str, float] = {}
+        self._trainer: Trainer | None = None
 
     def register(self, trainer: Trainer) -> None:
+        self._trainer = trainer
         trainer.on_epoch_end(self._eval)
 
     def _eval(self, state: TrainState) -> None:
-        self.metrics = self.eval_fn(state.model, state.device)
+        if self._trainer is None:
+            raise RuntimeError('Eval 尚未注册到 Trainer。')
+        self.metrics = self.eval_fn(self._trainer)
 
 
 class BestModel(Plugin):
@@ -160,7 +168,6 @@ class EarlyStop(Plugin):
             if self._wait >= self.patience:
                 print(
                     f'Early stopping at epoch {state.epoch + 1} '
-                    f'({self.watch_metric} 连续 {self.patience} epoch 未改善)'
                 )
                 state.extras['stop_training'] = True
 

@@ -10,7 +10,7 @@
     from daisy.training import Trainer
     from daisy.training.plugins import CosineAnnealingLR, Eval, BestModel, EpochPrint, CSVLog
 
-    evaluator = Eval(eval_fn=lambda m, d: evaluate_regression(m, val_loader, d))
+    evaluator = Eval(eval_fn=lambda trainer: evaluate_regression(trainer.inference(val_loader), val_targets))
     trainer = (
         Trainer(model, AdamW(model.parameters(), lr=1e-3), nn.MSELoss(), device)
         .after_forward(lambda s, out: out.squeeze(-1))
@@ -28,7 +28,7 @@
 
     from daisy.training.plugins import Mixup, EarlyStop
 
-    evaluator = Eval(eval_fn=lambda m, d: evaluate_classifier(m, val_loader, d))
+    evaluator = Eval(eval_fn=lambda trainer: evaluate_classifier(trainer.inference(val_loader), val_targets))
     trainer = (
         Trainer(model, optimizer, SoftTargetCrossEntropy(), device)
         .use(

@@ -5,3 +5,4 @@ tmp/
 proj/
 *.pt
 .slim/deepwork/
+tests/

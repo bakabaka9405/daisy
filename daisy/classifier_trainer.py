@@ -12,8 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, cast
 
-import numpy as np
-
 import daisy
 import torch
 import torch.nn as nn
@@ -26,6 +24,7 @@ from timm.loss.cross_entropy import LabelSmoothingCrossEntropy, SoftTargetCrossE
 from torch.optim import AdamW
 
 from daisy.dataset import IndexDataset
+from daisy.training import Trainer
 
 
 
@@ -164,13 +163,11 @@ def build_optimizer(
 
 
 def evaluate(
-	model: nn.Module,
-	data_loader: torch.utils.data.DataLoader,
+	scores: torch.Tensor,
+	targets: torch.Tensor,
 	criterion: nn.Module,
-	device: torch.device,
 	num_classes: int,
 	compute_metrics: bool = True,
-	use_amp: bool = True,
 ) -> EvalMetrics:
 	"""
 	模型评估
@@ -178,32 +175,9 @@ def evaluate(
 	Args:
 		compute_metrics: 是否计算 precision/recall/f1
 	"""
-	model.eval()
-	total_loss = 0.0
-	y_pred = []
-	y_true = []
-	y_outputs_list: list = []
-	num_batches = len(data_loader)
-
-	with torch.no_grad():
-		for images, targets in data_loader:
-			images = images.to(device, non_blocking=True)
-			targets = targets.to(device, non_blocking=True)
-
-			with torch.autocast('cuda', enabled=use_amp):
-				outputs = model(images)
-				loss = criterion(outputs, targets)
-
-			total_loss += loss.item()
-
-			# 收集预测结果
-			preds = torch.argmax(outputs, dim=1)
-			y_pred.extend(preds.cpu().numpy())
-			y_true.extend(targets.cpu().numpy())
-			y_outputs_list.append(outputs.cpu().numpy())
-
-	# 计算平均值
-	avg_loss = total_loss / num_batches
+	loss = criterion(scores.float(), targets)
+	y_pred = torch.argmax(scores, dim=1).numpy()
+	y_true = targets.numpy()
 
 	# 准确率
 	acc = accuracy_score(y_true, y_pred)
@@ -216,10 +190,10 @@ def evaluate(
 		matrix = calc_confusion_matrix(y_true, y_pred, num_classes)
 
 		# 计算 AUROC
-		y_outputs = np.concatenate(y_outputs_list, axis=0)
+		y_outputs = scores.numpy()
 		try:
 			auroc_result = auroc_score(y_true, y_outputs, num_classes=num_classes, mode='macro')
-			auroc_val = auroc_result if isinstance(auroc_result, float) else float(auroc_result['macro'])
+			auroc_val = float(auroc_result['macro']) if isinstance(auroc_result, dict) else auroc_result
 		except Exception:
 			auroc_val = 0.0
 	else:
@@ -228,7 +202,7 @@ def evaluate(
 		auroc_val = 0.0
 
 	return EvalMetrics(
-		loss=avg_loss,
+		loss=loss.item(),
 		acc=float(acc),
 		precision=float(prec),
 		recall=float(rec),
@@ -481,6 +455,8 @@ def train_classifier(
 	# 损失函数
 	criterion = create_criterion(mixup_fn is not None, smoothing)
 	val_criterion = nn.CrossEntropyLoss()  # 验证时不使用 mixup/smoothing
+	inference_trainer = Trainer(model, optimizer, criterion, device, use_amp=use_amp)
+	val_targets = torch.as_tensor(val_dataset.getRawData()[1], dtype=torch.long)
 
 	print('Ready to train...')
 	scaler = torch.GradScaler(enabled=use_amp) if use_amp else None
@@ -516,14 +492,13 @@ def train_classifier(
 			lr_scheduler.step(epoch + 1)
 
 		# Validation
+		val_scores = inference_trainer.inference(val_loader)
 		val_metrics = evaluate(
-			model=model,
-			data_loader=val_loader,
+			scores=val_scores,
+			targets=val_targets,
 			criterion=val_criterion,
-			device=device,
 			num_classes=num_classes,
 			compute_metrics=compute_metrics,
-			use_amp=use_amp,
 		)
 
 		# 打印结果
@@ -705,27 +680,9 @@ def fast_eval(device, model, dataset, transform=None, batch_size=1, num_workers=
 		pin_memory=True,
 	)
 
-	model.to(device)
-	model.eval()
-	y_pred = []
-	y_true = []
-	y_outputs = []
-	with torch.no_grad():
-		for images, label in data_loader:
-			images, label = (
-				images.to(device, non_blocking=True),
-				label.to(device, non_blocking=True),
-			)
-
-			outputs = model(images)
-
-			preds = torch.argmax(outputs, dim=1)
-
-			y_pred.extend(preds.cpu().numpy())
-			y_true.extend(label.cpu().numpy())
-			y_outputs.extend(outputs.cpu().numpy())
-
-	return y_true, y_pred, y_outputs
+	labels = torch.as_tensor(dataset.getRawData()[1], dtype=torch.long)
+	scores = Trainer(model=model, device=device, use_amp=False).inference(data_loader)
+	return labels.tolist(), torch.argmax(scores, dim=1).tolist() if scores.numel() else [], scores.tolist()
 
 
 def fast_calc_metrics(y_true, y_pred, num_classes=0):

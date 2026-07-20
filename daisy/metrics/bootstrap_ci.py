@@ -10,7 +10,7 @@ def bootstrap_ci(
 	n_boot=5000,
 	alpha=0.05,
 	seed=42,
-):
+) -> tuple[Any, Any]:
 	rng = np.random.default_rng(seed)
 	y_true = np.asarray(y_true)
 	y_pred = np.asarray(y_pred)

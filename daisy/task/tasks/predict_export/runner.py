@@ -8,6 +8,7 @@ from pathlib import Path
 
 import torch
 
+from daisy.training import Trainer
 from ...base import TaskRunner
 from ...data import select_dataset_split
 from ...registry import TaskRegistry
@@ -61,19 +62,9 @@ class PredictExportRunner(TaskRunner['PredictExportConfig']):
 			pin_memory=True,
 		)
 
-		model.to(device)
-		model.eval()
-		all_preds: list[int] = []
-		all_logits: list[list[float]] = []
-
-		with torch.no_grad():
-			for images, _ in loader:
-				images = images.to(device, non_blocking=True)
-				outputs = model(images)
-				preds = torch.argmax(outputs, dim=1)
-				all_preds.extend(preds.cpu().tolist())
-				if runtime_cfg.include_logits:
-					all_logits.extend(outputs.cpu().tolist())
+		scores = Trainer(model=model, device=device, use_amp=False).inference(loader)
+		all_preds = torch.argmax(scores, dim=1).tolist() if scores.numel() else []
+		all_logits = scores.tolist() if runtime_cfg.include_logits else []
 
 		rows = build_prediction_rows(
 			eval_files,

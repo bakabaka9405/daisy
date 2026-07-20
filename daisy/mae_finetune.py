@@ -91,7 +91,7 @@ def _build(
 	accum_iter: int,
 	use_amp: bool,
 	clip_grad: float | None,
-	num_workers: int,
+	num_workers: int | tuple[int, int],
 	pin_memory: bool,
 	save_path: Path | None,
 	save_freq: int,
@@ -112,9 +112,7 @@ def _build(
 	if isinstance(dataset, tuple):
 		train_dataset, val_dataset = dataset
 	else:
-		train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(
-			dataset, val_ratio=val_ratio
-		)
+		train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(dataset, val_ratio=val_ratio)
 
 	# 默认 transform
 	if train_transform is None:
@@ -125,12 +123,15 @@ def _build(
 	train_dataset.setTransform(train_transform)
 	val_dataset.applyTransform(val_transform)
 
+	if isinstance(num_workers, int):
+		num_workers = (num_workers, num_workers)
+
 	# --- DataLoader ---
 	train_loader = MultiEpochsDataLoader(
 		train_dataset,
 		batch_size=batch_size,
 		shuffle=True,
-		num_workers=num_workers,
+		num_workers=num_workers[0],
 		pin_memory=pin_memory,
 		drop_last=True,
 	)
@@ -139,7 +140,7 @@ def _build(
 		val_dataset,
 		batch_size=batch_size,
 		shuffle=False,
-		num_workers=num_workers,
+		num_workers=num_workers[1],
 		pin_memory=pin_memory,
 	)
 
@@ -169,6 +170,7 @@ def _build(
 		criterion = nn.CrossEntropyLoss()
 
 	val_criterion = nn.CrossEntropyLoss()
+	val_targets = torch.as_tensor(val_dataset.getRawData()[1], dtype=torch.long)
 
 	# --- Trainer ---
 	trainer = Trainer(
@@ -194,26 +196,26 @@ def _build(
 
 	# Mixup/CutMix
 	if mixup_enabled:
-		plugins.append(Mixup(
-			mixup_alpha=mixup,
-			cutmix_alpha=cutmix,
-			smoothing=smoothing,
-			num_classes=num_classes,
-		))
+		plugins.append(
+			Mixup(
+				mixup_alpha=mixup,
+				cutmix_alpha=cutmix,
+				smoothing=smoothing,
+				num_classes=num_classes,
+			)
+		)
 
 	# Eval
 	evaluator: Eval | None = None
 	best_model: BestModel | None = None
 
-	def _eval_fn(m: nn.Module, d: torch.device) -> dict[str, float]:
+	def _eval_fn(trainer: Trainer) -> dict[str, float]:
 		metrics = evaluate(
-			model=m,
-			data_loader=val_loader,
+			scores=trainer.inference(val_loader),
+			targets=val_targets,
 			criterion=val_criterion,
-			device=d,
 			num_classes=num_classes,
 			compute_metrics=True,
-			use_amp=use_amp,
 		)
 		return {
 			'loss': metrics.loss,
@@ -237,12 +239,6 @@ def _build(
 		if save_freq > 0:
 			plugins.append(Checkpoint(save_dir=save_path, save_freq=save_freq))
 
-	# EarlyStop
-	if early_stop:
-		plugins.append(EarlyStop(
-			evaluator, patience=early_stop_patience, watch_metric='f1', mode='max'
-		))
-
 	# CSVLog
 	csv_log: CSVLog | None = None
 	if log_dir:
@@ -253,6 +249,10 @@ def _build(
 
 	# EpochPrint
 	plugins.append(EpochPrint(evaluator=evaluator))
+
+	# EarlyStop
+	if early_stop:
+		plugins.append(EarlyStop(evaluator, patience=early_stop_patience, watch_metric='f1', mode='max'))
 
 	trainer.use(*plugins)
 
@@ -300,7 +300,7 @@ def mae_finetune(
 	accum_iter: int = 1,
 	use_amp: bool = True,
 	clip_grad: float | None = None,
-	num_workers: int = 4,
+	num_workers: int | tuple[int, int] = 4,
 	pin_memory: bool = True,
 	save_path: Path | str | None = None,
 	save_freq: int = 20,
