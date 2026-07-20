@@ -9,10 +9,13 @@ from torch.nn import functional as F
 
 
 def safe_divide(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-	"""稳定计算 a / b，并将分母为零的位置置零。"""
-	denominator = b.clamp(min=1e-9) + b.clamp(max=1e-9)
-	denominator = denominator + denominator.eq(0).to(denominator.dtype) * 1e-9
-	return a / denominator * b.ne(0).to(b.dtype)
+	"""计算 a / b，并将除零产生的 nan/±inf 置零。
+
+	结果仅作为 relevance 反向分配的权重使用，因此分母为零的位置置零表示
+	该输出不分配 relevance。注意本实现不对极小非零分母做钳制，此时 a / b
+	是巨大的有限值而非 inf，不会被置零，会原样作为权重传播。
+	"""
+	return torch.nan_to_num(a / b, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def linear_relprop(x: torch.Tensor, weight: torch.Tensor, relevance: torch.Tensor) -> torch.Tensor:

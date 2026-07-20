@@ -199,7 +199,7 @@ def generate_vit_grad_rollout_heatmap(
 		one_hot[0, target_class] = 1
 		output.backward(gradient=one_hot, retain_graph=False)
 
-		# 梯度通过 backward hook 收集，顺序为反向（最后一层先到）
+		# 反向收集梯度传入 rollout
 		all_gradients = all_gradients[::-1]
 		rollout = _compute_grad_rollout(all_attentions, all_gradients, start_layer)
 		mask = rollout[0, 0, num_prefix:]
