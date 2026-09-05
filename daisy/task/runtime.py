@@ -106,22 +106,12 @@ def print_task_completed(output_path: str | Path) -> None:
 	print('=' * 60)
 
 
-def _make_json_safe(value: Any) -> Any:
-	if isinstance(value, Path):
-		return str(value)
-	if isinstance(value, dict):
-		return {str(k): _make_json_safe(v) for k, v in value.items()}
-	if isinstance(value, (list, tuple, set)):
-		return [_make_json_safe(v) for v in value]
-	return value
-
-
 def save_json(path: str | Path, data: Any) -> None:
 	"""保存 JSON 文件"""
 	path = Path(path)
 	path.parent.mkdir(parents=True, exist_ok=True)
 	with open(path, 'w', encoding='utf-8') as f:
-		json.dump(_make_json_safe(data), f, ensure_ascii=False, indent=2)
+		json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def save_task_snapshot(

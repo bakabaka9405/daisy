@@ -9,6 +9,7 @@ from .models_mae import (
 	mae_vit_large_patch16,
 	mae_vit_huge_patch14,
 	create_mae_model,
+	load_timm_pretrained_encoder_weights,
 	MAE_MODELS,
 )
 from .models_vit import (
@@ -35,6 +36,7 @@ __all__ = [
 	'mae_vit_large_patch16',
 	'mae_vit_huge_patch14',
 	'create_mae_model',
+	'load_timm_pretrained_encoder_weights',
 	'MAE_MODELS',
 	# ViT models for finetune
 	'vit_base_patch16',

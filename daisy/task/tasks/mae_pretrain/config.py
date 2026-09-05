@@ -23,6 +23,7 @@ class MAEModelConfig(BaseModel):
 	name: str = 'mae_vit_base_patch16'
 	img_size: int = 224
 	norm_pix_loss: bool = False
+	timm_pretrained: str | None = None
 	# 可选：加载预训练权重
 	checkpoint: str | None = None
 

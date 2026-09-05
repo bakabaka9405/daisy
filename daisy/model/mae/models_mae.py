@@ -11,6 +11,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
+import timm
 
 from timm.layers.patch_embed import PatchEmbed
 from timm.models.vision_transformer import Block
@@ -291,6 +292,34 @@ class MaskedAutoencoderViT(nn.Module):
 		pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
 		loss = self.forward_loss(imgs, pred, mask)
 		return loss, pred, mask
+
+
+def load_timm_pretrained_encoder_weights(model: MaskedAutoencoderViT, model_name: str) -> None:
+	"""从 timm 模型加载兼容的 MAE 编码器权重。"""
+	source_model = timm.create_model(model_name, pretrained=True)
+	source_state = source_model.state_dict()
+	target_parameters = dict(model.named_parameters())
+	encoder_parameters = {
+		key: value
+		for key, value in target_parameters.items()
+		if key == 'cls_token' or key.startswith(('patch_embed.', 'blocks.', 'norm.'))
+	}
+
+	missing_keys = [key for key in encoder_parameters if key not in source_state]
+	shape_mismatches = [
+		key
+		for key, value in encoder_parameters.items()
+		if key in source_state and source_state[key].shape != value.shape
+	]
+	if missing_keys or shape_mismatches:
+		details = []
+		if missing_keys:
+			details.append(f'missing: {", ".join(missing_keys)}')
+		if shape_mismatches:
+			details.append(f'shape mismatch: {", ".join(shape_mismatches)}')
+		raise ValueError(f'Incompatible timm encoder weights ({"; ".join(details)})')
+
+	model.load_state_dict({key: source_state[key] for key in encoder_parameters}, strict=False)
 
 
 # Model factory functions

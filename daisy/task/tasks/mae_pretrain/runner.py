@@ -6,7 +6,7 @@ import torch
 from torchvision.transforms import v2 as transforms, InterpolationMode
 
 import daisy
-from daisy.model.mae import create_mae_model
+from daisy.model.mae import create_mae_model, load_timm_pretrained_encoder_weights
 from daisy.dataset import UnlabeledDiskDataset, load_files_from_folder
 from daisy.util.transform import ZeroOneNormalize
 from ...base import TaskRunner
@@ -103,6 +103,7 @@ class MAEPretrainRunner(TaskRunner):
 				choices=('mae_vit_base_patch16', 'mae_vit_large_patch16', 'mae_vit_huge_patch14'),
 				allow_custom=True,
 			),
+			'model.timm_pretrained': UIFieldConfig(label='timm 预训练模型'),
 			'training.epochs': UIFieldConfig(label='训练轮数'),
 			'training.batch_size': UIFieldConfig(label='Batch Size'),
 			'training.blr': UIFieldConfig(label='基础学习率'),
@@ -163,6 +164,11 @@ class MAEPretrainRunner(TaskRunner):
 			img_size=model_cfg.img_size,
 			norm_pix_loss=model_cfg.norm_pix_loss,
 		)
+		if model_cfg.timm_pretrained and training_cfg.resume is None:
+			print(f'Loading timm pretrained encoder: {model_cfg.timm_pretrained}')
+			load_timm_pretrained_encoder_weights(model, model_cfg.timm_pretrained)
+		elif model_cfg.timm_pretrained:
+			print('Skipping timm pretrained encoder because resume is configured')
 
 		print(f'Model: {model_cfg.name}')
 
