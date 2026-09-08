@@ -1,5 +1,4 @@
 from collections.abc import Callable
-from torch import Tensor
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
 from typing import Literal, Any

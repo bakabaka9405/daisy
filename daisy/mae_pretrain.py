@@ -5,13 +5,16 @@ import time
 from pathlib import Path
 
 import torch
+from ignite.engine import Engine, Events
+from ignite.metrics import Average
 from timm.data.loader import MultiEpochsDataLoader
 from torch.utils.data import Dataset
+from daisy.model.mae import MaskedAutoencoderViT
 
 
 def mae_pretrain(
 	device: torch.device,
-	model: torch.nn.Module,
+	model: MaskedAutoencoderViT,
 	dataset: Dataset,
 	epochs: int,
 	batch_size: int = 64,
@@ -86,6 +89,9 @@ def mae_pretrain(
 		pin_memory=pin_memory,
 		drop_last=True,
 	)
+	num_batches = len(data_loader)
+	if num_batches == 0:
+		raise ValueError('empty DataLoader')
 
 	model.to(device)
 
@@ -121,69 +127,81 @@ def mae_pretrain(
 		start_epoch = checkpoint['epoch'] + 1
 		print(f'Resumed from epoch {start_epoch}')
 
-	for epoch in range(start_epoch, epochs):
+	def process_function(engine: Engine, batch: torch.Tensor) -> float:
+		images, _ = batch
+
+		# 数据搬运
+		images = images.to(device, non_blocking=True)
+
+		# 前向
+		with torch.autocast('cuda', enabled=use_amp):
+			loss, _, _ = model(images, mask_ratio=mask_ratio)
+
+		loss_value = loss.item()
+
+		loss = loss / accum_iter
+		scaler.scale(loss).backward()
+
+		i = (engine.state.iteration - 1) % num_batches
+		if (i + 1) % accum_iter == 0 or (i + 1) == num_batches:
+			if clip_grad:
+				scaler.unscale_(optimizer)
+				torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
+			scaler.step(optimizer)
+			scaler.update()
+			optimizer.zero_grad()
+
+		return loss_value
+
+	engine = Engine(process_function)
+
+	@engine.on(Events.EPOCH_STARTED)
+	def on_epoch_started(_):
 		model.train()
-		train_loss = 0.0
-		num_batches = len(data_loader)
+		optimizer.zero_grad()
 
-		for i, (images, _) in enumerate(data_loader):
-			# 调整学习率 (per iteration)
-			iter_ratio = i / num_batches
-			lr_mult = lr_func(epoch, iter_ratio)
-			for param_group in optimizer.param_groups:
-				param_group['lr'] = lr * lr_mult
+	@engine.on(Events.ITERATION_STARTED)
+	def on_iteration_started(engine: Engine):
+		epoch = engine.state.epoch
+		i = (engine.state.iteration - 1) % num_batches
+		lr_mult = lr_func(epoch - 1, i / num_batches)
+		for param_group in optimizer.param_groups:
+			param_group['lr'] = lr * lr_mult
 
-			images = images.to(device, non_blocking=True)
+	Average().attach(engine, 'train_loss')
 
-			with torch.autocast('cuda', enabled=use_amp):
-				loss, _, _ = model(images, mask_ratio=mask_ratio)
+	@engine.on(Events.EPOCH_COMPLETED)
+	def on_epoch_completed(engine: Engine):
+		train_loss: float = engine.state.metrics['train_loss']
+		epoch = engine.state.epoch
+		print(f'Epoch {epoch}/{epochs}, Train Loss: {train_loss:.4f}')
 
-			loss_value = loss.item()
-
-			if not math.isfinite(loss_value):
-				print(f'Loss is {loss_value}, stopping training')
-				raise RuntimeError(f'Loss is {loss_value}')
-
-			loss = loss / accum_iter
-			scaler.scale(loss).backward()
-
-			if (i + 1) % accum_iter == 0 or (i + 1) == num_batches:
-				if clip_grad:
-					scaler.unscale_(optimizer)
-					torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_norm)
-				scaler.step(optimizer)
-				scaler.update()
-				optimizer.zero_grad()
-
-			train_loss += loss_value
-
-			# 打印进度
-			if (i + 1) % 20 == 0 or (i + 1) == num_batches:
-				current_lr = optimizer.param_groups[0]['lr']
-				print(f'Epoch [{epoch + 1}/{epochs}] [{i + 1}/{num_batches}] Loss: {loss_value:.4f} LR: {current_lr:.6f}')
-
-		train_loss /= num_batches
-		print(f'Epoch {epoch + 1}/{epochs}, Train Loss: {train_loss:.4f}')
-
-		# 写入日志
 		if log_file is not None:
 			with open(log_file, 'a', encoding='utf-8') as f:
-				f.write(f'{epoch + 1},{optimizer.param_groups[0]["lr"]:.6f},{train_loss:.4f}\n')
+				f.write(f'{epoch},{optimizer.param_groups[0]["lr"]:.6f},{train_loss:.4f}\n')
 
-		# 保存 checkpoint
 		if save_path is not None:
 			checkpoint = {
 				'model': model.state_dict(),
 				'optimizer': optimizer.state_dict(),
 				'scaler': scaler.state_dict(),
-				'epoch': epoch,
+				'epoch': epoch - 1,
 			}
-			# 定期保存
-			if (epoch + 1) % save_freq == 0 or (epoch + 1) == epochs:
-				torch.save(checkpoint, save_path / f'checkpoint_{epoch + 1:04d}.pth')
-				print(f'Saved checkpoint at epoch {epoch + 1}')
-
-			# 保存最新
+			if epoch % save_freq == 0 or epoch == epochs:
+				torch.save(checkpoint, save_path / f'checkpoint_{epoch:04d}.pth')
+				print(f'Saved checkpoint at epoch {epoch}')
 			torch.save(checkpoint, save_path / 'checkpoint_latest.pth')
 
-	print('MAE Pretraining completed!')
+	if start_epoch >= epochs:
+		return
+
+	if start_epoch > 0:
+		engine.load_state_dict(
+			{
+				'epoch': start_epoch,
+				'max_epochs': epochs,
+				'epoch_length': num_batches,
+			}
+		)
+
+	engine.run(data_loader, max_epochs=epochs)
