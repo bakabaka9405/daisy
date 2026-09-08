@@ -1,9 +1,11 @@
 """MAE Finetune 任务执行器"""
 
+from dataclasses import fields
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import daisy
+from daisy.mae_finetune import MAEFinetuneParams
 from daisy.model.mae import create_vit_model, load_mae_pretrained_weights
 from ...base import TaskRunner
 from ...data import build_train_val_selection
@@ -121,26 +123,18 @@ class MAEFinetuneRunner(TaskRunner[MAEFinetuneConfig]):
 		# 训练
 		print('\nStarting MAE finetuning...')
 
+		params = MAEFinetuneParams(
+			**training_cfg.model_dump(include={field.name for field in fields(MAEFinetuneParams)}),
+			mixup=aug_cfg.mixup,
+			cutmix=aug_cfg.cutmix,
+			smoothing=aug_cfg.smoothing,
+		)
 		daisy.mae_finetune.mae_finetune(
 			device=device,
 			model=model,
 			dataset=(train_dataset, val_dataset),
 			num_classes=model_cfg.num_classes,
-			epochs=training_cfg.epochs,
-			batch_size=training_cfg.batch_size,
-			blr=training_cfg.blr,
-			lr=training_cfg.lr,
-			layer_decay=training_cfg.layer_decay,
-			weight_decay=training_cfg.weight_decay,
-			warmup_epochs=training_cfg.warmup_epochs,
-			min_lr=training_cfg.min_lr,
-			mixup=aug_cfg.mixup,
-			cutmix=aug_cfg.cutmix,
-			smoothing=aug_cfg.smoothing,
-			accum_iter=training_cfg.accum_iter,
-			use_amp=training_cfg.use_amp,
-			clip_grad=training_cfg.clip_grad,
-			num_workers=training_cfg.num_workers,
+			params=params,
 			save_path=output_path,
 			save_freq=training_cfg.save_freq,
 			log_dir=output_path / 'logs' if config.output.log else None,

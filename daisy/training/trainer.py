@@ -137,14 +137,14 @@ class Trainer:
 
 	def _train_one_epoch(self, train_loader: DataLoader, state: TrainState) -> float:
 		if self.optimizer is None:
-			raise RuntimeError('_train_one_epoch 需要 optimizer。')
+			raise RuntimeError('Optimizer is required for _train_one_epoch.')
 		if self.criterion is None:
-			raise RuntimeError('_train_one_epoch 需要 criterion。')
+			raise RuntimeError('Criterion is required for _train_one_epoch.')
 
 		optimizer = self.optimizer
 		criterion = self.criterion
 		self.model.train()
-		total_loss = 0.0
+		total_loss = torch.zeros((), device=self.device)
 		num_batches = len(train_loader)
 
 		for batch_idx, (images, targets) in enumerate(train_loader):
@@ -164,7 +164,7 @@ class Trainer:
 				for fn in self._after_forward:
 					outputs = fn(state, outputs)
 				# 缩放 loss，使累计梯度与整批平均梯度处于同一尺度。
-				loss = criterion(outputs, targets) / self.accum_iter
+				loss: torch.Tensor = criterion(outputs, targets) / self.accum_iter
 
 			self.scaler.scale(loss).backward()
 
@@ -178,14 +178,14 @@ class Trainer:
 				optimizer.zero_grad(set_to_none=True)
 				state.global_step += 1
 
-			batch_loss = loss.item() * self.accum_iter
+			batch_loss = loss.detach() * self.accum_iter
 			state.batch_loss = batch_loss
-			total_loss += batch_loss
+			total_loss.add_(batch_loss)
 
 			for fn in self._on_batch_end:
 				fn(state)
 
-		return total_loss / max(num_batches, 1)
+		return (total_loss / max(num_batches, 1)).item()
 
 	@torch.no_grad()
 	def inference(self, data_loader: DataLoader) -> torch.Tensor:

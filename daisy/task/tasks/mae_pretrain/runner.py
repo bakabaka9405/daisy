@@ -1,11 +1,13 @@
 """MAE 预训练任务执行器"""
 
+from dataclasses import fields
 from pathlib import Path
 
 import torch
 from torchvision.transforms import v2 as transforms, InterpolationMode
 
 import daisy
+from daisy.mae_pretrain import MAEPretrainParams
 from daisy.model.mae import create_mae_model, load_timm_pretrained_encoder_weights
 from daisy.dataset import UnlabeledDiskDataset, load_files_from_folder
 from daisy.util.transform import ZeroOneNormalize
@@ -175,21 +177,14 @@ class MAEPretrainRunner(TaskRunner):
 		# 训练
 		print('\nStarting MAE pretraining...')
 
+		params = MAEPretrainParams(
+			**training_cfg.model_dump(include={field.name for field in fields(MAEPretrainParams)})
+		)
 		daisy.mae_pretrain.mae_pretrain(
 			device=device,
 			model=model,
 			dataset=dataset,
-			epochs=training_cfg.epochs,
-			batch_size=training_cfg.batch_size,
-			blr=training_cfg.blr,
-			weight_decay=training_cfg.weight_decay,
-			warmup_epochs=training_cfg.warmup_epochs,
-			mask_ratio=training_cfg.mask_ratio,
-			accum_iter=training_cfg.accum_iter,
-			num_workers=training_cfg.num_workers,
-			use_amp=training_cfg.use_amp,
-			clip_grad=training_cfg.clip_grad,
-			max_norm=training_cfg.max_norm,
+			params=params,
 			save_path=output_path,
 			save_freq=training_cfg.save_freq,
 			log_dir=output_path / 'logs' if config.output.log else None,

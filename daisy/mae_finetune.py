@@ -14,11 +14,14 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import torch
 import torch.nn as nn
+
+from daisy.typing import Replaceable
 
 from daisy.classifier_trainer import evaluate
 from daisy.dataset.index_dataset import IndexDataset
@@ -72,35 +75,42 @@ def load_mae_pretrain_checkpoint(
 	return model
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class MAEFinetuneParams(Replaceable):
+	"""MAE 微调超参数。"""
+
+	epochs: int
+	batch_size: int = 64
+	blr: float | None = 1e-3
+	lr: float = 0
+	layer_decay: float = 0.75
+	weight_decay: float = 0.05
+	warmup_epochs: int = 5
+	min_lr: float = 1e-6
+	mixup: float = 0.8
+	cutmix: float = 1.0
+	smoothing: float = 0.1
+	accum_iter: int = 1
+	use_amp: bool = True
+	clip_grad: float | None = None
+	num_workers: int | tuple[int, int] = 4
+	pin_memory: bool = True
+	early_stop: bool = False
+	early_stop_patience: int = 10
+	val_ratio: float = 0.1
+
+
 def _build(
 	device: torch.device,
 	model: nn.Module,
 	dataset: tuple[IndexDataset, IndexDataset] | IndexDataset,
 	num_classes: int,
-	epochs: int,
-	batch_size: int,
-	blr: float | None,
-	lr: float,
-	layer_decay: float,
-	weight_decay: float,
-	warmup_epochs: int,
-	min_lr: float,
-	mixup: float,
-	cutmix: float,
-	smoothing: float,
-	accum_iter: int,
-	use_amp: bool,
-	clip_grad: float | None,
-	num_workers: int | tuple[int, int],
-	pin_memory: bool,
+	params: MAEFinetuneParams,
 	save_path: Path | None,
 	save_freq: int,
 	log_dir: Path | None,
-	early_stop: bool,
-	early_stop_patience: int,
 	train_transform: Any,
 	val_transform: Any,
-	val_ratio: float,
 	optimizer: torch.optim.Optimizer | None,
 ) -> tuple[Trainer, Any, Eval | None, BestModel | None, CSVLog | None]:
 	"""组装 Trainer + Plugin 栈，返回内部 Plugin 引用。"""
@@ -112,7 +122,7 @@ def _build(
 	if isinstance(dataset, tuple):
 		train_dataset, val_dataset = dataset
 	else:
-		train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(dataset, val_ratio=val_ratio)
+		train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(dataset, val_ratio=params.val_ratio)
 
 	# 默认 transform
 	if train_transform is None:
@@ -123,49 +133,56 @@ def _build(
 	train_dataset.setTransform(train_transform)
 	val_dataset.applyTransform(val_transform)
 
-	if isinstance(num_workers, int):
-		num_workers = (num_workers, num_workers)
+	if isinstance(params.num_workers, int):
+		workers = (params.num_workers, params.num_workers)
+	else:
+		workers = params.num_workers
 
 	# --- DataLoader ---
 	train_loader = MultiEpochsDataLoader(
 		train_dataset,
-		batch_size=batch_size,
+		batch_size=params.batch_size,
 		shuffle=True,
-		num_workers=num_workers[0],
-		pin_memory=pin_memory,
+		num_workers=workers[0],
+		pin_memory=params.pin_memory,
 		drop_last=True,
 	)
 
 	val_loader = MultiEpochsDataLoader(
 		val_dataset,
-		batch_size=batch_size,
+		batch_size=params.batch_size,
 		shuffle=False,
-		num_workers=num_workers[1],
-		pin_memory=pin_memory,
+		num_workers=workers[1],
+		pin_memory=params.pin_memory,
 	)
 
 	# --- 学习率计算 ---
-	if blr is not None:
-		eff_batch_size = batch_size * accum_iter
-		actual_lr = blr * eff_batch_size / 256
-		print(f'Base LR: {blr:.2e}, Effective batch size: {eff_batch_size}, Actual LR: {actual_lr:.2e}')
+	if params.blr is not None:
+		eff_batch_size = params.batch_size * params.accum_iter
+		actual_lr = params.blr * eff_batch_size / 256
+		print(f'Base LR: {params.blr:.2e}, Effective batch size: {eff_batch_size}, Actual LR: {actual_lr:.2e}')
 	else:
-		actual_lr = lr
+		actual_lr = params.lr
 
 	# --- Optimizer ---
 	if optimizer is None:
 		from daisy.model.mae.lr_decay import param_groups_lrd
 		from torch.optim import AdamW
 
-		param_groups = param_groups_lrd(model, weight_decay=weight_decay, layer_decay=layer_decay)
-		optimizer = AdamW(param_groups, lr=actual_lr, betas=(0.9, 0.999))
+		param_groups = param_groups_lrd(model, weight_decay=params.weight_decay, layer_decay=params.layer_decay)
+		optimizer = AdamW(
+			param_groups,
+			lr=actual_lr,
+			betas=(0.9, 0.999),
+			fused=True,
+		)
 
 	# --- Criterion ---
-	mixup_enabled = mixup > 0 or cutmix > 0
+	mixup_enabled = params.mixup > 0 or params.cutmix > 0
 	if mixup_enabled:
 		criterion = SoftTargetCrossEntropy()
-	elif smoothing > 0:
-		criterion = LabelSmoothingCrossEntropy(smoothing=smoothing)
+	elif params.smoothing > 0:
+		criterion = LabelSmoothingCrossEntropy(smoothing=params.smoothing)
 	else:
 		criterion = nn.CrossEntropyLoss()
 
@@ -178,17 +195,17 @@ def _build(
 		optimizer=optimizer,
 		criterion=criterion,
 		device=device,
-		use_amp=use_amp,
-		accum_iter=accum_iter,
-		clip_grad=clip_grad,
+		use_amp=params.use_amp,
+		accum_iter=params.accum_iter,
+		clip_grad=params.clip_grad,
 	)
 
 	# --- Plugins ---
 	# LR schedule (per-iteration for MAE style)
 	lr_plugin = CosineAnnealingLR(
 		lr=actual_lr,
-		min_lr=min_lr,
-		warmup_epochs=warmup_epochs,
+		min_lr=params.min_lr,
+		warmup_epochs=params.warmup_epochs,
 		per_iteration=True,
 	)
 
@@ -198,9 +215,9 @@ def _build(
 	if mixup_enabled:
 		plugins.append(
 			Mixup(
-				mixup_alpha=mixup,
-				cutmix_alpha=cutmix,
-				smoothing=smoothing,
+				mixup_alpha=params.mixup,
+				cutmix_alpha=params.cutmix,
+				smoothing=params.smoothing,
 				num_classes=num_classes,
 			)
 		)
@@ -251,8 +268,8 @@ def _build(
 	plugins.append(EpochPrint(evaluator=evaluator))
 
 	# EarlyStop
-	if early_stop:
-		plugins.append(EarlyStop(evaluator, patience=early_stop_patience, watch_metric='f1', mode='max'))
+	if params.early_stop:
+		plugins.append(EarlyStop(evaluator, patience=params.early_stop_patience, watch_metric='f1', mode='max'))
 
 	trainer.use(*plugins)
 
@@ -284,35 +301,13 @@ def mae_finetune(
 	model: nn.Module,
 	dataset: tuple[IndexDataset, IndexDataset] | IndexDataset,
 	num_classes: int,
-	epochs: int,
-	# MAE 特定默认值
-	batch_size: int = 64,
-	blr: float | None = 1e-3,
-	lr: float = 0,
-	layer_decay: float = 0.75,
-	weight_decay: float = 0.05,
-	warmup_epochs: int = 5,
-	min_lr: float = 1e-6,
-	mixup: float = 0.8,
-	cutmix: float = 1.0,
-	smoothing: float = 0.1,
-	# 其他
-	accum_iter: int = 1,
-	use_amp: bool = True,
-	clip_grad: float | None = None,
-	num_workers: int | tuple[int, int] = 4,
-	pin_memory: bool = True,
+	params: MAEFinetuneParams,
+	*,
 	save_path: Path | str | None = None,
 	save_freq: int = 20,
 	log_dir: Path | str | None = None,
-	# 额外参数
-	early_stop: bool = False,
-	early_stop_patience: int = 10,
-	# Transform (由 TaskRunner 传入)
 	train_transform: Any = None,
 	val_transform: Any = None,
-	val_ratio: float = 0.1,
-	# 高级: 自定义 optimizer
 	optimizer: torch.optim.Optimizer | None = None,
 ) -> TrainState:
 	"""
@@ -324,32 +319,14 @@ def mae_finetune(
 	Args:
 		device: 训练设备
 		model: ViT 模型 (已加载 MAE 预训练权重)
-		dataset: 数据集 (训练和验证) 或单个数据集 (按 val_ratio 拆分)
+		dataset: 数据集 (训练和验证) 或单个数据集 (按 params.val_ratio 拆分)
 		num_classes: 分类数
-		epochs: 训练轮数
-		batch_size: 批大小
-		blr: 基础学习率 (实际 lr = blr * batch_size * accum_iter / 256)
-		lr: 直接指定学习率 (blr 优先)
-		layer_decay: Layer-wise LR decay 系数
-		weight_decay: 权重衰减
-		warmup_epochs: warmup 轮数
-		min_lr: 最小学习率
-		mixup: Mixup alpha
-		cutmix: CutMix alpha
-		smoothing: Label smoothing
-		accum_iter: 梯度累积迭代数
-		use_amp: 是否使用混合精度
-		clip_grad: 梯度裁剪的最大范数 (None 表示不裁剪)
-		num_workers: DataLoader workers 数量
-		pin_memory: 是否 pin memory
+		params: 微调超参数
 		save_path: 模型保存路径
 		save_freq: 保存频率（每 N 个 epoch）
 		log_dir: 日志目录 (CSV 输出)
-		early_stop: 是否启用早停
-		early_stop_patience: 早停耐心值
 		train_transform: 训练数据变换
 		val_transform: 验证数据变换
-		val_ratio: 验证集比例 (仅在 dataset 为单个时使用)
 		optimizer: 自定义优化器 (None 时内部构建带 layer decay 的 AdamW)
 
 	Returns:
@@ -370,34 +347,16 @@ def mae_finetune(
 		model=model,
 		dataset=dataset,
 		num_classes=num_classes,
-		epochs=epochs,
-		batch_size=batch_size,
-		blr=blr,
-		lr=lr,
-		layer_decay=layer_decay,
-		weight_decay=weight_decay,
-		warmup_epochs=warmup_epochs,
-		min_lr=min_lr,
-		mixup=mixup,
-		cutmix=cutmix,
-		smoothing=smoothing,
-		accum_iter=accum_iter,
-		use_amp=use_amp,
-		clip_grad=clip_grad,
-		num_workers=num_workers,
-		pin_memory=pin_memory,
+		params=params,
 		save_path=_save_path,
 		save_freq=save_freq,
 		log_dir=_log_dir,
-		early_stop=early_stop,
-		early_stop_patience=early_stop_patience,
 		train_transform=train_transform,
 		val_transform=val_transform,
-		val_ratio=val_ratio,
 		optimizer=optimizer,
 	)
 
 	print('Ready to train...')
-	state = trainer.fit(train_loader, epochs=epochs)
+	state = trainer.fit(train_loader, epochs=params.epochs)
 
 	return _extract_result(state, evaluator, best_model, csv_log)
