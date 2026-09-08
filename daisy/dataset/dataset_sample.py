@@ -1,16 +1,12 @@
 from .index_dataset import IndexDataset
 import numpy
-from typing import TypeVar
 
 
 def _get_rng(seed: int | None = None):
 	return numpy.random.default_rng(seed)
 
 
-T = TypeVar('T', bound='IndexDataset[int]')
-
-
-def balanced_sample(
+def balanced_sample[T: IndexDataset](
 	dataset: T,
 	expected_size: int,
 	num_classes: int,

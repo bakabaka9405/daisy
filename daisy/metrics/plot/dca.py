@@ -6,7 +6,8 @@ from typing import Any
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
-from numpy.typing import ArrayLike
+
+from daisy.typing import MatrixF64, VectorF64, VectorI64
 
 from ..dca import DcaCurve, DcaMode, compute_multiclass_dca_curves
 
@@ -15,14 +16,9 @@ def _resolve_class_names(
 	class_names: Sequence[str] | None,
 	num_classes: int,
 ) -> list[str]:
-	if class_names is None:
-		return [f'class_{i}' for i in range(num_classes)]
-
-	names = [str(name) for name in class_names]
-	if len(names) < num_classes:
-		names.extend(f'class_{i}' for i in range(len(names), num_classes))
-
-	return names[:num_classes]
+	if class_names is not None:
+		return [class_names[i] if i < len(class_names) else f'class_{i}' for i in range(num_classes)]
+	return [f'class_{i}' for i in range(num_classes)]
 
 
 def _build_plot_items(
@@ -42,47 +38,44 @@ def _build_plot_items(
 			plot_items.append((curve_key, f'{class_names[class_index]} vs rest', curves[curve_key]))
 
 	# multi-class DCA 下 micro 与 macro 理论上重合，all 模式默认不重复绘制。
-	if mode == 'micro' and 'micro' in curves:
+	if mode == 'micro':
 		plot_items.append(('micro', 'micro-average', curves['micro']))
 
-	if mode in {'macro', 'all'} and 'macro' in curves:
+	if mode in {'macro', 'all'}:
 		plot_items.append(('macro', 'macro-average', curves['macro']))
 
 	return plot_items
 
 
 def _build_curve_colors(total_curves: int, cmap: str) -> list[Any]:
-	if total_curves <= 0:
-		return []
-
 	color_map = plt.get_cmap(cmap)
 	positions = np.linspace(0.0, 1.0, num=total_curves, endpoint=False)
 	return [color_map(float(position)) for position in positions]
 
 
 def _compute_treat_all_net_benefit(
-	thresholds: np.ndarray,
-	prevalence: float,
-) -> np.ndarray:
+	thresholds: VectorF64,
+	prevalence: np.float64,
+) -> VectorF64:
 	threshold_odds = thresholds / (1.0 - thresholds)
 	return prevalence - (1.0 - prevalence) * threshold_odds
 
 
-def _resolve_reference_prevalence(plot_items: list[tuple[str, str, DcaCurve]]) -> tuple[float, str]:
+def _resolve_reference_prevalence(plot_items: list[tuple[str, str, DcaCurve]]) -> tuple[np.float64, str]:
 	class_curves = [curve for curve_key, _, curve in plot_items if curve_key.startswith('class_')]
 	if class_curves:
-		return float(np.mean([curve.prevalence for curve in class_curves])), 'Treat all (mean prevalence)'
+		return np.mean(np.stack([curve.prevalence for curve in class_curves])), 'Treat all (mean prevalence)'
 
 	if len(plot_items) == 1:
 		return plot_items[0][2].prevalence, 'Treat all'
 
-	return float(np.mean([curve.prevalence for _, _, curve in plot_items])), 'Treat all (mean prevalence)'
+	return np.mean(np.stack([curve.prevalence for _, _, curve in plot_items])), 'Treat all (mean prevalence)'
 
 
 def _resolve_y_limits(
 	plot_items: list[tuple[str, str, DcaCurve]],
 	plot_treat_none: bool,
-) -> tuple[float, float]:
+) -> tuple[np.float64, np.float64]:
 	y_values = [curve.net_benefit for _, _, curve in plot_items]
 
 	# Treat-all 在阈值接近 1 时会出现很大的负值，这里不让它主导纵轴缩放。
@@ -91,20 +84,19 @@ def _resolve_y_limits(
 	if plot_treat_none:
 		y_values.append(np.zeros_like(thresholds))
 
-	min_value = min(float(np.min(values)) for values in y_values)
-	max_value = max(float(np.max(values)) for values in y_values)
-	padding = max(0.02, (max_value - min_value) * 0.05)
+	min_value = min(np.min(values) for values in y_values)
+	max_value = max(np.max(values) for values in y_values)
+	padding = np.maximum(0.02, (max_value - min_value) * 0.05)
 	return min_value - padding, max_value + padding
 
 
 def plot_dca_curve(
-	y_prob: ArrayLike,
-	y_true: ArrayLike,
-	num_classes: int,
+	y_prob: MatrixF64,
+	y_true: VectorI64,
 	mode: DcaMode,
 	ax: Axes,
 	*,
-	thresholds: ArrayLike | None = None,
+	thresholds: VectorF64 | None = None,
 	class_names: Sequence[str] | None = None,
 	title: str | None = None,
 	plot_treat_all: bool = True,
@@ -123,21 +115,20 @@ def plot_dca_curve(
 ) -> dict[str, DcaCurve]:
 	"""绘制多分类 DCA 曲线。"""
 
-	# 1) 计算待绘制曲线与公共参考线。
+	# 计算待绘制曲线与公共参考线。
+	curves = compute_multiclass_dca_curves(y_true, y_prob, mode=mode, thresholds=thresholds)
+	_, num_classes = y_prob.shape
 	name_list = _resolve_class_names(class_names, num_classes)
-	curves = compute_multiclass_dca_curves(y_true, y_prob, num_classes=num_classes, mode=mode, thresholds=thresholds)
 	plot_items = _build_plot_items(curves, mode, name_list)
-	if not plot_items:
-		raise ValueError('No DCA curve is available for plotting')
 
 	threshold_axis = plot_items[0][2].thresholds
 	default_treat_all_label: str | None = None
-	shared_treat_all: np.ndarray | None = None
+	shared_treat_all: VectorF64 | None = None
 	if plot_treat_all:
 		reference_prevalence, default_treat_all_label = _resolve_reference_prevalence(plot_items)
 		shared_treat_all = _compute_treat_all_net_benefit(threshold_axis, reference_prevalence)
 
-	# 2) 执行绘图和外观设置。
+	# 执行绘图和外观设置。
 	if plot_treat_none:
 		treat_none_style: dict[str, Any] = {
 			'label': treat_none_label,
@@ -173,7 +164,8 @@ def plot_dca_curve(
 		ax.plot(curve.thresholds, curve.net_benefit, **curve_style)
 
 	ax.set_xlim(float(threshold_axis[0]), float(threshold_axis[-1]))
-	ax.set_ylim(*_resolve_y_limits(plot_items, plot_treat_none))
+	y_min, y_max = _resolve_y_limits(plot_items, plot_treat_none)
+	ax.set_ylim(float(y_min), float(y_max))
 	ax.set_xlabel('Threshold Probability')
 	ax.set_ylabel('Net Benefit')
 	ax.set_title(title if title is not None else f'Multi-class DCA ({mode})')

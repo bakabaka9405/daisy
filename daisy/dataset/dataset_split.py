@@ -1,20 +1,17 @@
-from .index_dataset import IndexDataset, LabelT
+from .index_dataset import IndexDataset
 import numpy
 from ..util import (
 	gather_list_by_indexes as gather,
 	shuffle_correlated_lists,
 )
 from collections.abc import Generator
-from typing import TypeVar
-
-T = TypeVar('T', bound=IndexDataset)
 
 
 def _get_rng(seed: int | None = None):
 	return numpy.random.default_rng(seed)
 
 
-def split_by_label(dataset: IndexDataset[LabelT]) -> dict[LabelT, list]:
+def split_by_label[LabelT](dataset: IndexDataset[LabelT]) -> dict[LabelT, list]:
 	"""将数据集按标签分割为多个子集"""
 	label_to_indices: dict[LabelT, list] = {}
 	data, labels = dataset.getRawData()
@@ -25,7 +22,7 @@ def split_by_label(dataset: IndexDataset[LabelT]) -> dict[LabelT, list]:
 	return label_to_indices
 
 
-def default_data_split(
+def default_data_split[T: IndexDataset](
 	dataset: T,
 	val_ratio: float = 0.1,
 	seed: int | None = None,
@@ -45,7 +42,7 @@ def default_data_split(
 	)
 
 
-def stratified_data_split(
+def stratified_data_split[T: IndexDataset](
 	dataset: T,
 	val_ratio: float = 0.1,
 	seed: int | None = None,
@@ -85,7 +82,7 @@ def stratified_data_split(
 	return dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
 
 
-def split_by_groups(
+def split_by_groups[T: IndexDataset](
 	dataset: T,
 	groups: list[str | int],
 	val_ratio: float = 0.1,
@@ -125,7 +122,7 @@ def split_by_groups(
 	)
 
 
-def minimum_class_proportional_split(
+def minimum_class_proportional_split[T: IndexDataset](
 	dataset: T,
 	val_ratio: float = 0.1,
 	val_minimum_size: int = 100,
@@ -178,7 +175,7 @@ def minimum_class_proportional_split(
 	return dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
 
 
-def balanced_k_fold(
+def balanced_k_fold[T: IndexDataset](
 	dataset: T,
 	k: int,
 	seed: int | None = None,
@@ -204,7 +201,7 @@ def balanced_k_fold(
 		yield dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
 
 
-def k_fold(
+def k_fold[T: IndexDataset](
 	dataset: T,
 	k: int,
 	seed: int | None = None,
@@ -225,7 +222,7 @@ def k_fold(
 		yield dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
 
 
-def trunc_max_class(dataset: T) -> T:
+def trunc_max_class[T: IndexDataset](dataset: T) -> T:
 	dataset_type = type(dataset)
 	label_dict = split_by_label(dataset)
 	minimum_size = min(len(i) for _, i in label_dict.items())

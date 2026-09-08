@@ -1,22 +1,19 @@
 from __future__ import annotations
 
 import numpy as np
-from numpy.typing import ArrayLike
+from daisy.typing import VectorF64
 
 
-def icc_a1_score(y_true: ArrayLike, y_pred: ArrayLike) -> float:
-	"""计算 two-way random-effects、absolute agreement、single measurement ICC。
-
-	输入会被展平，且形状必须一致并至少包含两个样本。分母为零时返回 NaN。
+def icc_a1_score(y_true: VectorF64, y_pred: VectorF64) -> np.float64:
 	"""
-	y_true = np.asarray(y_true, dtype=np.float64).ravel()
-	y_pred = np.asarray(y_pred, dtype=np.float64).ravel()
+	计算 two-way random-effects、absolute agreement、single measurement ICC。
 
-	if y_true.shape != y_pred.shape:
-		raise ValueError(f'形状不一致：y_true {y_true.shape} vs y_pred {y_pred.shape}')
+	至少包含两个样本。分母为零时返回 NaN。
+	"""
+
 	n = y_true.shape[0]
 	if n < 2:
-		raise ValueError(f'至少需要 2 个样本，当前仅有 {n} 个')
+		raise ValueError(f'need at least 2 samples, got {n}')
 
 	# 将真实值和预测值视为两个评分者。
 	data = np.column_stack((y_true, y_pred))
@@ -39,6 +36,6 @@ def icc_a1_score(y_true: ArrayLike, y_pred: ArrayLike) -> float:
 	denom = ms_targets + (k - 1) * ms_error + k * (ms_raters - ms_error) / n
 
 	if denom == 0:
-		return float('nan')
+		return np.float64('nan')
 
-	return float(numer / denom)
+	return numer / denom

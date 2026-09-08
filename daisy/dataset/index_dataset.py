@@ -1,13 +1,10 @@
 from torch import Tensor
 from torch.utils.data import Dataset
 from abc import abstractmethod
-from typing import Any, Generic, TypeVar
-
-LabelT = TypeVar('LabelT')
-T = TypeVar('T', bound='IndexDataset')
+from typing import Any, Self
 
 
-class IndexDataset(Dataset, Generic[LabelT]):
+class IndexDataset[LabelT](Dataset):
 	@abstractmethod
 	def __init__(
 		self,
@@ -38,9 +35,9 @@ class IndexDataset(Dataset, Generic[LabelT]):
 		pass
 
 	@abstractmethod
-	def take(self: T, k: int) -> T:
+	def take(self, k: int) -> Self:
 		pass
 
 	@abstractmethod
-	def subset(self: T, indices: list[int]) -> T:
+	def subset(self, indices: list[int]) -> Self:
 		pass

@@ -5,7 +5,7 @@ from pathlib import Path
 import torch
 
 from collections.abc import Callable
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -52,11 +52,7 @@ class BaseTaskConfig(BaseModel, ABC):
 		pass
 
 
-# 泛型类型变量
-T_Config = TypeVar('T_Config', bound=BaseTaskConfig)
-
-
-class TaskRunner(ABC, Generic[T_Config]):
+class TaskRunner[T_Config: BaseTaskConfig](ABC):
 	"""任务执行器基类"""
 
 	@classmethod

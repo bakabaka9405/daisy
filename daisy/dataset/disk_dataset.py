@@ -2,13 +2,13 @@ from collections.abc import Callable
 from torch import Tensor
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
-from typing import Generic, Literal, Any, TypeVar
+from typing import Literal, Any
 from PIL import Image
 
-from .index_dataset import IndexDataset, LabelT
+from .index_dataset import IndexDataset
 
 
-class DiskDataset(IndexDataset[LabelT], Generic[LabelT]):
+class DiskDataset[LabelT](IndexDataset[LabelT]):
 	file_paths: list[Path]
 	labels: list[LabelT]
 	transform: Callable[..., Any] | None

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 import daisy
+import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
@@ -25,8 +26,6 @@ from torch.optim import AdamW
 
 from daisy.dataset import IndexDataset
 from daisy.training import Trainer
-
-
 
 
 class LRScheduler:
@@ -115,8 +114,6 @@ class TrainResult:
 	history: list[TrainingHistoryEntry] = field(default_factory=list)
 
 
-
-
 def calc_confusion_matrix(y_true, y_pred, num_classes: int) -> list[list[int]]:
 	"""计算混淆矩阵"""
 	count = [[0] * num_classes for _ in range(num_classes)]
@@ -160,8 +157,6 @@ def build_optimizer(
 	return AdamW(param_groups, lr=lr, betas=(0.9, 0.999))
 
 
-
-
 def evaluate(
 	scores: torch.Tensor,
 	targets: torch.Tensor,
@@ -192,8 +187,12 @@ def evaluate(
 		# 计算 AUROC
 		y_outputs = scores.numpy()
 		try:
-			auroc_result = auroc_score(y_true, y_outputs, num_classes=num_classes, mode='macro')
-			auroc_val = float(auroc_result['macro']) if isinstance(auroc_result, dict) else auroc_result
+			auroc_result = auroc_score(
+				y_true.astype(np.int64, copy=False),
+				y_outputs.astype(np.float64, copy=False),
+				mode='macro',
+			)
+			auroc_val = float(auroc_result['macro'] if isinstance(auroc_result, dict) else auroc_result)
 		except Exception:
 			auroc_val = 0.0
 	else:
@@ -210,8 +209,6 @@ def evaluate(
 		auroc=auroc_val,
 		confusion_matrix=matrix,
 	)
-
-
 
 
 def train_one_epoch(
@@ -296,8 +293,6 @@ def train_one_epoch(
 	train_acc = float(accuracy_score(y_true, y_pred)) if y_pred else 0.0
 
 	return avg_loss, train_acc
-
-
 
 
 def train_classifier(
@@ -600,8 +595,6 @@ def train_classifier(
 	)
 
 
-
-
 def fast_train_smile(
 	device: torch.device,
 	model: torch.nn.Module,
@@ -664,8 +657,6 @@ def fast_train_smile(
 		compute_metrics=True,
 	)
 	return result
-
-
 
 
 def fast_eval(device, model, dataset, transform=None, batch_size=1, num_workers=0):

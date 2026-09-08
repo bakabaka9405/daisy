@@ -3,12 +3,12 @@ from collections.abc import Callable
 from torch import Tensor
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
-from typing import Any, Generic, cast, Literal
+from typing import Any, cast, Literal
 
-from .index_dataset import IndexDataset, LabelT
+from .index_dataset import IndexDataset
 
 
-class MemoryDataset(IndexDataset[LabelT], Generic[LabelT]):
+class MemoryDataset[LabelT](IndexDataset[LabelT]):
 	tensors: list[Tensor]
 	labels: list[LabelT]
 	transform: Callable[..., Any] | None

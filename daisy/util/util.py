@@ -1,13 +1,12 @@
 import random
-import subprocess  # noqa: F401 - used by get_git_commit
+import subprocess
 
 import torch
 import numpy
-from numpy.typing import NDArray
 from torch import Tensor
 from torchvision.io.image import decode_image, ImageReadMode
-from torchvision import transforms
-from typing import TypeVar, Any
+from typing import Any, SupportsIndex
+from collections.abc import Iterable
 
 
 def set_global_seed(seed: int):
@@ -48,28 +47,6 @@ def DecodeImageFromFile(path: str, device: torch.device | None = None) -> Tensor
 class ZeroOneNormalize:
 	def __call__(self, tensor: torch.Tensor):
 		return tensor.float().div(255)
-
-
-def get_default_train_transform():
-	return transforms.Compose(
-		[
-			transforms.RandomAffine(0, shear=10, scale=(0.8, 1.2)),
-			transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1),
-			transforms.Resize((224, 224)),
-			ZeroOneNormalize(),
-			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-		]
-	)
-
-
-def get_default_val_transform():
-	return transforms.Compose(
-		[
-			transforms.Resize((224, 224)),
-			ZeroOneNormalize(),
-			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-		]
-	)
 
 
 def get_model_classifier(model):
@@ -131,20 +108,17 @@ def change_model_classifier(model, *, identity: bool = False, num_classes: int =
 			raise ValueError('Invalid model type')
 
 
-def FreezeModel(model):
+def freeze_model(model):
 	for param in model.parameters():
 		param.requires_grad = False
 
 
-def UnfreezeModel(model):
+def unfreeze_model(model):
 	for param in model.parameters():
 		param.requires_grad = True
 
 
-T = TypeVar('T')
-
-
-def gather_list_by_indexes(lst: list[T], index: list[int] | NDArray) -> list[T]:
+def gather_list_by_indexes[T](lst: list[T], index: Iterable[SupportsIndex]) -> list[T]:
 	return [lst[i] for i in index]
 
 
