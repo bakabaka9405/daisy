@@ -19,7 +19,7 @@ from torch.utils.data import Dataset
 def moco_pretrain(
 	device: torch.device,
 	model: nn.Module,
-	dataset: Dataset,
+	dataset: Dataset[list[torch.Tensor]],
 	engine: Literal['v2', 'v3'],
 	epochs: int,
 	batch_size: int = 256,
@@ -46,7 +46,7 @@ def moco_pretrain(
 	Args:
 		device: 训练设备
 		model: MoCoV2 或 MoCoV3 模型
-		dataset: 训练数据集 (返回 [view1, view2] 或 (view1, dummy_label))
+		dataset: 训练数据集（样本为 [view1, view2]）
 		engine: 'v2' 或 'v3'
 		epochs: 训练轮数
 		batch_size: 批大小
@@ -182,11 +182,9 @@ def moco_pretrain(
 			for param_group in optimizer.param_groups:
 				param_group['lr'] = current_lr
 
-			# 解析 batch: TwoCropsTransform 返回 ([view1, view2], dummy_label)
-			images, _ = batch
-			# images 是一个 list: [view1_tensor, view2_tensor]
-			im_1 = images[0].to(device, non_blocking=True)
-			im_2 = images[1].to(device, non_blocking=True)
+			# 两视图已由 transform 归一化
+			im_1 = batch[0].to(device, non_blocking=True)
+			im_2 = batch[1].to(device, non_blocking=True)
 
 			with torch.autocast('cuda', enabled=use_amp):
 				if engine == 'v2':

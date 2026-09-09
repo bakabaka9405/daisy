@@ -1,17 +1,14 @@
-from torch import Tensor
+from collections.abc import Callable
 from torch.utils.data import Dataset
 from abc import abstractmethod
 from typing import Any, Self
 
 
-class IndexDataset[LabelT](Dataset):
+class IndexDataset[SampleT](Dataset[SampleT]):
+	transform: Callable[..., Any]
+
 	@abstractmethod
-	def __init__(
-		self,
-		data: list,
-		labels: list[LabelT],
-		**kwargs,
-	):
+	def __init__(self, *args: Any, **kwargs: Any) -> None:
 		pass
 
 	@abstractmethod
@@ -19,11 +16,11 @@ class IndexDataset[LabelT](Dataset):
 		pass
 
 	@abstractmethod
-	def __getitem__(self, index: int) -> tuple[Tensor, LabelT]:
+	def __getitem__(self, index: int) -> SampleT:
 		pass
 
 	@abstractmethod
-	def getRawData(self) -> tuple[list, list[LabelT]]:
+	def getRawData(self) -> Any:
 		pass
 
 	@abstractmethod

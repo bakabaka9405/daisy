@@ -1,8 +1,52 @@
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
 import torch
+from torch import Tensor
+from torch.utils.data._utils.collate import collate, default_collate_fn_map
 from torchvision.transforms import v2 as transforms, InterpolationMode
 import torch.nn.functional as F
+
+
+@dataclass(slots=True, frozen=True)
+class LazyNormalization:
+	"""把张量包装为 LazyNormalizedTensor，归一化由 Prefetcher 在设备上执行。"""
+
+	mean: tuple[float, ...]
+	std: tuple[float, ...]
+
+	def __init__(self, mean: Sequence[float], std: Sequence[float]) -> None:
+		object.__setattr__(self, 'mean', tuple(mean))
+		object.__setattr__(self, 'std', tuple(std))
+
+	def __call__(self, tensor: Tensor) -> 'LazyNormalizedTensor':
+		return LazyNormalizedTensor(tensor, self)
+
+
+@dataclass(slots=True, frozen=True)
+class LazyNormalizedTensor:
+	"""携带归一化参数的张量；同一 batch 内合并要求参数一致。"""
+
+	tensor: Tensor
+	policy: LazyNormalization
+
+	def pin_memory(self) -> 'LazyNormalizedTensor':
+		return LazyNormalizedTensor(self.tensor.pin_memory(), self.policy)
+
+
+def _collate_lazy_normalized(
+	batch: list[LazyNormalizedTensor],
+	*,
+	collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
+) -> LazyNormalizedTensor:
+	policy = batch[0].policy
+	if any(item.policy != policy for item in batch):
+		raise ValueError('同一 batch 内的 LazyNormalization 策略必须一致')
+	collated = collate([item.tensor for item in batch], collate_fn_map=collate_fn_map)
+	return LazyNormalizedTensor(collated, policy)
+
+
+default_collate_fn_map[LazyNormalizedTensor] = _collate_lazy_normalized
 
 
 class ZeroOneNormalize:
@@ -126,11 +170,10 @@ def get_stretch_train_transform():
 			transforms.RandomResizedCrop((224, 224), scale=(0.8, 1.0), ratio=(1.9, 2.1)),
 			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
 			transforms.RandomHorizontalFlip(),
-			# ZeroOneNormalize(),
-			# transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-			# transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
+			LazyNormalization([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 		]
 	)
+
 
 def get_stretch_train_transform_slight():
 	return transforms.Compose(
@@ -142,6 +185,7 @@ def get_stretch_train_transform_slight():
 			# transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
 		]
 	)
+
 
 def get_stretch_linprobe_transform():
 	return transforms.Compose(
@@ -159,6 +203,7 @@ def get_stretch_val_transform():
 	return transforms.Compose(
 		[
 			transforms.Resize((224, 224)),
+			LazyNormalization([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 			# ZeroOneNormalize(),
 			# transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 			# transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),

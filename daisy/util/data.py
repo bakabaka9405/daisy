@@ -1,58 +1,58 @@
 """无竞态的 CUDA 数据预取器。"""
 
 from collections.abc import Iterator
+from typing import Any
 
 import torch
 from timm.data.loader import MultiEpochsDataLoader
 from torch.utils.data import DataLoader, Dataset
+from torch.utils._pytree import tree_leaves, tree_map
+from torchvision.transforms.v2 import functional as F
+
+from .transform import LazyNormalizedTensor
 
 
 class Prefetcher:
-	"""在独立 CUDA 流上把 batch 搬运到设备、转换为 fp32 并归一化。
+	"""在独立 CUDA 流上搬运 batch，对 LazyNormalizedTensor 做设备端归一化。
 
-	输入假定为 uint8 [0, 255]，归一化等价于 (x / 255 - mean) / std。
-	预取张量在预取流上分配，消费流使用前先等待预取流，并对张量登记
-	record_stream，使缓存分配器在消费流读取完成前不会复用其显存。
+	普通 Tensor 只搬设备并保留 dtype 与数值；标记张量在设备上转 float32 后归一化，
+	uint8 缩放到 [0, 1]，float 输入保持原值。pytree 容器与非 Tensor 元数据原样保留，
+	输出中的标记已消费为普通 Tensor。CUDA 路径对预取张量调用 record_stream，避免
+	缓存分配器在消费流读取完成前复用其显存。
 	"""
 
-	def __init__(
-		self,
-		loader: DataLoader,
-		device: torch.device,
-		mean: tuple[float, ...] = (0.485, 0.456, 0.406),
-		std: tuple[float, ...] = (0.229, 0.224, 0.225),
-	):
+	def __init__(self, loader: DataLoader, device: torch.device):
 		self.loader = loader
 		self.device = device
-		# mean/std 乘以 255，在设备上对 uint8 输入做原地归一化
-		self.mean = torch.tensor([m * 255 for m in mean], device=device).view(-1, 1, 1)
-		self.std = torch.tensor([s * 255 for s in std], device=device).view(-1, 1, 1)
 
 	def __len__(self) -> int:
 		return len(self.loader)
 
-	def __iter__(self) -> Iterator[tuple[torch.Tensor, torch.Tensor]]:
+	def _map_leaf(self, leaf: Any) -> Any:
+		if isinstance(leaf, LazyNormalizedTensor):
+			tensor = leaf.tensor.to(self.device, non_blocking=True)
+			tensor = F.to_dtype(tensor, dtype=torch.float32, scale=True)
+			return F.normalize(tensor, list(leaf.policy.mean), list(leaf.policy.std))
+		if isinstance(leaf, torch.Tensor):
+			return leaf.to(self.device, non_blocking=True)
+		return leaf
+
+	def __iter__(self) -> Iterator[Any]:
 		if self.device.type != 'cuda':
-			for data, target in self.loader:
-				data = data.to(self.device, dtype=torch.float32).sub_(self.mean).div_(self.std)
-				yield data, target.to(self.device)
+			for batch in self.loader:
+				yield tree_map(self._map_leaf, batch)
 			return
 
 		stream = torch.cuda.Stream(device=self.device)
 		current = torch.cuda.current_stream(self.device)
-
-		for data, target in self.loader:
+		for batch in self.loader:
 			with torch.cuda.stream(stream):
-				data = data.to(self.device, non_blocking=True)
-				target = target.to(self.device, non_blocking=True)
-				data = data.to(torch.float32).sub_(self.mean).div_(self.std)
-
-			# 消费流等待预取完成；record_stream 保证显存在消费流读取完成前不被复用
+				out = tree_map(self._map_leaf, batch)
 			current.wait_stream(stream)
-			data.record_stream(current)
-			target.record_stream(current)
-
-			yield data, target
+			for leaf in tree_leaves(out):
+				if isinstance(leaf, torch.Tensor) and leaf.is_cuda:
+					leaf.record_stream(current)
+			yield out
 
 
 def make_dataloader(
@@ -64,8 +64,6 @@ def make_dataloader(
 	drop_last: bool = True,
 	num_workers: int = 0,
 	pin_memory: bool = True,
-	mean: tuple[float, ...] = (0.485, 0.456, 0.406),
-	std: tuple[float, ...] = (0.229, 0.224, 0.225),
 ) -> Prefetcher:
 	return Prefetcher(
 		MultiEpochsDataLoader(
@@ -77,6 +75,4 @@ def make_dataloader(
 			drop_last=drop_last,
 		),
 		device,
-		mean=mean,
-		std=std,
 	)

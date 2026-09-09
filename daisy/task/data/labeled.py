@@ -20,7 +20,7 @@ class LabeledSamples:
 		return len(self.files)
 
 	def to_dataset(self) -> daisy.dataset.DiskDataset:
-		return daisy.dataset.DiskDataset(self.files, self.labels)
+		return daisy.dataset.DiskDataset(self.files, self.labels, lambda x: x)
 
 	@classmethod
 	def from_dataset(cls, dataset: daisy.dataset.IndexDataset) -> 'LabeledSamples':

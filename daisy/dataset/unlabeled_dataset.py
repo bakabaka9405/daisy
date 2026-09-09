@@ -2,23 +2,24 @@
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Self
 
 from torch import Tensor
-from torch.utils.data import Dataset
 from torchvision.io import decode_image, ImageReadMode
 
+from .index_dataset import IndexDataset
 
-class UnlabeledDiskDataset(Dataset):
-	"""无标签数据集，用于 MAE 等自监督学习任务
 
-	仅加载图像，不处理标签。为兼容 DataLoader 返回虚拟标签 0。
-	"""
+class UnlabeledDiskDataset[SampleT](IndexDataset[SampleT]):
+	"""无标签数据集，用于 MAE、MoCo 等自监督学习任务。"""
+
+	file_paths: list[Path]
+	transform: Callable[[Tensor], SampleT]
 
 	def __init__(
 		self,
 		file_paths: list[Path],
-		transform: Callable[..., Any] | None = None,
+		transform: Callable[[Tensor], SampleT],
 	):
 		self.file_paths = file_paths
 		self.transform = transform
@@ -26,20 +27,23 @@ class UnlabeledDiskDataset(Dataset):
 	def __len__(self) -> int:
 		return len(self.file_paths)
 
-	def __getitem__(self, index: int) -> tuple[Tensor | Any, int]:
-		tensor = decode_image(str(self.file_paths[index]), ImageReadMode.RGB)
+	def __getitem__(self, index: int) -> SampleT:
+		return self.transform(decode_image(str(self.file_paths[index]), ImageReadMode.RGB))
 
-		if self.transform:
-			tensor = self.transform(tensor)
+	def getRawData(self) -> list[Path]:
+		return self.file_paths
 
-		return tensor, 0
-
-	def set_transform(self, transform: Callable[..., Any]) -> None:
-		"""设置 transform"""
+	def setTransform(self, transform: Callable[[Tensor], SampleT]) -> None:
 		self.transform = transform
 
-	def take(self, k: int) -> 'UnlabeledDiskDataset':
-		return UnlabeledDiskDataset(self.file_paths[:k], self.transform)
+	def applyTransform(self, transform: Callable[[Tensor], SampleT]) -> None:
+		self.transform = transform
+
+	def take(self, k: int) -> Self:
+		return type(self)(self.file_paths[:k], self.transform)
+
+	def subset(self, indices: list[int]) -> Self:
+		return type(self)([self.file_paths[i] for i in indices], self.transform)
 
 
 def load_files_from_folder(root: Path | str, extensions: tuple[str, ...] | None = None) -> list[Path]:

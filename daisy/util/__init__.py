@@ -11,7 +11,7 @@ from .util import (
 	exclude_by_label,
 	filter_by_label,
 )
-from .transform import get_default_val_transform, get_default_train_transform
+from .transform import get_default_val_transform, get_default_train_transform, LazyNormalization
 from .data import Prefetcher, make_dataloader
 
 __all__ = [
@@ -22,6 +22,7 @@ __all__ = [
 	'shuffle_correlated_lists',
 	'get_default_val_transform',
 	'get_default_train_transform',
+	'LazyNormalization',
 	'Prefetcher',
 	'make_dataloader',
 	'enable_cudnn_benchmark',

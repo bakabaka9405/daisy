@@ -132,7 +132,7 @@ def _build(
 		val_transform = daisy.util.transform.get_rectangle_val_transform()
 
 	train_dataset.setTransform(train_transform)
-	val_dataset.applyTransform(val_transform)
+	val_dataset.setTransform(val_transform)
 
 	if isinstance(params.num_workers, int):
 		workers = (params.num_workers, params.num_workers)

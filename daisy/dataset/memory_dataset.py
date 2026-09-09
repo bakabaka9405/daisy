@@ -8,16 +8,16 @@ from typing import Any, cast, Literal
 from .index_dataset import IndexDataset
 
 
-class MemoryDataset[LabelT](IndexDataset[LabelT]):
+class MemoryDataset[LabelT](IndexDataset[tuple[Tensor, LabelT]]):
 	tensors: list[Tensor]
 	labels: list[LabelT]
-	transform: Callable[..., Any] | None
+	transform: Callable[..., Any]
 
 	def __init__(
 		self,
 		data: list[Path] | list[Tensor],
 		labels: list[LabelT],
-		transform: Callable[..., Any] | None = None,
+		transform: Callable[..., Any],
 		backend: Literal['pil', 'tensor'] = 'tensor',
 	):
 		if len(data) == 0:
@@ -45,13 +45,9 @@ class MemoryDataset[LabelT](IndexDataset[LabelT]):
 	def __getitem__(self, index: int) -> tuple[Tensor, LabelT]:
 		tensor = self.tensors[index]
 		label = self.labels[index]
+		return self.transform(tensor), label
 
-		if self.transform:
-			tensor = self.transform(tensor)
-
-		return tensor, label
-
-	def getRawData(self) -> tuple[list, list[LabelT]]:
+	def getRawData(self) -> tuple[list[Tensor], list[LabelT]]:
 		return self.tensors, self.labels
 
 	def setTransform(self, transform: Callable[..., Any]) -> None:
@@ -62,3 +58,10 @@ class MemoryDataset[LabelT](IndexDataset[LabelT]):
 
 	def take(self, k: int) -> 'MemoryDataset[LabelT]':
 		return MemoryDataset(self.tensors[:k], self.labels[:k], self.transform)
+
+	def subset(self, indices: list[int]) -> 'MemoryDataset[LabelT]':
+		return MemoryDataset(
+			[self.tensors[i] for i in indices],
+			[self.labels[i] for i in indices],
+			self.transform,
+		)

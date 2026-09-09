@@ -8,12 +8,12 @@ from pathlib import Path
 import torch
 from ignite.engine import Engine, Events
 from ignite.metrics import Average
-from timm.data.loader import MultiEpochsDataLoader
 from torch.utils.data import Dataset
 
 from daisy.model.mae import MaskedAutoencoderViT
 from daisy.typing import Replaceable
 from daisy.util import make_dataloader
+from daisy.util.transform import LazyNormalizedTensor
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -37,7 +37,7 @@ class MAEPretrainParams(Replaceable):
 def mae_pretrain(
 	device: torch.device,
 	model: MaskedAutoencoderViT,
-	dataset: Dataset,
+	dataset: Dataset[torch.Tensor | LazyNormalizedTensor],
 	params: MAEPretrainParams,
 	*,
 	save_path: Path | str | None = None,
@@ -82,7 +82,6 @@ def mae_pretrain(
 
 	# DataLoader
 	print('Loading dataloader...')
-
 	loader = make_dataloader(
 		dataset,
 		batch_size=params.batch_size,
@@ -91,8 +90,6 @@ def mae_pretrain(
 		drop_last=True,
 		num_workers=params.num_workers,
 		pin_memory=params.pin_memory,
-		mean=(0.485, 0.456, 0.406),
-		std=(0.229, 0.224, 0.225),
 	)
 
 	num_batches = len(loader)
@@ -138,11 +135,9 @@ def mae_pretrain(
 		print(f'Resumed from epoch {start_epoch}')
 
 	def process_function(engine: Engine, batch: torch.Tensor) -> float:
-		images, _ = batch
-
 		# 前向
 		with torch.autocast('cuda', enabled=params.use_amp):
-			loss, _, _ = model(images, mask_ratio=params.mask_ratio)
+			loss, _, _ = model(batch, mask_ratio=params.mask_ratio)
 
 		loss_value = loss.detach()
 
@@ -162,8 +157,12 @@ def mae_pretrain(
 
 	engine = Engine(process_function)
 
+	epoch_start = 0.0
+
 	@engine.on(Events.EPOCH_STARTED)
-	def on_epoch_started(_):
+	def on_epoch_started(engine: Engine):
+		nonlocal epoch_start
+		epoch_start = time.perf_counter()
 		model.train()
 		optimizer.zero_grad()
 
@@ -181,7 +180,8 @@ def mae_pretrain(
 	def on_epoch_completed(engine: Engine):
 		train_loss: float = engine.state.metrics['train_loss']
 		epoch = engine.state.epoch
-		print(f'Epoch {epoch}/{params.epochs}, Train Loss: {train_loss:.4f}')
+		elapsed = time.perf_counter() - epoch_start
+		print(f'Epoch {epoch}/{params.epochs}, Train Loss: {train_loss:.4f}, Time: {elapsed:.1f}s')
 
 		if log_file is not None:
 			with open(log_file, 'a', encoding='utf-8') as f:

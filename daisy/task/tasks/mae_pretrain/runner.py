@@ -10,6 +10,7 @@ import daisy
 from daisy.mae_pretrain import MAEPretrainParams
 from daisy.model.mae import create_mae_model, load_timm_pretrained_encoder_weights
 from daisy.dataset import UnlabeledDiskDataset, load_files_from_folder
+from daisy.util.transform import LazyNormalization
 from ...base import TaskRunner
 from ...registry import TaskRegistry
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
@@ -38,6 +39,7 @@ def get_mae_transform(
 	if hflip:
 		trans.append(transforms.RandomHorizontalFlip())
 
+	trans.append(LazyNormalization([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]))
 	return transforms.Compose(trans)
 
 

@@ -5,13 +5,14 @@ from ..util import (
 	shuffle_correlated_lists,
 )
 from collections.abc import Generator
+from typing import Any
 
 
 def _get_rng(seed: int | None = None):
 	return numpy.random.default_rng(seed)
 
 
-def split_by_label[LabelT](dataset: IndexDataset[LabelT]) -> dict[LabelT, list]:
+def split_by_label[LabelT](dataset: IndexDataset[tuple[Any, LabelT]]) -> dict[LabelT, list]:
 	"""将数据集按标签分割为多个子集"""
 	label_to_indices: dict[LabelT, list] = {}
 	data, labels = dataset.getRawData()
@@ -37,8 +38,8 @@ def default_data_split[T: IndexDataset](
 	train_size = int(len(data) * (1 - val_ratio))
 
 	return (
-		dataset_type(gather(data, idx[:train_size]), gather(labels, idx[:train_size])),
-		dataset_type(gather(data, idx[train_size:]), gather(labels, idx[train_size:])),
+		dataset_type(gather(data, idx[:train_size]), gather(labels, idx[:train_size]), dataset.transform),
+		dataset_type(gather(data, idx[train_size:]), gather(labels, idx[train_size:]), dataset.transform),
 	)
 
 
@@ -79,7 +80,10 @@ def stratified_data_split[T: IndexDataset](
 	val_data = [item for item, _ in val_pairs]
 	val_labels = [label for _, label in val_pairs]
 
-	return dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
+	return (
+		dataset_type(train_data, train_labels, dataset.transform),
+		dataset_type(val_data, val_labels, dataset.transform),
+	)
 
 
 def split_by_groups[T: IndexDataset](
@@ -117,8 +121,8 @@ def split_by_groups[T: IndexDataset](
 			train_indices.extend(indices)
 
 	return (
-		dataset_type(gather(data, train_indices), gather(labels, train_indices)),
-		dataset_type(gather(data, val_indices), gather(labels, val_indices)),
+		dataset_type(gather(data, train_indices), gather(labels, train_indices), dataset.transform),
+		dataset_type(gather(data, val_indices), gather(labels, val_indices), dataset.transform),
 	)
 
 
@@ -172,7 +176,10 @@ def minimum_class_proportional_split[T: IndexDataset](
 		val_data = gather(val_data, val_idx) if len(val_data) > 0 else []
 		val_labels = gather(val_labels, val_idx) if len(val_labels) > 0 else []
 
-	return dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
+	return (
+		dataset_type(train_data, train_labels, dataset.transform),
+		dataset_type(val_data, val_labels, dataset.transform),
+	)
 
 
 def balanced_k_fold[T: IndexDataset](
@@ -198,7 +205,10 @@ def balanced_k_fold[T: IndexDataset](
 		val_data = []
 		val_labels = []
 
-		yield dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
+		yield (
+			dataset_type(train_data, train_labels, dataset.transform),
+			dataset_type(val_data, val_labels, dataset.transform),
+		)
 
 
 def k_fold[T: IndexDataset](
@@ -219,7 +229,10 @@ def k_fold[T: IndexDataset](
 		train_labels = gather(labels, numpy.concatenate(idxes[:fold] + idxes[fold + 1 :]))
 		val_data = gather(data, idxes[fold])
 		val_labels = gather(labels, idxes[fold])
-		yield dataset_type(train_data, train_labels), dataset_type(val_data, val_labels)
+		yield (
+			dataset_type(train_data, train_labels, dataset.transform),
+			dataset_type(val_data, val_labels, dataset.transform),
+		)
 
 
 def trunc_max_class[T: IndexDataset](dataset: T) -> T:
@@ -236,4 +249,4 @@ def trunc_max_class[T: IndexDataset](dataset: T) -> T:
 		labels += [i] * minimum_size
 
 	shuffle_correlated_lists(data, labels)
-	return dataset_type(data, labels)
+	return dataset_type(data, labels, dataset.transform)

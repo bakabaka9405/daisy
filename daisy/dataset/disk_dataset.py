@@ -7,17 +7,17 @@ from PIL import Image
 from .index_dataset import IndexDataset
 
 
-class DiskDataset[LabelT](IndexDataset[LabelT]):
+class DiskDataset[LabelT](IndexDataset[tuple[Any, LabelT]]):
 	file_paths: list[Path]
 	labels: list[LabelT]
-	transform: Callable[..., Any] | None
+	transform: Callable[..., Any]
 	backend: Literal['pil', 'tensor']
 
 	def __init__(
 		self,
 		file_paths: list[Path],
 		labels: list[LabelT],
-		transform: Callable[..., Any] | None = None,
+		transform: Callable[..., Any],
 		backend: Literal['pil', 'tensor'] = 'tensor',
 	):
 		self.file_paths = file_paths
@@ -34,13 +34,9 @@ class DiskDataset[LabelT](IndexDataset[LabelT]):
 		else:
 			img = decode_image(str(self.file_paths[index]), ImageReadMode.RGB)
 		label = self.labels[index]
+		return self.transform(img), label
 
-		if self.transform:
-			img = self.transform(img)
-
-		return img, label
-
-	def getRawData(self) -> tuple[list, list[LabelT]]:
+	def getRawData(self) -> tuple[list[Path], list[LabelT]]:
 		return self.file_paths, self.labels
 
 	def setTransform(self, transform: Callable[..., Any]) -> None:
