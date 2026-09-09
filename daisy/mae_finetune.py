@@ -25,6 +25,7 @@ from daisy.typing import Replaceable
 
 from daisy.classifier_trainer import evaluate
 from daisy.dataset.index_dataset import IndexDataset
+from daisy.util import Prefetcher
 from daisy.training import (
 	BestModel,
 	Checkpoint,
@@ -139,21 +140,27 @@ def _build(
 		workers = params.num_workers
 
 	# --- DataLoader ---
-	train_loader = MultiEpochsDataLoader(
-		train_dataset,
-		batch_size=params.batch_size,
-		shuffle=True,
-		num_workers=workers[0],
-		pin_memory=params.pin_memory,
-		drop_last=True,
+	train_loader = Prefetcher(
+		MultiEpochsDataLoader(
+			train_dataset,
+			batch_size=params.batch_size,
+			shuffle=True,
+			num_workers=workers[0],
+			pin_memory=params.pin_memory,
+			drop_last=True,
+		),
+		device=device,
 	)
 
-	val_loader = MultiEpochsDataLoader(
-		val_dataset,
-		batch_size=params.batch_size,
-		shuffle=False,
-		num_workers=workers[1],
-		pin_memory=params.pin_memory,
+	val_loader = Prefetcher(
+		MultiEpochsDataLoader(
+			val_dataset,
+			batch_size=params.batch_size,
+			shuffle=False,
+			num_workers=workers[1],
+			pin_memory=params.pin_memory,
+		),
+		device=device,
 	)
 
 	# --- 学习率计算 ---

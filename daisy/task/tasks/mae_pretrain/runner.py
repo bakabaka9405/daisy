@@ -10,7 +10,6 @@ import daisy
 from daisy.mae_pretrain import MAEPretrainParams
 from daisy.model.mae import create_mae_model, load_timm_pretrained_encoder_weights
 from daisy.dataset import UnlabeledDiskDataset, load_files_from_folder
-from daisy.util.transform import ZeroOneNormalize
 from ...base import TaskRunner
 from ...registry import TaskRegistry
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
@@ -38,16 +37,6 @@ def get_mae_transform(
 
 	if hflip:
 		trans.append(transforms.RandomHorizontalFlip())
-
-	trans.extend(
-		[
-			ZeroOneNormalize(),
-			transforms.Normalize(
-				mean=[0.485, 0.456, 0.406],
-				std=[0.229, 0.224, 0.225],
-			),
-		]
-	)
 
 	return transforms.Compose(trans)
 
@@ -177,9 +166,7 @@ class MAEPretrainRunner(TaskRunner):
 		# 训练
 		print('\nStarting MAE pretraining...')
 
-		params = MAEPretrainParams(
-			**training_cfg.model_dump(include={field.name for field in fields(MAEPretrainParams)})
-		)
+		params = MAEPretrainParams(**training_cfg.model_dump(include={field.name for field in fields(MAEPretrainParams)}))
 		daisy.mae_pretrain.mae_pretrain(
 			device=device,
 			model=model,

@@ -5,7 +5,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from daisy.typing import GenericDataLoader as DataLoader
 
 from daisy.training.state import TrainState
 

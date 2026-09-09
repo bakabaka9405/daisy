@@ -12,6 +12,7 @@ from .util import (
 	filter_by_label,
 )
 from .transform import get_default_val_transform, get_default_train_transform
+from .data import Prefetcher, make_dataloader
 
 __all__ = [
 	'set_global_seed',
@@ -21,6 +22,8 @@ __all__ = [
 	'shuffle_correlated_lists',
 	'get_default_val_transform',
 	'get_default_train_transform',
+	'Prefetcher',
+	'make_dataloader',
 	'enable_cudnn_benchmark',
 	'change_model_classifier',
 	'copy_by_label',

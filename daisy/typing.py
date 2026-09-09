@@ -2,7 +2,8 @@ import numpy as np
 from numpy.typing import NDArray, ArrayLike
 from torch import Tensor
 from dataclasses import dataclass, replace
-from typing import Self
+from typing import Self, Protocol
+from collections.abc import Iterator
 
 type VectorI32 = np.ndarray[tuple[int], np.dtype[np.int32]]
 type VectorI64 = np.ndarray[tuple[int], np.dtype[np.int64]]
@@ -27,3 +28,8 @@ def to_array(x: Tensor | ArrayLike) -> NDArray:
 class Replaceable:
 	def replace(self: Self, **changes) -> Self:
 		return replace(self, **changes)
+
+
+class GenericDataLoader(Protocol):
+	def __iter__(self) -> Iterator[tuple[Tensor, Tensor]]: ...
+	def __len__(self) -> int: ...

@@ -13,6 +13,7 @@ from torch.utils.data import Dataset
 
 from daisy.model.mae import MaskedAutoencoderViT
 from daisy.typing import Replaceable
+from daisy.util import make_dataloader
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -81,20 +82,22 @@ def mae_pretrain(
 
 	# DataLoader
 	print('Loading dataloader...')
-	data_loader = MultiEpochsDataLoader(
+
+	loader = make_dataloader(
 		dataset,
 		batch_size=params.batch_size,
+		device=device,
 		shuffle=True,
+		drop_last=True,
 		num_workers=params.num_workers,
 		pin_memory=params.pin_memory,
-		drop_last=True,
+		mean=(0.485, 0.456, 0.406),
+		std=(0.229, 0.224, 0.225),
 	)
-	num_batches = len(data_loader)
-	if num_batches == 0:
-		raise ValueError('empty DataLoader')
 
-	model.to(device)
-	model.compile(backend='inductor')
+	num_batches = len(loader)
+
+	model.to(device).compile(backend='inductor')
 
 	# Optimizer
 	# 使用 AdamW，参考 MAE 原论文
@@ -136,9 +139,6 @@ def mae_pretrain(
 
 	def process_function(engine: Engine, batch: torch.Tensor) -> float:
 		images, _ = batch
-
-		# 数据搬运
-		images = images.to(device, non_blocking=True)
 
 		# 前向
 		with torch.autocast('cuda', enabled=params.use_amp):
@@ -211,4 +211,4 @@ def mae_pretrain(
 			}
 		)
 
-	engine.run(data_loader, max_epochs=params.epochs)
+	engine.run(loader, max_epochs=params.epochs)
