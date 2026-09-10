@@ -13,13 +13,14 @@ from typing import Literal
 import torch
 import torch.nn as nn
 from timm.data.loader import MultiEpochsDataLoader
-from torch.utils.data import Dataset
+
+from daisy.dataset.index_dataset import IndexDataset
 
 
 def moco_pretrain(
 	device: torch.device,
 	model: nn.Module,
-	dataset: Dataset[list[torch.Tensor]],
+	dataset: IndexDataset[list[torch.Tensor], None],
 	engine: Literal['v2', 'v3'],
 	epochs: int,
 	batch_size: int = 256,

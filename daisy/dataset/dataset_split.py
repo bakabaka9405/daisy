@@ -5,17 +5,18 @@ from ..util import (
 	shuffle_correlated_lists,
 )
 from collections.abc import Generator
-from typing import Any
 
 
 def _get_rng(seed: int | None = None):
 	return numpy.random.default_rng(seed)
 
 
-def split_by_label[LabelT](dataset: IndexDataset[tuple[Any, LabelT]]) -> dict[LabelT, list]:
+def split_by_label[ImageT, LabelT](dataset: IndexDataset[ImageT, LabelT]) -> dict[LabelT, list]:
 	"""将数据集按标签分割为多个子集"""
 	label_to_indices: dict[LabelT, list] = {}
 	data, labels = dataset.getRawData()
+	if labels is None:
+		raise ValueError('split_by_label requires a labeled dataset')
 	for i, j in zip(data, labels):
 		if j not in label_to_indices:
 			label_to_indices[j] = []
@@ -28,18 +29,17 @@ def default_data_split[T: IndexDataset](
 	val_ratio: float = 0.1,
 	seed: int | None = None,
 ) -> tuple[T, T]:
-	dataset_type = type(dataset)
-
-	data, labels = dataset.getRawData()
+	"""随机划分训练/验证集，与标签无关"""
+	data, _ = dataset.getRawData()
 
 	rng = _get_rng(seed)
-	idx = rng.permutation(len(data))
+	idx = rng.permutation(len(data)).tolist()
 
 	train_size = int(len(data) * (1 - val_ratio))
 
 	return (
-		dataset_type(gather(data, idx[:train_size]), gather(labels, idx[:train_size]), dataset.transform),
-		dataset_type(gather(data, idx[train_size:]), gather(labels, idx[train_size:]), dataset.transform),
+		dataset.subset(idx[:train_size]),
+		dataset.subset(idx[train_size:]),
 	)
 
 
@@ -51,7 +51,6 @@ def stratified_data_split[T: IndexDataset](
 ) -> tuple[T, T]:
 	"""按类别分层划分训练/验证集"""
 	dataset_type = type(dataset)
-	data, labels = dataset.getRawData()
 	label_dict = split_by_label(dataset)
 	rng = _get_rng(seed)
 
@@ -96,8 +95,6 @@ def split_by_groups[T: IndexDataset](
 	if len(groups) != len(dataset):
 		raise ValueError('groups length must match dataset length')
 
-	dataset_type = type(dataset)
-	data, labels = dataset.getRawData()
 	group_to_indices: dict[str | int, list[int]] = {}
 	for index, group in enumerate(groups):
 		group_to_indices.setdefault(group, []).append(index)
@@ -121,8 +118,8 @@ def split_by_groups[T: IndexDataset](
 			train_indices.extend(indices)
 
 	return (
-		dataset_type(gather(data, train_indices), gather(labels, train_indices), dataset.transform),
-		dataset_type(gather(data, val_indices), gather(labels, val_indices), dataset.transform),
+		dataset.subset(train_indices),
+		dataset.subset(val_indices),
 	)
 
 
@@ -218,20 +215,16 @@ def k_fold[T: IndexDataset](
 ) -> Generator[tuple[T, T]]:
 	"""K 折验证，类别不均匀的情况下不保证同类别样本均匀分布在每一折中"""
 
-	dataset_type = type(dataset)
-
-	data, labels = dataset.getRawData()
+	data, _ = dataset.getRawData()
 	rng = _get_rng(seed)
 	idx = rng.permutation(len(data))
 	idxes = numpy.array_split(idx, k)
 	for fold in range(k):
-		train_data = gather(data, numpy.concatenate(idxes[:fold] + idxes[fold + 1 :]))
-		train_labels = gather(labels, numpy.concatenate(idxes[:fold] + idxes[fold + 1 :]))
-		val_data = gather(data, idxes[fold])
-		val_labels = gather(labels, idxes[fold])
+		train_idx = numpy.concatenate(idxes[:fold] + idxes[fold + 1 :]).tolist()
+		val_idx = idxes[fold].tolist()
 		yield (
-			dataset_type(train_data, train_labels, dataset.transform),
-			dataset_type(val_data, val_labels, dataset.transform),
+			dataset.subset(train_idx),
+			dataset.subset(val_idx),
 		)
 
 

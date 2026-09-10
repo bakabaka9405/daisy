@@ -2,7 +2,7 @@ import numpy as np
 from numpy.typing import NDArray, ArrayLike
 from torch import Tensor
 from dataclasses import dataclass, replace
-from typing import Self, Protocol
+from typing import Any, Self, Protocol
 from collections.abc import Iterator
 
 type VectorI32 = np.ndarray[tuple[int], np.dtype[np.int32]]
@@ -31,5 +31,5 @@ class Replaceable:
 
 
 class GenericDataLoader(Protocol):
-	def __iter__(self) -> Iterator[tuple[Tensor, Tensor]]: ...
+	def __iter__(self) -> Iterator[Any]: ...
 	def __len__(self) -> int: ...

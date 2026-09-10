@@ -450,8 +450,12 @@ def train_classifier(
 	# 损失函数
 	criterion = create_criterion(mixup_fn is not None, smoothing)
 	val_criterion = nn.CrossEntropyLoss()  # 验证时不使用 mixup/smoothing
-	inference_trainer = Trainer(model, optimizer, criterion, device, use_amp=use_amp)
 	val_targets = torch.as_tensor(val_dataset.getRawData()[1], dtype=torch.long)
+
+	def predict_fn(batch: Any) -> torch.Tensor:
+		return model(batch[0])
+
+	inference_trainer = Trainer(model, optimizer, device=device, use_amp=use_amp)
 
 	print('Ready to train...')
 	scaler = torch.GradScaler(enabled=use_amp) if use_amp else None
@@ -487,7 +491,7 @@ def train_classifier(
 			lr_scheduler.step(epoch + 1)
 
 		# Validation
-		val_scores = inference_trainer.inference(val_loader)
+		val_scores = inference_trainer.inference(val_loader, predict_fn)
 		val_metrics = evaluate(
 			scores=val_scores,
 			targets=val_targets,
@@ -672,7 +676,7 @@ def fast_eval(device, model, dataset, transform=None, batch_size=1, num_workers=
 	)
 
 	labels = torch.as_tensor(dataset.getRawData()[1], dtype=torch.long)
-	scores = Trainer(model=model, device=device, use_amp=False).inference(data_loader)
+	scores = Trainer(model=model, device=device, use_amp=False).inference(data_loader, lambda batch: model(batch[0]))
 	return labels.tolist(), torch.argmax(scores, dim=1).tolist() if scores.numel() else [], scores.tolist()
 
 

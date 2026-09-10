@@ -49,6 +49,8 @@ class EvalCheckpointRunner(TaskRunner['EvalCheckpointConfig']):
 		)
 
 		eval_files, eval_labels = eval_dataset.getRawData()
+		if eval_labels is None:
+			raise ValueError('eval_checkpoint requires a labeled dataset')
 		print(f'Eval samples: {len(eval_dataset)}')
 
 		model = create_inference_model(config.model)

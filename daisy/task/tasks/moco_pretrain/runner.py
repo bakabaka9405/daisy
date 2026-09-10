@@ -15,7 +15,7 @@ from daisy.model.moco import (
 	MOCO_VIT_MODELS,
 	TwoCropsTransform,
 )
-from daisy.dataset import UnlabeledDiskDataset, load_files_from_folder
+from daisy.dataset import DiskDataset, load_files_from_folder
 from daisy.util.transform import ZeroOneNormalize
 from ...base import TaskRunner
 from ...registry import TaskRegistry
@@ -142,8 +142,8 @@ class MoCoPretrainRunner(TaskRunner['MoCoPretrainConfig']):
 		else:
 			transform = _build_v3_transform(input_size)
 
-		# 创建数据集
-		dataset = UnlabeledDiskDataset(files, transform=transform)
+		# 创建数据集（无标签，LabelT=None）
+		dataset: DiskDataset[list[torch.Tensor], None] = DiskDataset(files, None, transform)
 
 		# 创建模型
 		print('\nCreating model...')

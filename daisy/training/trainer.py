@@ -6,27 +6,27 @@ from typing import Any
 import torch
 import torch.nn as nn
 from daisy.typing import GenericDataLoader as DataLoader
+from daisy.util.data import Prefetcher
 
 from daisy.training.state import TrainState
 
 
 SideEffectFn = Callable[[TrainState], None]
-BeforeForwardFn = Callable[[TrainState, torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]]
-AfterForwardFn = Callable[[TrainState, torch.Tensor], torch.Tensor]
+ProcessFn = Callable[[Any], torch.Tensor]
 
 
 class Trainer:
-	"""通过事件回调和 Plugin 扩展固定训练循环。
+	"""固定训练循环，业务逻辑通过 ``process_fn`` / ``predict_fn`` 闭包注入。
 
-	每轮依次执行 batch start、输入变换、forward、backward、优化器更新和 batch end；
-	每个 epoch 前后分别触发对应回调。
+	每个 batch 由 Prefetcher 完整搬运到设备；``process_fn`` 在 autocast 下返回
+	保留计算图的标量 loss，Trainer 负责反向、梯度累积、梯度裁剪、scaler 与优化器更新。
 	"""
 
 	def __init__(
 		self,
 		model: nn.Module,
 		optimizer: torch.optim.Optimizer | None = None,
-		criterion: nn.Module | None = None,
+		process_fn: ProcessFn | None = None,
 		device: torch.device | None = None,
 		*,
 		use_amp: bool = True,
@@ -35,7 +35,7 @@ class Trainer:
 	):
 		self.model = model
 		self.optimizer = optimizer
-		self.criterion = criterion
+		self.process_fn = process_fn
 		self.device = device if device is not None else torch.device('cpu')
 		self.use_amp = use_amp
 		self.accum_iter = accum_iter
@@ -49,9 +49,6 @@ class Trainer:
 		self._on_epoch_end: list[SideEffectFn] = []
 		self._on_batch_start: list[SideEffectFn] = []
 		self._on_batch_end: list[SideEffectFn] = []
-		self._before_forward: list[BeforeForwardFn] = []
-		self._after_forward: list[AfterForwardFn] = []
-		self._state: TrainState | None = None
 
 	def on_fit_start(self, fn: SideEffectFn) -> Trainer:
 		self._on_fit_start.append(fn)
@@ -77,52 +74,45 @@ class Trainer:
 		self._on_batch_end.append(fn)
 		return self
 
-	def before_forward(self, fn: BeforeForwardFn) -> Trainer:
-		"""注册返回 ``(images, targets)`` 的前向输入变换。"""
-		self._before_forward.append(fn)
-		return self
-
-	def after_forward(self, fn: AfterForwardFn) -> Trainer:
-		"""注册返回变换后输出的 forward hook。"""
-		self._after_forward.append(fn)
-		return self
-
 	def use(self, *plugins: Any) -> Trainer:
 		"""注册 Plugin。"""
 		for plugin in plugins:
 			plugin.register(self)
 		return self
 
-	def fit(self, train_loader: DataLoader, epochs: int) -> TrainState:
-		"""执行训练循环并返回最终状态。"""
+	def fit(self, train_loader: DataLoader, epochs: int, *, start_epoch: int = 0) -> TrainState:
+		"""执行 ``[start_epoch, epochs)`` 区间训练并返回最终状态。"""
 		if self.optimizer is None:
 			raise RuntimeError('fit 需要 optimizer。')
-		if self.criterion is None:
-			raise RuntimeError('fit 需要 criterion。')
+		if self.process_fn is None:
+			raise RuntimeError('fit 需要 process_fn。')
 
 		optimizer = self.optimizer
 		self.model.to(self.device)
+
+		loader = train_loader if isinstance(train_loader, Prefetcher) else Prefetcher(train_loader, self.device)
 
 		state = TrainState(
 			model=self.model,
 			optimizer=optimizer,
 			device=self.device,
 			total_epochs=epochs,
-			total_batches=len(train_loader),
+			total_batches=len(loader),
 		)
-		self._state = state
+
+		optimizer.zero_grad(set_to_none=True)
 
 		for fn in self._on_fit_start:
 			fn(state)
 
-		for epoch in range(epochs):
+		for epoch in range(start_epoch, epochs):
 			state.epoch = epoch
-			state.total_batches = len(train_loader)
+			state.total_batches = len(loader)
 
 			for fn in self._on_epoch_start:
 				fn(state)
 
-			state.epoch_train_loss = self._train_one_epoch(train_loader, state)
+			state.epoch_train_loss = self._train_one_epoch(loader, state)
 
 			for fn in self._on_epoch_end:
 				fn(state)
@@ -135,36 +125,30 @@ class Trainer:
 
 		return state
 
-	def _train_one_epoch(self, train_loader: DataLoader, state: TrainState) -> float:
+	def _train_one_epoch(self, train_loader: Prefetcher, state: TrainState) -> float:
 		if self.optimizer is None:
 			raise RuntimeError('Optimizer is required for _train_one_epoch.')
-		if self.criterion is None:
-			raise RuntimeError('Criterion is required for _train_one_epoch.')
+		if self.process_fn is None:
+			raise RuntimeError('process_fn is required for _train_one_epoch.')
 
 		optimizer = self.optimizer
-		criterion = self.criterion
+		process_fn = self.process_fn
 		self.model.train()
 		total_loss = torch.zeros((), device=self.device)
 		num_batches = len(train_loader)
 
-		for batch_idx, (images, targets) in enumerate(train_loader):
+		for batch_idx, batch in enumerate(train_loader):
 			state.batch_idx = batch_idx
 
 			for fn in self._on_batch_start:
 				fn(state)
 
-			images = images.to(self.device, non_blocking=True)
-			targets = targets.to(self.device, non_blocking=True)
-
-			for fn in self._before_forward:
-				images, targets = fn(state, images, targets)
-
 			with torch.autocast(device_type=self.device.type, enabled=self.use_amp):
-				outputs = self.model(images)
-				for fn in self._after_forward:
-					outputs = fn(state, outputs)
+				raw_loss = process_fn(batch)
+				if not isinstance(raw_loss, torch.Tensor) or raw_loss.ndim != 0:
+					raise TypeError('process_fn 必须返回标量 Tensor loss。')
 				# 缩放 loss，使累计梯度与整批平均梯度处于同一尺度。
-				loss: torch.Tensor = criterion(outputs, targets) / self.accum_iter
+				loss = raw_loss / self.accum_iter
 
 			self.scaler.scale(loss).backward()
 
@@ -178,7 +162,7 @@ class Trainer:
 				optimizer.zero_grad(set_to_none=True)
 				state.global_step += 1
 
-			batch_loss = loss.detach() * self.accum_iter
+			batch_loss = raw_loss.detach()
 			state.batch_loss = batch_loss
 			total_loss.add_(batch_loss)
 
@@ -188,32 +172,18 @@ class Trainer:
 		return (total_loss / max(num_batches, 1)).item()
 
 	@torch.no_grad()
-	def inference(self, data_loader: DataLoader) -> torch.Tensor:
-		"""返回按 batch 顺序拼接且已执行 forward hook 的 score。"""
-		current = self._state
-		state = TrainState(
-			model=self.model,
-			optimizer=self.optimizer,
-			device=self.device,
-			epoch=current.epoch if current else 0,
-			total_epochs=current.total_epochs if current else 0,
-			total_batches=len(data_loader),
-			global_step=current.global_step if current else 0,
-			extras=current.extras.copy() if current else {},
-		)
+	def inference(self, data_loader: DataLoader, predict_fn: Callable[[Any], torch.Tensor]) -> torch.Tensor:
+		"""按 batch 顺序拼接预测结果，返回 CPU 张量。"""
+		loader = data_loader if isinstance(data_loader, Prefetcher) else Prefetcher(data_loader, self.device)
 		was_training = self.model.training
 		self.model.to(self.device)
 		self.model.eval()
 
 		try:
 			scores: list[torch.Tensor] = []
-			for batch_idx, (images, _) in enumerate(data_loader):
-				state.batch_idx = batch_idx
-				images = images.to(self.device, non_blocking=True)
+			for batch in loader:
 				with torch.autocast(device_type=self.device.type, enabled=self.use_amp):
-					outputs = self.model(images)
-					for fn in self._after_forward:
-						outputs = fn(state, outputs)
+					outputs = predict_fn(batch)
 				scores.append(outputs.cpu())
 
 			return torch.cat(scores) if scores else torch.empty(0)

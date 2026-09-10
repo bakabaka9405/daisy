@@ -25,6 +25,8 @@ class LabeledSamples:
 	@classmethod
 	def from_dataset(cls, dataset: daisy.dataset.IndexDataset) -> 'LabeledSamples':
 		files, labels = dataset.getRawData()
+		if labels is None:
+			raise ValueError('from_dataset requires a labeled dataset')
 		return cls(files=cast(list[Path], list(files)), labels=list(labels))
 
 

@@ -50,6 +50,8 @@ class PredictExportRunner(TaskRunner['PredictExportConfig']):
 		)
 
 		eval_files, eval_labels = eval_dataset.getRawData()
+		if eval_labels is None:
+			raise ValueError('predict_export requires a labeled dataset')
 		transform = get_inference_transform(config.model, runtime_cfg)
 		model = create_inference_model(config.model)
 
@@ -62,7 +64,7 @@ class PredictExportRunner(TaskRunner['PredictExportConfig']):
 			pin_memory=True,
 		)
 
-		scores = Trainer(model=model, device=device, use_amp=False).inference(loader)
+		scores = Trainer(model=model, device=device, use_amp=False).inference(loader, lambda batch: model(batch[0]))
 		all_preds = torch.argmax(scores, dim=1).tolist() if scores.numel() else []
 		all_logits = scores.tolist() if runtime_cfg.include_logits else []
 

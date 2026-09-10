@@ -20,6 +20,7 @@ from typing import Any
 
 import torch
 import torch.nn as nn
+from timm.data.mixup import Mixup
 
 from daisy.typing import Replaceable
 
@@ -34,7 +35,6 @@ from daisy.training import (
 	EarlyStop,
 	EpochPrint,
 	Eval,
-	Mixup,
 	Trainer,
 	TrainState,
 )
@@ -196,11 +196,32 @@ def _build(
 	val_criterion = nn.CrossEntropyLoss()
 	val_targets = torch.as_tensor(val_dataset.getRawData()[1], dtype=torch.long)
 
+	mixup_fn: Mixup | None = None
+	if mixup_enabled:
+		mixup_fn = Mixup(
+			mixup_alpha=params.mixup,
+			cutmix_alpha=params.cutmix,
+			prob=1.0,
+			switch_prob=0.5,
+			mode='batch',
+			label_smoothing=params.smoothing,
+			num_classes=num_classes,
+		)
+
+	def process_fn(batch: Any) -> torch.Tensor:
+		images, targets = batch
+		if mixup_fn is not None:
+			images, targets = mixup_fn(images, targets)
+		return criterion(model(images), targets)
+
+	def predict_fn(batch: Any) -> torch.Tensor:
+		return model(batch[0])
+
 	# --- Trainer ---
 	trainer = Trainer(
 		model=model,
 		optimizer=optimizer,
-		criterion=criterion,
+		process_fn=process_fn,
 		device=device,
 		use_amp=params.use_amp,
 		accum_iter=params.accum_iter,
@@ -218,24 +239,13 @@ def _build(
 
 	plugins: list[Any] = [lr_plugin]
 
-	# Mixup/CutMix
-	if mixup_enabled:
-		plugins.append(
-			Mixup(
-				mixup_alpha=params.mixup,
-				cutmix_alpha=params.cutmix,
-				smoothing=params.smoothing,
-				num_classes=num_classes,
-			)
-		)
-
 	# Eval
 	evaluator: Eval | None = None
 	best_model: BestModel | None = None
 
 	def _eval_fn(trainer: Trainer) -> dict[str, float]:
 		metrics = evaluate(
-			scores=trainer.inference(val_loader),
+			scores=trainer.inference(val_loader, predict_fn),
 			targets=val_targets,
 			criterion=val_criterion,
 			num_classes=num_classes,

@@ -1,5 +1,6 @@
 """MAE 预训练任务执行器"""
 
+from collections.abc import Callable
 from dataclasses import fields
 from pathlib import Path
 
@@ -9,8 +10,8 @@ from torchvision.transforms import v2 as transforms, InterpolationMode
 import daisy
 from daisy.mae_pretrain import MAEPretrainParams
 from daisy.model.mae import create_mae_model, load_timm_pretrained_encoder_weights
-from daisy.dataset import UnlabeledDiskDataset, load_files_from_folder
-from daisy.util.transform import LazyNormalization
+from daisy.dataset import DiskDataset, load_files_from_folder
+from daisy.util.transform import LazyNormalization, LazyNormalizedTensor
 from ...base import TaskRunner
 from ...registry import TaskRegistry
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
@@ -23,7 +24,7 @@ def get_mae_transform(
 	scale_min: float = 0.2,
 	scale_max: float = 1.0,
 	hflip: bool = True,
-):
+) -> Callable[[torch.Tensor], LazyNormalizedTensor]:
 	"""获取 MAE 预训练的 transform
 
 	参考 MAE 原论文：RandomResizedCrop + HorizontalFlip + Normalize
@@ -146,8 +147,8 @@ class MAEPretrainRunner(TaskRunner):
 			hflip=transform_cfg.hflip,
 		)
 
-		# 创建数据集
-		dataset = UnlabeledDiskDataset(files, transform=transform)
+		# 创建数据集（无标签，LabelT=None）
+		dataset: DiskDataset[LazyNormalizedTensor, None] = DiskDataset(files, None, transform)
 
 		# 创建模型
 		print('\nCreating model...')

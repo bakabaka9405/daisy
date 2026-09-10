@@ -5,9 +5,11 @@ from typing import Any
 
 import torch
 from timm.data.loader import MultiEpochsDataLoader
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 from torch.utils._pytree import tree_leaves, tree_map
 from torchvision.transforms.v2 import functional as F
+
+from daisy.typing import GenericDataLoader
 
 from .transform import LazyNormalizedTensor
 
@@ -21,7 +23,7 @@ class Prefetcher:
 	缓存分配器在消费流读取完成前复用其显存。
 	"""
 
-	def __init__(self, loader: DataLoader, device: torch.device):
+	def __init__(self, loader: GenericDataLoader, device: torch.device):
 		self.loader = loader
 		self.device = device
 

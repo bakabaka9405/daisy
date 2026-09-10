@@ -23,6 +23,8 @@ def balanced_sample[T: IndexDataset](
 		raise ValueError('expected_size must be less than or equal to the size of the dataset')
 
 	labels = dataset.getRawData()[1]
+	if labels is None:
+		raise ValueError('balanced_sample requires a labeled dataset')
 	rng = _get_rng(seed)
 
 	class_index = [[] for _ in range(num_classes)]

@@ -312,36 +312,3 @@ class Timer(Plugin):
 
     def _end(self, state: TrainState) -> None:
         self.elapsed = time.perf_counter() - self._t0
-
-
-class Mixup(Plugin):
-    """在 forward 前应用 Mixup/CutMix；依赖 ``timm.data.mixup.Mixup``。"""
-
-    def __init__(
-        self,
-        mixup_alpha: float = 0.8,
-        cutmix_alpha: float = 1.0,
-        prob: float = 1.0,
-        switch_prob: float = 0.5,
-        smoothing: float = 0.1,
-        num_classes: int = 2,
-    ):
-        from timm.data.mixup import Mixup as TimmMixup
-
-        self.mixup_fn = TimmMixup(
-            mixup_alpha=mixup_alpha,
-            cutmix_alpha=cutmix_alpha,
-            prob=prob,
-            switch_prob=switch_prob,
-            mode='batch',
-            label_smoothing=smoothing,
-            num_classes=num_classes,
-        )
-
-    def register(self, trainer: Trainer) -> None:
-        trainer.before_forward(self._apply)
-
-    def _apply(
-        self, state: TrainState, images: torch.Tensor, targets: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.mixup_fn(images, targets)
