@@ -20,13 +20,11 @@ from typing import Any
 
 import torch
 import torch.nn as nn
-from timm.data.mixup import Mixup
 
+from daisy.classification import build_classifier_trainer
 from daisy.typing import Replaceable
 
-from daisy.classifier_trainer import evaluate
 from daisy.dataset.index_dataset import IndexDataset
-from daisy.util import Prefetcher
 from daisy.training import (
 	BestModel,
 	Checkpoint,
@@ -35,7 +33,6 @@ from daisy.training import (
 	EarlyStop,
 	EpochPrint,
 	Eval,
-	Trainer,
 	TrainState,
 )
 
@@ -101,201 +98,9 @@ class MAEFinetuneParams(Replaceable):
 	val_ratio: float = 0.1
 
 
-def _build(
-	device: torch.device,
-	model: nn.Module,
-	dataset: tuple[IndexDataset, IndexDataset] | IndexDataset,
-	num_classes: int,
-	params: MAEFinetuneParams,
-	save_path: Path | None,
-	save_freq: int,
-	log_dir: Path | None,
-	train_transform: Any,
-	val_transform: Any,
-	optimizer: torch.optim.Optimizer | None,
-) -> tuple[Trainer, Any, Eval | None, BestModel | None, CSVLog | None]:
-	"""组装 Trainer + Plugin 栈，返回内部 Plugin 引用。"""
-	import daisy
-	from timm.data.loader import MultiEpochsDataLoader
-	from timm.loss.cross_entropy import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
-
-	# --- 数据集处理 ---
-	if isinstance(dataset, tuple):
-		train_dataset, val_dataset = dataset
-	else:
-		train_dataset, val_dataset = daisy.dataset.dataset_split.default_data_split(dataset, val_ratio=params.val_ratio)
-
-	# 默认 transform
-	if train_transform is None:
-		train_transform = daisy.util.transform.get_rectangle_train_transform()
-	if val_transform is None:
-		val_transform = daisy.util.transform.get_rectangle_val_transform()
-
-	train_dataset.setTransform(train_transform)
-	val_dataset.setTransform(val_transform)
-
-	if isinstance(params.num_workers, int):
-		workers = (params.num_workers, params.num_workers)
-	else:
-		workers = params.num_workers
-
-	# --- DataLoader ---
-	train_loader = Prefetcher(
-		MultiEpochsDataLoader(
-			train_dataset,
-			batch_size=params.batch_size,
-			shuffle=True,
-			num_workers=workers[0],
-			pin_memory=params.pin_memory,
-			drop_last=True,
-		),
-		device=device,
-	)
-
-	val_loader = Prefetcher(
-		MultiEpochsDataLoader(
-			val_dataset,
-			batch_size=params.batch_size,
-			shuffle=False,
-			num_workers=workers[1],
-			pin_memory=params.pin_memory,
-		),
-		device=device,
-	)
-
-	# --- 学习率计算 ---
-	if params.blr is not None:
-		eff_batch_size = params.batch_size * params.accum_iter
-		actual_lr = params.blr * eff_batch_size / 256
-		print(f'Base LR: {params.blr:.2e}, Effective batch size: {eff_batch_size}, Actual LR: {actual_lr:.2e}')
-	else:
-		actual_lr = params.lr
-
-	# --- Optimizer ---
-	if optimizer is None:
-		from daisy.model.mae.lr_decay import param_groups_lrd
-		from torch.optim import AdamW
-
-		param_groups = param_groups_lrd(model, weight_decay=params.weight_decay, layer_decay=params.layer_decay)
-		optimizer = AdamW(
-			param_groups,
-			lr=actual_lr,
-			betas=(0.9, 0.999),
-			fused=True,
-		)
-
-	# --- Criterion ---
-	mixup_enabled = params.mixup > 0 or params.cutmix > 0
-	if mixup_enabled:
-		criterion = SoftTargetCrossEntropy()
-	elif params.smoothing > 0:
-		criterion = LabelSmoothingCrossEntropy(smoothing=params.smoothing)
-	else:
-		criterion = nn.CrossEntropyLoss()
-
-	val_criterion = nn.CrossEntropyLoss()
-	val_targets = torch.as_tensor(val_dataset.getRawData()[1], dtype=torch.long)
-
-	mixup_fn: Mixup | None = None
-	if mixup_enabled:
-		mixup_fn = Mixup(
-			mixup_alpha=params.mixup,
-			cutmix_alpha=params.cutmix,
-			prob=1.0,
-			switch_prob=0.5,
-			mode='batch',
-			label_smoothing=params.smoothing,
-			num_classes=num_classes,
-		)
-
-	def process_fn(batch: Any) -> torch.Tensor:
-		images, targets = batch
-		if mixup_fn is not None:
-			images, targets = mixup_fn(images, targets)
-		return criterion(model(images), targets)
-
-	def predict_fn(batch: Any) -> torch.Tensor:
-		return model(batch[0])
-
-	# --- Trainer ---
-	trainer = Trainer(
-		model=model,
-		optimizer=optimizer,
-		process_fn=process_fn,
-		device=device,
-		use_amp=params.use_amp,
-		accum_iter=params.accum_iter,
-		clip_grad=params.clip_grad,
-	)
-
-	# --- Plugins ---
-	# LR schedule (per-iteration for MAE style)
-	lr_plugin = CosineAnnealingLR(
-		lr=actual_lr,
-		min_lr=params.min_lr,
-		warmup_epochs=params.warmup_epochs,
-		per_iteration=True,
-	)
-
-	plugins: list[Any] = [lr_plugin]
-
-	# Eval
-	evaluator: Eval | None = None
-	best_model: BestModel | None = None
-
-	def _eval_fn(trainer: Trainer) -> dict[str, float]:
-		metrics = evaluate(
-			scores=trainer.inference(val_loader, predict_fn),
-			targets=val_targets,
-			criterion=val_criterion,
-			num_classes=num_classes,
-			compute_metrics=True,
-		)
-		return {
-			'loss': metrics.loss,
-			'acc': metrics.acc,
-			'f1': metrics.f1,
-			'precision': metrics.precision,
-			'recall': metrics.recall,
-			'auroc': metrics.auroc,
-		}
-
-	evaluator = Eval(eval_fn=_eval_fn)
-	plugins.append(evaluator)
-
-	# BestModel
-	if save_path:
-		save_path.mkdir(parents=True, exist_ok=True)
-		best_model = BestModel(evaluator, watch_metric='f1', mode='max', save_path=save_path)
-		plugins.append(best_model)
-
-		# Checkpoint
-		if save_freq > 0:
-			plugins.append(Checkpoint(save_dir=save_path, save_freq=save_freq))
-
-	# CSVLog
-	csv_log: CSVLog | None = None
-	if log_dir:
-		log_dir.mkdir(parents=True, exist_ok=True)
-		log_path = log_dir / f'log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
-		csv_log = CSVLog(log_path=log_path, evaluator=evaluator)
-		plugins.append(csv_log)
-
-	# EpochPrint
-	plugins.append(EpochPrint(evaluator=evaluator))
-
-	# EarlyStop
-	if params.early_stop:
-		plugins.append(EarlyStop(evaluator, patience=params.early_stop_patience, watch_metric='f1', mode='max'))
-
-	trainer.use(*plugins)
-
-	return trainer, train_loader, evaluator, best_model, csv_log
-
-
 def _extract_result(
 	state: TrainState,
-	evaluator: Eval | None,
+	evaluator: Eval,
 	best_model: BestModel | None,
 	csv_log: CSVLog | None,
 ) -> TrainState:
@@ -304,8 +109,7 @@ def _extract_result(
 		state.extras['best_f1'] = best_model.best_value
 		state.extras['best_epoch'] = best_model.best_epoch
 
-	if evaluator:
-		state.extras['final_metrics'] = evaluator.metrics
+	state.extras['final_metrics'] = evaluator.metrics
 
 	if csv_log:
 		state.extras['history'] = csv_log.history
@@ -359,19 +163,86 @@ def mae_finetune(
 
 	torch.cuda.empty_cache()
 
-	trainer, train_loader, evaluator, best_model, csv_log = _build(
+	# --- 学习率计算 ---
+	if params.blr is not None:
+		eff_batch_size = params.batch_size * params.accum_iter
+		actual_lr = params.blr * eff_batch_size / 256
+		print(f'Base LR: {params.blr:.2e}, Effective batch size: {eff_batch_size}, Actual LR: {actual_lr:.2e}')
+	else:
+		actual_lr = params.lr
+
+	# --- 优化器 ---
+	if optimizer is None:
+		from daisy.model.mae.lr_decay import param_groups_lrd
+		from torch.optim import AdamW
+
+		param_groups = param_groups_lrd(model, weight_decay=params.weight_decay, layer_decay=params.layer_decay)
+		optimizer = AdamW(
+			param_groups,
+			lr=actual_lr,
+			betas=(0.9, 0.999),
+			fused=True,
+		)
+
+	# --- 通用分类训练组装 (Eval 已注册) ---
+	trainer, train_loader, evaluator = build_classifier_trainer(
 		device=device,
 		model=model,
+		optimizer=optimizer,
 		dataset=dataset,
 		num_classes=num_classes,
-		params=params,
-		save_path=_save_path,
-		save_freq=save_freq,
-		log_dir=_log_dir,
+		batch_size=params.batch_size,
 		train_transform=train_transform,
 		val_transform=val_transform,
-		optimizer=optimizer,
+		val_ratio=params.val_ratio,
+		num_workers=params.num_workers,
+		pin_memory=params.pin_memory,
+		drop_last=True,
+		mixup=params.mixup,
+		cutmix=params.cutmix,
+		smoothing=params.smoothing,
+		use_amp=params.use_amp,
+		accum_iter=params.accum_iter,
+		clip_grad=params.clip_grad,
 	)
+
+	# --- 插件 ---
+	# per-iteration 调度会覆盖优化器学习率 (含自定义优化器)
+	plugins: list[Any] = [
+		CosineAnnealingLR(
+			lr=actual_lr,
+			min_lr=params.min_lr,
+			warmup_epochs=params.warmup_epochs,
+			per_iteration=True,
+		)
+	]
+
+	best_model: BestModel | None = None
+	if _save_path:
+		_save_path.mkdir(parents=True, exist_ok=True)
+		best_model = BestModel(evaluator, watch_metric='f1', mode='max', save_path=_save_path)
+		plugins.append(best_model)
+
+		# Checkpoint
+		if save_freq > 0:
+			plugins.append(Checkpoint(save_dir=_save_path, save_freq=save_freq))
+
+	# CSVLog
+	csv_log: CSVLog | None = None
+	if _log_dir:
+		_log_dir.mkdir(parents=True, exist_ok=True)
+		log_path = _log_dir / f'log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
+		csv_log = CSVLog(log_path=log_path, evaluator=evaluator)
+		plugins.append(csv_log)
+
+	# EpochPrint
+	plugins.append(EpochPrint(evaluator=evaluator))
+
+	# EarlyStop
+	if params.early_stop:
+		plugins.append(EarlyStop(evaluator, patience=params.early_stop_patience, watch_metric='f1', mode='max'))
+
+	trainer.use(*plugins)
 
 	print('Ready to train...')
 	state = trainer.fit(train_loader, epochs=params.epochs)
