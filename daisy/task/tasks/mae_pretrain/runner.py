@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import fields
 from pathlib import Path
+from typing import override
 
 import torch
 from torchvision.transforms import v2 as transforms, InterpolationMode
@@ -72,18 +73,22 @@ class MAEPretrainRunner(TaskRunner):
 	"""MAE 预训练任务执行器"""
 
 	@classmethod
+	@override
 	def get_task_type(cls) -> str:
 		return 'mae_pretrain'
 
 	@classmethod
+	@override
 	def get_config_class(cls) -> type[MAEPretrainConfig]:
 		return MAEPretrainConfig
 
 	@classmethod
+	@override
 	def get_ui_display_name(cls) -> str:
 		return 'MAE 预训练'
 
 	@classmethod
+	@override
 	def get_ui_field_overrides(cls) -> dict[str, UIFieldConfig]:
 		return {
 			'meta.title': UIFieldConfig(label='任务标题'),
@@ -106,6 +111,7 @@ class MAEPretrainRunner(TaskRunner):
 			'output.save_path': UIFieldConfig(hidden=True),
 		}
 
+	@override
 	def run(self, config: MAEPretrainConfig, device: torch.device) -> Path:  # type: ignore[override]
 		"""执行 MAE 预训练任务"""
 		training_cfg = config.training
@@ -156,7 +162,6 @@ class MAEPretrainRunner(TaskRunner):
 		model = create_mae_model(
 			model_cfg.name,
 			img_size=model_cfg.img_size,
-			norm_pix_loss=model_cfg.norm_pix_loss,
 		)
 		if model_cfg.timm_pretrained and training_cfg.resume is None:
 			print(f'Loading timm pretrained encoder: {model_cfg.timm_pretrained}')

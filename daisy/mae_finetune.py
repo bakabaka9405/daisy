@@ -21,10 +21,10 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from daisy.classification import build_classifier_trainer
-from daisy.typing import Replaceable
-
+from daisy.classification import prepare_classification_training
 from daisy.dataset.index_dataset import IndexDataset
+from daisy.method.mae import MAEFinetuneMethod
+from daisy.typing import Replaceable
 from daisy.training import (
 	BestModel,
 	Checkpoint,
@@ -171,26 +171,25 @@ def mae_finetune(
 	else:
 		actual_lr = params.lr
 
-	# --- 优化器 ---
-	if optimizer is None:
-		from daisy.model.mae.lr_decay import param_groups_lrd
-		from torch.optim import AdamW
-
-		param_groups = param_groups_lrd(model, weight_decay=params.weight_decay, layer_decay=params.layer_decay)
-		optimizer = AdamW(
-			param_groups,
-			lr=actual_lr,
-			betas=(0.9, 0.999),
-			fused=True,
-		)
-
-	# --- 通用分类训练组装 (Eval 已注册) ---
-	trainer, train_loader, evaluator = build_classifier_trainer(
+	method = MAEFinetuneMethod(
+		model,
+		num_classes,
 		device=device,
-		model=model,
+		lr=actual_lr,
+		weight_decay=params.weight_decay,
+		layer_decay=params.layer_decay,
+		mixup=params.mixup,
+		cutmix=params.cutmix,
+		smoothing=params.smoothing,
+		use_amp=params.use_amp,
+		accum_iter=params.accum_iter,
+		clip_grad=params.clip_grad,
 		optimizer=optimizer,
-		dataset=dataset,
-		num_classes=num_classes,
+	)
+
+	train_loader, evaluator = prepare_classification_training(
+		method,
+		dataset,
 		batch_size=params.batch_size,
 		train_transform=train_transform,
 		val_transform=val_transform,
@@ -198,13 +197,9 @@ def mae_finetune(
 		num_workers=params.num_workers,
 		pin_memory=params.pin_memory,
 		drop_last=True,
-		mixup=params.mixup,
-		cutmix=params.cutmix,
-		smoothing=params.smoothing,
-		use_amp=params.use_amp,
-		accum_iter=params.accum_iter,
-		clip_grad=params.clip_grad,
 	)
+
+	trainer = method.trainer
 
 	# --- 插件 ---
 	# per-iteration 调度会覆盖优化器学习率 (含自定义优化器)
@@ -245,6 +240,6 @@ def mae_finetune(
 	trainer.use(*plugins)
 
 	print('Ready to train...')
-	state = trainer.fit(train_loader, epochs=params.epochs)
+	state = method.fit(train_loader, epochs=params.epochs)
 
 	return _extract_result(state, evaluator, best_model, csv_log)

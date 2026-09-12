@@ -35,7 +35,9 @@ class Trainer:
 	):
 		self.model = model
 		self.optimizer = optimizer
-		self.process_fn = process_fn
+		self._process_fn: ProcessFn | None = None
+		if process_fn is not None:
+			self.set_process_fn(process_fn)
 		self.device = device if device is not None else torch.device('cpu')
 		self.use_amp = use_amp
 		self.accum_iter = accum_iter
@@ -49,6 +51,21 @@ class Trainer:
 		self._on_epoch_end: list[SideEffectFn] = []
 		self._on_batch_start: list[SideEffectFn] = []
 		self._on_batch_end: list[SideEffectFn] = []
+
+	@property
+	def process_fn(self) -> ProcessFn | None:
+		"""获取当前绑定的 process_fn。"""
+		return self._process_fn
+
+	def set_process_fn(self, process_fn: ProcessFn) -> Trainer:
+		"""设置训练处理闭包，至多允许绑定一次（包含构造函数初始化）。"""
+		if self._process_fn is not None:
+			raise RuntimeError('process_fn has already been set.')
+		if not callable(process_fn):
+			raise TypeError('process_fn must be callable.')
+
+		self._process_fn = process_fn
+		return self
 
 	def on_fit_start(self, fn: SideEffectFn) -> Trainer:
 		self._on_fit_start.append(fn)

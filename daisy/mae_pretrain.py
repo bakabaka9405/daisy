@@ -7,8 +7,9 @@ from pathlib import Path
 import torch
 
 from daisy.dataset.index_dataset import IndexDataset
+from daisy.method.mae import MAEPretrainMethod
 from daisy.model.mae import MaskedAutoencoderViT
-from daisy.training import CosineAnnealingLR, Timer, Trainer, TrainState
+from daisy.training import CosineAnnealingLR, Timer, TrainState
 from daisy.typing import Replaceable
 from daisy.util import make_dataloader
 from daisy.util.transform import LazyNormalizedTensor
@@ -24,6 +25,7 @@ class MAEPretrainParams(Replaceable):
 	weight_decay: float = 0.05
 	warmup_epochs: int = 40
 	mask_ratio: float = 0.75
+	norm_pix_loss: bool = False
 	accum_iter: int = 1
 	num_workers: int = 4
 	use_amp: bool = True
@@ -89,32 +91,20 @@ def mae_pretrain[ImageT: torch.Tensor | LazyNormalizedTensor](
 
 	model.to(device).compile(backend='inductor')
 
-	# bias/norm 不做 weight decay
-	param_groups = [
-		{'params': [p for n, p in model.named_parameters() if 'bias' not in n and 'norm' not in n]},
-		{'params': [p for n, p in model.named_parameters() if 'bias' in n or 'norm' in n], 'weight_decay': 0.0},
-	]
-	optimizer = torch.optim.AdamW(
-		param_groups,
+	method = MAEPretrainMethod(
+		model,
+		device=device,
 		lr=lr,
 		weight_decay=params.weight_decay,
-		betas=(0.9, 0.95),
-		fused=True,
-	)
-
-	def process_fn(batch: torch.Tensor) -> torch.Tensor:
-		loss, _, _ = model(batch, mask_ratio=params.mask_ratio)
-		return loss
-
-	trainer = Trainer(
-		model=model,
-		optimizer=optimizer,
-		process_fn=process_fn,
-		device=device,
+		mask_ratio=params.mask_ratio,
+		norm_pix_loss=params.norm_pix_loss,
 		use_amp=params.use_amp,
 		accum_iter=params.accum_iter,
 		clip_grad=params.max_norm if params.clip_grad else None,
 	)
+	trainer = method.trainer
+	optimizer = trainer.optimizer
+	assert optimizer is not None
 
 	timer = Timer()
 	trainer.use(
@@ -160,4 +150,4 @@ def mae_pretrain[ImageT: torch.Tensor | LazyNormalizedTensor](
 	if start_epoch >= params.epochs:
 		return
 
-	trainer.fit(loader, params.epochs, start_epoch=start_epoch)
+	method.fit(loader, params.epochs, start_epoch=start_epoch)

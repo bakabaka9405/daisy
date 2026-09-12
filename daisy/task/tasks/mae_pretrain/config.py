@@ -1,6 +1,6 @@
 """MAE 预训练任务配置"""
 
-from typing import Literal
+from typing import Literal, override
 
 from pydantic import BaseModel, Field
 
@@ -22,7 +22,6 @@ class MAEModelConfig(BaseModel):
 
 	name: str = 'mae_vit_base_patch16'
 	img_size: int = 224
-	norm_pix_loss: bool = False
 	timm_pretrained: str | None = None
 	# 可选：加载预训练权重
 	checkpoint: str | None = None
@@ -49,6 +48,7 @@ class MAETrainingConfig(BaseModel):
 	weight_decay: float = 0.05
 	warmup_epochs: int = 40
 	mask_ratio: float = 0.75
+	norm_pix_loss: bool = False
 	accum_iter: int = 1
 	use_amp: bool = True
 	clip_grad: bool = False
@@ -77,5 +77,6 @@ class MAEPretrainConfig(BaseTaskConfig):
 	training: MAETrainingConfig = Field(default_factory=MAETrainingConfig)
 
 	@classmethod
+	@override
 	def get_task_type(cls) -> str:
 		return 'mae_pretrain'
