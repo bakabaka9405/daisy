@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from dataclasses import fields
 from pathlib import Path
+import random
 from typing import override
 
 import torch
@@ -43,29 +44,6 @@ def get_mae_transform(
 
 	trans.append(LazyNormalization([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]))
 	return transforms.Compose(trans)
-
-
-def sample_files_by_ratio(
-	files: list[Path],
-	*,
-	ratio: float,
-	seed: int | None = None,
-) -> list[Path]:
-	"""按比例采样文件列表"""
-	if not files:
-		return files
-	if ratio <= 0 or ratio > 1:
-		raise ValueError(f'sample_ratio must be in (0, 1], got {ratio}')
-	if ratio >= 1:
-		return files
-
-	rng = torch.Generator()
-	if seed is not None:
-		rng.manual_seed(seed)
-	indices = torch.randperm(len(files), generator=rng).tolist()
-	sample_size = max(1, int(round(len(files) * ratio)))
-	selected_indices = sorted(indices[:sample_size])
-	return [files[index] for index in selected_indices]
 
 
 @TaskRegistry.register
@@ -125,8 +103,6 @@ class MAEPretrainRunner(TaskRunner):
 		# 加载所有图像文件（支持多个文件夹，用分号分割）
 		files = []
 		roots = [r.strip() for r in dataset_cfg.root.split(';') if r.strip()]
-		if not roots:
-			raise ValueError('dataset.root is required for mae_pretrain')
 		for root in roots:
 			root_files = load_files_from_folder(
 				Path(root),
@@ -135,8 +111,10 @@ class MAEPretrainRunner(TaskRunner):
 			print(f'Loaded {len(root_files)} samples from {root}')
 			files.extend(root_files)
 
-		sample_seed = dataset_cfg.sample_seed if dataset_cfg.sample_seed is not None else training_cfg.seed
-		files = sample_files_by_ratio(files, ratio=dataset_cfg.sample_ratio, seed=sample_seed)
+		if dataset_cfg.sample_ratio < 1.0 and files:
+			sample_seed = dataset_cfg.sample_seed if dataset_cfg.sample_seed is not None else training_cfg.seed
+			k = max(1, round(len(files) * dataset_cfg.sample_ratio))
+			files = random.Random(sample_seed).sample(files, k)
 		print(f'Total samples: {len(files)}')
 		save_run_snapshot(
 			output_path,

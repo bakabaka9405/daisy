@@ -13,7 +13,7 @@ class MAEDatasetConfig(BaseModel):
 	type: Literal['folder'] = 'folder'
 	root: str = ''
 	extensions: list[str] = Field(default_factory=lambda: ['.jpg', '.jpeg', '.png', '.bmp', '.webp'])
-	sample_ratio: float = 1.0
+	sample_ratio: float = Field(default=1.0, gt=0.0, le=1.0)
 	sample_seed: int | None = None
 
 
@@ -47,7 +47,7 @@ class MAETrainingConfig(BaseModel):
 	blr: float = 1.5e-4  # 基础学习率
 	weight_decay: float = 0.05
 	warmup_epochs: int = 40
-	mask_ratio: float = 0.75
+	mask_ratio: float = Field(default=0.75, gt=0.0, lt=1.0)
 	norm_pix_loss: bool = False
 	accum_iter: int = 1
 	use_amp: bool = True

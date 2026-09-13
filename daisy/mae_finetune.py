@@ -158,8 +158,8 @@ def mae_finetune(
 		- extras['history']: 训练历史 list[dict]
 	"""
 	# 路径标准化
-	_save_path = Path(save_path) if save_path is not None else None
-	_log_dir = Path(log_dir) if log_dir is not None else None
+	save_path = Path(save_path) if save_path is not None else None
+	log_dir = Path(log_dir) if log_dir is not None else None
 
 	torch.cuda.empty_cache()
 
@@ -213,20 +213,17 @@ def mae_finetune(
 	]
 
 	best_model: BestModel | None = None
-	if _save_path:
-		_save_path.mkdir(parents=True, exist_ok=True)
-		best_model = BestModel(evaluator, watch_metric='f1', mode='max', save_path=_save_path)
+	if save_path:
+		best_model = BestModel(evaluator, watch_metric='f1', mode='max', save_path=save_path)
 		plugins.append(best_model)
 
-		# Checkpoint
 		if save_freq > 0:
-			plugins.append(Checkpoint(save_dir=_save_path, save_freq=save_freq))
+			plugins.append(Checkpoint(save_dir=save_path, save_freq=save_freq))
 
 	# CSVLog
 	csv_log: CSVLog | None = None
-	if _log_dir:
-		_log_dir.mkdir(parents=True, exist_ok=True)
-		log_path = _log_dir / f'log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
+	if log_dir:
+		log_path = log_dir / f'log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
 		csv_log = CSVLog(log_path=log_path, evaluator=evaluator)
 		plugins.append(csv_log)
 
