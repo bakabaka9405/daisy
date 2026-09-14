@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import csv
 from pathlib import Path
+from typing import override
 
 import torch
 
 import daisy
+from daisy.metrics.classification import fast_calc_metrics
 from ...base import TaskRunner
 from ...data import select_dataset_split
 from ...registry import TaskRegistry
@@ -21,13 +23,16 @@ class EvalCheckpointRunner(TaskRunner['EvalCheckpointConfig']):
 	"""checkpoint 评估任务执行器"""
 
 	@classmethod
+	@override
 	def get_task_type(cls) -> str:
 		return 'eval_checkpoint'
 
 	@classmethod
+	@override
 	def get_config_class(cls) -> type[EvalCheckpointConfig]:
 		return EvalCheckpointConfig
 
+	@override
 	def run(self, config: EvalCheckpointConfig, device: torch.device) -> Path:
 		runtime_cfg = config.evaluation
 		run_context = prepare_task_run(config, device, seed=runtime_cfg.seed)
@@ -59,7 +64,7 @@ class EvalCheckpointRunner(TaskRunner['EvalCheckpointConfig']):
 			batch_size=runtime_cfg.batch_size,
 			num_workers=runtime_cfg.num_workers,
 		)
-		metrics = daisy.classifier_trainer.fast_calc_metrics(
+		metrics = fast_calc_metrics(
 			y_true,
 			y_pred,
 			num_classes=config.model.num_classes,

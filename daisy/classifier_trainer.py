@@ -10,7 +10,7 @@ import math
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal
 
 import daisy
 import numpy as np
@@ -19,6 +19,7 @@ import torch.nn as nn
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 from daisy.metrics import auroc_score
+from daisy.metrics.classification import EvalMetrics, calc_confusion_matrix
 from timm.data.loader import MultiEpochsDataLoader
 from timm.data.mixup import Mixup
 from timm.loss.cross_entropy import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
@@ -73,34 +74,6 @@ class LRScheduler:
 			param_group['lr'] = current_lr * lr_scale
 
 
-@dataclass
-class EvalMetrics:
-	"""评估指标容器"""
-
-	loss: float = 0.0
-	acc: float = 0.0  # 准确率
-	precision: float = 0.0
-	recall: float = 0.0
-	f1: float = 0.0
-	auroc: float = 0.0
-	confusion_matrix: list[list[int]] | None = None
-
-	def get_metric(self, name: str) -> float:
-		"""根据名称获取指标值"""
-		if name == 'acc' or name == 'acc1':
-			return self.acc
-		elif name == 'prec':
-			return self.precision
-		elif name == 'recall':
-			return self.recall
-		elif name == 'f1':
-			return self.f1
-		elif name == 'auroc':
-			return self.auroc
-		else:
-			return 0.0
-
-
 TrainingHistoryEntry = dict[str, int | float]
 
 
@@ -112,14 +85,6 @@ class TrainResult:
 	best_metrics: EvalMetrics
 	final_metrics: EvalMetrics
 	history: list[TrainingHistoryEntry] = field(default_factory=list)
-
-
-def calc_confusion_matrix(y_true, y_pred, num_classes: int) -> list[list[int]]:
-	"""计算混淆矩阵"""
-	count = [[0] * num_classes for _ in range(num_classes)]
-	for i, j in zip(y_true, y_pred):
-		count[i][j] += 1  # type:ignore
-	return count
 
 
 def create_criterion(mixup_enabled: bool, smoothing: float) -> nn.Module:
@@ -599,70 +564,6 @@ def train_classifier(
 	)
 
 
-def fast_train_smile(
-	device: torch.device,
-	model: torch.nn.Module,
-	num_classes: int,
-	epochs: int,
-	lr: float,
-	dataset: IndexDataset | tuple[IndexDataset, IndexDataset],
-	batch_size: int = 128,
-	accum_iter: int = 1,
-	train_transform=None,
-	val_transform=None,
-	val_ratio: float = 0.1,
-	warmup_epochs: int = 0,
-	num_workers: int | tuple[int, int] = 10,
-	weight_decay: float = 1e-4,
-	smoothing: float = 0.1,
-	use_amp: bool = True,
-	use_scheduler: bool = True,
-	clip_grad: bool = False,
-	max_norm: float = 1.0,
-	pin_memory: bool = True,
-	early_stop: bool = False,
-	early_stop_epoch: int = 5,
-	save_path: Path | str | None = None,
-	keep_count: int = 0,
-	save_best: bool = True,
-	cmp_obj: Literal['acc', 'prec', 'recall', 'f1', 'auroc'] = 'f1',
-	show_matrix: bool = True,
-	log_dir: Path | str | None = None,
-):
-	"""向后兼容的训练函数别名"""
-	result = train_classifier(
-		device=device,
-		model=model,
-		num_classes=num_classes,
-		epochs=epochs,
-		lr=lr,
-		dataset=dataset,
-		batch_size=batch_size,
-		accum_iter=accum_iter,
-		train_transform=train_transform,
-		val_transform=val_transform,
-		val_ratio=val_ratio,
-		warmup_epochs=warmup_epochs if use_scheduler else 0,
-		num_workers=num_workers,
-		weight_decay=weight_decay,
-		smoothing=smoothing,
-		use_amp=use_amp,
-		clip_grad=max_norm if clip_grad else None,
-		pin_memory=pin_memory,
-		early_stop=early_stop,
-		early_stop_patience=early_stop_epoch,
-		early_stop_metric=cmp_obj,
-		save_path=save_path,
-		keep_recent=keep_count,
-		save_best=save_best,
-		save_best_metric=cmp_obj,
-		show_confusion_matrix=show_matrix,
-		log_dir=log_dir,
-		compute_metrics=True,
-	)
-	return result
-
-
 def fast_eval(device, model, dataset, transform=None, batch_size=1, num_workers=0):
 	"""快速评估函数"""
 	if transform:
@@ -678,25 +579,3 @@ def fast_eval(device, model, dataset, transform=None, batch_size=1, num_workers=
 	labels = torch.as_tensor(dataset.getRawData()[1], dtype=torch.long)
 	scores = Trainer(model=model, device=device, use_amp=False).inference(data_loader, lambda batch: model(batch[0]))
 	return labels.tolist(), torch.argmax(scores, dim=1).tolist() if scores.numel() else [], scores.tolist()
-
-
-def fast_calc_metrics(y_true, y_pred, num_classes=0):
-	"""快速计算评估指标"""
-	acc = accuracy_score(y_true, y_pred)
-	zero_division = cast(Any, 0)
-	prec = precision_score(y_true, y_pred, average='macro', zero_division=zero_division)
-	rec = recall_score(y_true, y_pred, average='macro', zero_division=zero_division)
-	f1 = f1_score(y_true, y_pred, average='macro', zero_division=zero_division)
-	if num_classes == 0:
-		matrix = None
-	else:
-		matrix = calc_confusion_matrix(y_true, y_pred, num_classes)
-
-	return EvalMetrics(
-		loss=0.0,
-		acc=float(acc),
-		precision=float(prec),
-		recall=float(rec),
-		f1=float(f1),
-		confusion_matrix=matrix,
-	)

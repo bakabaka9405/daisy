@@ -46,6 +46,18 @@ runner 应优先复用 `daisy/task/runtime.py` 中的共享流程：
 
 若某个 task 需要额外运行信息，应在 `save_run_snapshot(..., extra=...)` 中追加，而不是重新拼装整套运行时元数据。
 
+### 2.4 CLI 参数绑定与覆盖
+
+CLI 基于 tyro 与 Pydantic 配置模型实现声明式参数绑定。使用 `--` 作为分隔符：分隔符前为 CLI 命令选项（如 `--device` / `-d`），分隔符后为具体任务配置字段覆盖项。参数优先级顺序为：CLI 覆盖项 > TOML 配置 > 模型默认值，最终由 Pydantic 校验生效。
+
+- 所有任务配置字段均具备默认值，TOML 文件仅需声明非默认配置；
+- TOML 文件在应用 CLI 参数覆盖前先经 `tomllib` 解析和 Pydantic 校验；
+- 任务配置字段覆盖项直接映射自对应任务的 Pydantic 配置模型；
+- 常用命令示例：
+  - 原生命令说明：`python -m daisy run --help`；
+  - 任务配置字段说明与当前默认值：`python -m daisy run task.toml -- --help`；
+  - 覆盖配置参数并指定运行设备：`python -m daisy run task.toml -d cpu -- --training.lr 0.02`。
+
 ## 3. 新增 task 类型的实现规范
 
 新增 task 时应遵循以下流程：
@@ -88,6 +100,16 @@ save_path = "outputs/{task_id}"
 - 新 task 文件必须显式声明 `task_type`；
 - 运行时只对历史遗留的 `classification` 风格配置保留缺省兼容；
 - 其他类型若缺失 `task_type`，应视为配置错误并显式报错。
+
+### 4.2 分类任务配置行为与产物
+
+分类任务通过 `ClassificationMethod` 执行训练，复用 `prepare_classification_training` 组装数据加载与验证，并由 Trainer Plugins 处理调度、保存和日志。
+
+- 学习率调度：`training.use_scheduler` 为 `true` 时启用 CosineAnnealing 调度与 warmup，为 `false` 时全程保持初始学习率；
+- 梯度裁剪：`training.clip_grad` 为 `true` 时按 `max_norm` 执行梯度范数裁剪，无论 `use_amp` 开启与否均生效；
+- 优化目标：`training.cmp_obj` 支持 `acc`、`f1`、`recall` 与 `prec`（`prec` 映射为验证集 `precision` 指标），作为 `BestModel` 和 `EarlyStop` 的监控指标；
+- 模型保存：`output.save_best` 为 `true` 时保存最优权重 `best_model.pth`；`output.keep_count > 0` 时独立于 `save_best` 滚动保存最新检查点 `checkpoint_NNNN.pth`；
+- 训练日志：`output.log` 为 `true` 时在 `logs/` 目录下生成 `log_YYYYMMDD_HHMMSS.csv`，记录各轮 `train_loss` 及验证集 6 项评估指标（`loss`、`acc`、`f1`、`precision`、`recall`、`auroc`）。
 
 ## 5. 文件组织与命名
 

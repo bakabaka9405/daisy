@@ -2,9 +2,11 @@
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Annotated
 import torch
 
 from pydantic import BaseModel, Field
+import tyro.conf
 
 
 class BaseMetaConfig(BaseModel):
@@ -34,8 +36,8 @@ class BaseTaskConfig(BaseModel, ABC):
 	# task_type 和 output 由子类定义
 	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
 	# 任务文件路径（加载后自动设置）
-	task_file: Path | None = None
-	task_id: str = ''
+	task_file: Annotated[Path | None, tyro.conf.Suppress] = None
+	task_id: Annotated[str, tyro.conf.Suppress] = ''
 
 	class Config:
 		extra = 'forbid'

@@ -1,11 +1,15 @@
 """分类任务执行器"""
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+import time
+from typing import override
 
 from timm import create_model
+import torch
 
-import daisy
+from daisy.classification import prepare_classification_training
+from daisy.method.classification import ClassificationMethod
+from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, EpochPrint
 from ...base import TaskRunner
 from ...data import build_train_val_selection
 from ...registry import TaskRegistry
@@ -13,26 +17,24 @@ from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from ...shared import get_classification_transform
 from .config import ClassificationConfig
 
-if TYPE_CHECKING:
-	import torch
-
 
 @TaskRegistry.register
-class ClassificationRunner(TaskRunner['ClassificationConfig']):
+class ClassificationRunner(TaskRunner[ClassificationConfig]):
 	"""分类任务执行器"""
 
 	@classmethod
+	@override
 	def get_task_type(cls) -> str:
 		return 'classification'
 
 	@classmethod
+	@override
 	def get_config_class(cls) -> type[ClassificationConfig]:
 		return ClassificationConfig
 
-	def run(self, config: ClassificationConfig, device: 'torch.device') -> Path:
+	@override
+	def run(self, config: ClassificationConfig, device: torch.device) -> Path:
 		"""执行分类训练任务"""
-		import torch
-
 		training_cfg = config.training
 		run_context = prepare_task_run(config, device, seed=training_cfg.seed)
 		output_path = run_context.output_path
@@ -73,39 +75,83 @@ class ClassificationRunner(TaskRunner['ClassificationConfig']):
 		print(f'Model: {model_cfg.name}')
 
 		# 获取 transforms
-		train_transform = get_classification_transform(config.training.transform.train)
-		val_transform = get_classification_transform(config.training.transform.val)
+		train_transform = get_classification_transform(training_cfg.transform.train)
+		val_transform = get_classification_transform(training_cfg.transform.val)
 
 		# 训练
 		print('\nStarting training...')
 
-		daisy.classifier_trainer.fast_train_smile(
-			device=device,
-			model=model,
-			dataset=(train_dataset, val_dataset),
+		# 实例化分类方法
+		method = ClassificationMethod(
+			model,
 			num_classes=model_cfg.num_classes,
-			epochs=training_cfg.epochs,
-			batch_size=training_cfg.batch_size,
+			device=device,
 			lr=training_cfg.lr,
 			weight_decay=training_cfg.weight_decay,
-			warmup_epochs=training_cfg.warmup_epochs,
 			smoothing=training_cfg.smoothing,
-			accum_iter=training_cfg.accum_iter,
-			use_scheduler=training_cfg.use_scheduler,
 			use_amp=training_cfg.use_amp,
-			clip_grad=training_cfg.clip_grad,
-			max_norm=training_cfg.max_norm,
-			num_workers=training_cfg.num_workers,
-			early_stop=training_cfg.early_stop,
-			early_stop_epoch=training_cfg.early_stop_epoch,
-			cmp_obj=training_cfg.cmp_obj,
+			accum_iter=training_cfg.accum_iter,
+			clip_grad=training_cfg.max_norm if training_cfg.clip_grad else None,
+		)
+
+		# 构建 DataLoader 并自动注册 Eval 插件
+		train_loader, evaluator = prepare_classification_training(
+			method,
+			(train_dataset, val_dataset),
+			batch_size=training_cfg.batch_size,
 			train_transform=train_transform,
 			val_transform=val_transform,
-			save_path=output_path if config.output.save_best else None,
-			keep_count=config.output.keep_count,
-			save_best=config.output.save_best,
-			log_dir=output_path / 'logs' if config.output.log else None,
+			num_workers=training_cfg.num_workers,
 		)
+
+		# 配置并挂载训练插件
+		trainer = method.trainer
+
+		if training_cfg.use_scheduler:
+			trainer.use(
+				CosineAnnealingLR(
+					lr=training_cfg.lr,
+					warmup_epochs=training_cfg.warmup_epochs,
+				)
+			)
+
+		watch_metric = 'precision' if training_cfg.cmp_obj == 'prec' else training_cfg.cmp_obj
+
+		if config.output.save_best:
+			trainer.use(
+				BestModel(
+					evaluator,
+					watch_metric=watch_metric,
+					mode='max',
+					save_path=output_path,
+				)
+			)
+
+		if config.output.keep_count > 0:
+			trainer.use(
+				Checkpoint(
+					save_dir=output_path,
+					keep_recent=config.output.keep_count,
+				)
+			)
+
+		if config.output.log:
+			log_path = output_path / 'logs' / f'log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
+			trainer.use(CSVLog(log_path=log_path, evaluator=evaluator))
+
+		trainer.use(EpochPrint(evaluator=evaluator))
+
+		if training_cfg.early_stop:
+			trainer.use(
+				EarlyStop(
+					evaluator,
+					patience=training_cfg.early_stop_epoch,
+					watch_metric=watch_metric,
+					mode='max',
+				)
+			)
+
+		method.fit(train_loader, epochs=training_cfg.epochs)
 
 		print_task_completed(output_path)
 

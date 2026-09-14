@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
-import tomli
+import tomllib
 import torch
 
 from .base import BaseTaskConfig
@@ -81,7 +81,7 @@ def load_config(path: str | Path) -> BaseTaskConfig:
 	path = Path(path)
 
 	with open(path, 'rb') as f:
-		data = tomli.load(f)
+		data = tomllib.load(f)
 
 	# 解析任务类型，仅兼容缺省的旧 classification 配置
 	task_type, resolved_data = _resolve_task_type(data, path)
