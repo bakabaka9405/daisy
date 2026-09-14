@@ -50,6 +50,30 @@ def _cumulative_bce(logits: torch.Tensor, y: torch.Tensor, num_classes: int) -> 
 	return bce.sum(dim=1).mean()
 
 
+def _clm_log_probabilities(model: CLMModel, score: torch.Tensor) -> torch.Tensor:
+	"""计算 CLM 模型的各类对数概率。"""
+	threshold = model.threshold
+	if model.num_classes == 2:
+		first = F.logsigmoid(threshold - score)
+		last = F.logsigmoid(score - threshold)
+		return torch.stack([first, last], dim=1)
+
+	delta = model.delta
+	assert delta is not None
+	gaps = F.softplus(delta)
+	offsets = torch.cat([gaps.new_zeros(1), torch.cumsum(gaps, dim=0)])
+	tau = threshold + offsets
+
+	first = F.logsigmoid(tau[0] - score)
+	last = F.logsigmoid(score - tau[-1])
+	mid = (
+		F.logsigmoid(tau[1:].unsqueeze(0) - score.unsqueeze(1))
+		+ F.logsigmoid(score.unsqueeze(1) - tau[:-1].unsqueeze(0))
+		+ F.logsigmoid(delta).unsqueeze(0)
+	)
+	return torch.cat([first.unsqueeze(1), mid, last.unsqueeze(1)], dim=1)
+
+
 class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 	"""有序分类与回归方法基类，负责类别数校验与预测流程。"""
 
@@ -79,27 +103,46 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 			clip_grad=clip_grad,
 		)
 
+	@classmethod
+	@abstractmethod
+	def create_model(cls, backbone: nn.Module, num_classes: int) -> M:
+		"""构建算法专属完整模型。"""
+		...
+
+	@classmethod
+	@abstractmethod
+	def decode_features(cls, model: M, feat: Tensor, *, num_classes: int) -> Tensor:
+		"""由特征解码得到一维 long 类别预测。"""
+		...
+
+	@override
+	def build_model(self, backbone: nn.Module) -> M:
+		return self.create_model(backbone, self.num_classes)
+
 	@override
 	def predict_step(self, X: Tensor) -> torch.Tensor:
 		feat = self.model.forward_features(X)
 		return self.decode_predictions(feat.float())
 
-	@abstractmethod
 	def decode_predictions(self, feat: torch.Tensor) -> torch.Tensor:
 		"""由特征解码得到一维 long 类别预测。"""
-		...
+		return self.decode_features(self.model, feat, num_classes=self.num_classes)
 
 
 class ClassificationBaseMethod(OrdinalBaseMethod[ClassificationModel]):
 	"""使用多分类线性头的有序方法基类。"""
 
+	@classmethod
 	@override
-	def build_model(self, backbone: nn.Module) -> ClassificationModel:
-		return ClassificationModel(backbone, self.num_classes)
+	def create_model(cls, backbone: nn.Module, num_classes: int) -> ClassificationModel:
+		return ClassificationModel(backbone, num_classes)
 
+	@classmethod
 	@override
-	def decode_predictions(self, feat: torch.Tensor) -> torch.Tensor:
-		return self.model.fc(feat).argmax(dim=1)
+	def decode_features(
+		cls, model: ClassificationModel, feat: torch.Tensor, *, num_classes: int
+	) -> torch.Tensor:
+		return model.fc(feat).argmax(dim=1)
 
 
 class CEMethod(ClassificationBaseMethod):
@@ -200,13 +243,17 @@ class UnimodalMethod(ClassificationBaseMethod):
 class MSERankBaseMethod(OrdinalBaseMethod[ScalarModel]):
 	"""MSE 锚定排序方法基类。"""
 
+	@classmethod
 	@override
-	def build_model(self, backbone: nn.Module) -> ScalarModel:
+	def create_model(cls, backbone: nn.Module, num_classes: int) -> ScalarModel:
 		return ScalarModel(backbone, bias=True)
 
+	@classmethod
 	@override
-	def decode_predictions(self, feat: torch.Tensor) -> torch.Tensor:
-		return self.model.fc(feat).squeeze(-1).round().clamp(0, self.num_classes - 1).long()
+	def decode_features(
+		cls, model: ScalarModel, feat: torch.Tensor, *, num_classes: int
+	) -> torch.Tensor:
+		return model.fc(feat).squeeze(-1).round().clamp(0, num_classes - 1).long()
 
 
 class MSERankNetMethod(MSERankBaseMethod):
@@ -236,51 +283,41 @@ class MSERankHingeMethod(MSERankBaseMethod):
 class CLMMethod(OrdinalBaseMethod[CLMModel]):
 	"""累积链接模型（Cumulative Link Model）方法。"""
 
+	@classmethod
 	@override
-	def build_model(self, backbone: nn.Module) -> CLMModel:
-		return CLMModel(backbone, self.num_classes)
+	def create_model(cls, backbone: nn.Module, num_classes: int) -> CLMModel:
+		return CLMModel(backbone, num_classes)
 
-	def _clm_logp(self, score: torch.Tensor) -> torch.Tensor:
-		threshold = self.model.threshold
-		if self.num_classes == 2:
-			first = F.logsigmoid(threshold - score)
-			last = F.logsigmoid(score - threshold)
-			return torch.stack([first, last], dim=1)
-
-		delta = self.model.delta
-		assert delta is not None
-		gaps = F.softplus(delta)
-		offsets = torch.cat([gaps.new_zeros(1), torch.cumsum(gaps, dim=0)])
-		tau = threshold + offsets
-
-		first = F.logsigmoid(tau[0] - score)
-		last = F.logsigmoid(score - tau[-1])
-		mid = (
-			F.logsigmoid(tau[1:].unsqueeze(0) - score.unsqueeze(1))
-			+ F.logsigmoid(score.unsqueeze(1) - tau[:-1].unsqueeze(0))
-			+ F.logsigmoid(delta).unsqueeze(0)
-		)
-		return torch.cat([first.unsqueeze(1), mid, last.unsqueeze(1)], dim=1)
+	@classmethod
+	@override
+	def decode_features(
+		cls, model: CLMModel, feat: torch.Tensor, *, num_classes: int
+	) -> torch.Tensor:
+		score = model.fc(feat).squeeze(-1)
+		return _clm_log_probabilities(model, score).argmax(dim=1)
 
 	def process(self, batch: Any) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
 		score = self.model.fc(feat).squeeze(-1)
-		return F.nll_loss(self._clm_logp(score), targets.long())
-
-	@override
-	def decode_predictions(self, feat: torch.Tensor) -> torch.Tensor:
-		score = self.model.fc(feat).squeeze(-1)
-		return self._clm_logp(score).argmax(dim=1)
+		return F.nll_loss(_clm_log_probabilities(self.model, score), targets.long())
 
 
 class CORALMethod(OrdinalBaseMethod[CORALModel]):
 	"""CORAL 有序回归方法。"""
 
+	@classmethod
 	@override
-	def build_model(self, backbone: nn.Module) -> CORALModel:
-		return CORALModel(backbone, self.num_classes)
+	def create_model(cls, backbone: nn.Module, num_classes: int) -> CORALModel:
+		return CORALModel(backbone, num_classes)
+
+	@classmethod
+	@override
+	def decode_features(
+		cls, model: CORALModel, feat: torch.Tensor, *, num_classes: int
+	) -> torch.Tensor:
+		return ((model.fc(feat) + model.coral_bias) > 0).sum(dim=1).long()
 
 	def process(self, batch: Any) -> torch.Tensor:
 		images, targets = batch
@@ -289,17 +326,22 @@ class CORALMethod(OrdinalBaseMethod[CORALModel]):
 		logits = self.model.fc(feat) + self.model.coral_bias
 		return _cumulative_bce(logits, targets, self.num_classes)
 
-	@override
-	def decode_predictions(self, feat: torch.Tensor) -> torch.Tensor:
-		return ((self.model.fc(feat) + self.model.coral_bias) > 0).sum(dim=1).long()
-
 
 class CORNMethod(OrdinalBaseMethod[CORNModel]):
 	"""CORN 条件有序回归方法。"""
 
+	@classmethod
 	@override
-	def build_model(self, backbone: nn.Module) -> CORNModel:
-		return CORNModel(backbone, self.num_classes)
+	def create_model(cls, backbone: nn.Module, num_classes: int) -> CORNModel:
+		return CORNModel(backbone, num_classes)
+
+	@classmethod
+	@override
+	def decode_features(
+		cls, model: CORNModel, feat: torch.Tensor, *, num_classes: int
+	) -> torch.Tensor:
+		cum = torch.sigmoid(model.fc(feat)).cumprod(dim=1)
+		return (cum > 0.5).sum(dim=1).long()
 
 	def process(self, batch: Any) -> torch.Tensor:
 		images, targets = batch
@@ -312,18 +354,21 @@ class CORNMethod(OrdinalBaseMethod[CORNModel]):
 		bce = F.binary_cross_entropy_with_logits(logits, target, reduction='none')
 		return (bce * mask).sum() / mask.sum().clamp(min=1)
 
-	@override
-	def decode_predictions(self, feat: torch.Tensor) -> torch.Tensor:
-		cum = torch.sigmoid(self.model.fc(feat)).cumprod(dim=1)
-		return (cum > 0.5).sum(dim=1).long()
-
 
 class OrdinalContrastiveMethod(OrdinalBaseMethod[ContrastiveClassificationModel]):
 	"""有序对比学习方法。"""
 
+	@classmethod
 	@override
-	def build_model(self, backbone: nn.Module) -> ContrastiveClassificationModel:
-		return ContrastiveClassificationModel(backbone, self.num_classes)
+	def create_model(cls, backbone: nn.Module, num_classes: int) -> ContrastiveClassificationModel:
+		return ContrastiveClassificationModel(backbone, num_classes)
+
+	@classmethod
+	@override
+	def decode_features(
+		cls, model: ContrastiveClassificationModel, feat: torch.Tensor, *, num_classes: int
+	) -> torch.Tensor:
+		return model.fc(feat).argmax(dim=1)
 
 	def process(self, batch: Any) -> torch.Tensor:
 		images, targets = batch
@@ -333,10 +378,6 @@ class OrdinalContrastiveMethod(OrdinalBaseMethod[ContrastiveClassificationModel]
 		ce = F.cross_entropy(logits, targets.long())
 		proj = self.model.proj(feat)
 		return ce + _contrastive_term(proj, targets)
-
-	@override
-	def decode_predictions(self, feat: torch.Tensor) -> torch.Tensor:
-		return self.model.fc(feat).argmax(dim=1)
 
 
 METHODS: dict[str, type[OrdinalBaseMethod[Any]]] = {

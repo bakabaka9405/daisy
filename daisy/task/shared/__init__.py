@@ -2,6 +2,7 @@
 
 from .dataset_config import DatasetConfig, DatasetSplitConfig
 from .inference_config import InferenceModelConfig, InferenceRuntimeConfig
+from .output_config import LogOutputConfig
 from .transforms import get_classification_transform, get_mae_finetune_train_transform, get_mae_finetune_val_transform
 
 __all__ = [
@@ -9,6 +10,7 @@ __all__ = [
 	'DatasetSplitConfig',
 	'InferenceModelConfig',
 	'InferenceRuntimeConfig',
+	'LogOutputConfig',
 	'get_classification_transform',
 	'get_mae_finetune_train_transform',
 	'get_mae_finetune_val_transform',

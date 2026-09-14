@@ -1,39 +1,55 @@
-"""任务类型模块
-
-每个任务类型作为一个子模块实现，包含:
-- config.py: 任务配置类
-- runner.py: 任务执行器类
-
-导入此模块会自动注册所有任务类型。
-"""
+"""任务类型模块与任务注册表。"""
 
 from __future__ import annotations
 
-from importlib import import_module
-from pkgutil import iter_modules
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+import torch
+
+from ..base import BaseTaskConfig
+from .classification.config import ClassificationConfig
+from .classification.runner import run as run_classification
+from .eval_checkpoint.config import EvalCheckpointConfig
+from .eval_checkpoint.runner import run as run_eval_checkpoint
+from .mae_finetune.config import MAEFinetuneConfig
+from .mae_finetune.runner import run as run_mae_finetune
+from .mae_pretrain.config import MAEPretrainConfig
+from .mae_pretrain.runner import run as run_mae_pretrain
+from .moco_lincls.config import MoCoLinclsConfig
+from .moco_lincls.runner import run as run_moco_lincls
+from .moco_pretrain.config import MoCoPretrainConfig
+from .moco_pretrain.runner import run as run_moco_pretrain
+from .ordinal.config import OrdinalConfig
+from .ordinal.runner import run as run_ordinal
+from .predict_export.config import PredictExportConfig
+from .predict_export.runner import run as run_predict_export
+
+type TaskEntry = tuple[type[BaseTaskConfig], Callable[[Any, torch.device], Path]]
+
+TASKS: dict[str, TaskEntry] = {
+	'classification': (ClassificationConfig, run_classification),
+	'ordinal': (OrdinalConfig, run_ordinal),
+	'mae_pretrain': (MAEPretrainConfig, run_mae_pretrain),
+	'mae_finetune': (MAEFinetuneConfig, run_mae_finetune),
+	'moco_pretrain': (MoCoPretrainConfig, run_moco_pretrain),
+	'moco_lincls': (MoCoLinclsConfig, run_moco_lincls),
+	'eval_checkpoint': (EvalCheckpointConfig, run_eval_checkpoint),
+	'predict_export': (PredictExportConfig, run_predict_export),
+}
 
 
-_DISCOVERED_MODULES: set[str] = set()
+def get_task(task_type: str) -> TaskEntry:
+	"""根据任务类型获取 (配置类, 执行函数) 元组。"""
+	task = TASKS.get(task_type)
+	if task is None:
+		raise ValueError(f"Unknown task type: '{task_type}'. Available types: {list(TASKS.keys())}")
+	return task
 
 
-def discover_tasks() -> list[str]:
-	"""自动发现并导入所有任务模块"""
-	discovered: list[str] = []
-	for module_info in sorted(iter_modules(__path__), key=lambda item: item.name):
-		module_name = module_info.name
-		if not module_info.ispkg or module_name.startswith('_'):
-			continue
-		qualified_name = f'{__name__}.{module_name}'
-		if qualified_name in _DISCOVERED_MODULES:
-			discovered.append(module_name)
-			continue
-		import_module(qualified_name)
-		_DISCOVERED_MODULES.add(qualified_name)
-		discovered.append(module_name)
-	return discovered
-
-
-discover_tasks()
-
-
-__all__ = ['discover_tasks']
+__all__ = [
+	'TASKS',
+	'get_task',
+	'TaskEntry',
+]

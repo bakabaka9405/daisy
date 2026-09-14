@@ -1,12 +1,13 @@
 """MAE Finetune 任务配置"""
 
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field
 import tyro.conf
 
 from ...base import BaseConfig, BaseTaskConfig
-from ...shared import DatasetConfig
+from ...shared import DatasetConfig, LogOutputConfig
 
 
 class MAEFinetuneModelConfig(BaseConfig):
@@ -18,7 +19,7 @@ class MAEFinetuneModelConfig(BaseConfig):
 	drop_path: float = 0.1
 	img_size: int = 224
 	# MAE 预训练权重路径
-	checkpoint: str | None = None
+	checkpoint: Path | None = None
 
 
 class MAEFinetuneAugConfig(BaseConfig):
@@ -57,18 +58,11 @@ class MAEFinetuneTrainingConfig(BaseConfig):
 	augment: MAEFinetuneAugConfig = Field(default_factory=MAEFinetuneAugConfig)
 
 
-class MAEFinetuneOutputConfig(BaseConfig):
-	"""MAE Finetune 输出配置"""
-
-	save_path: str = 'outputs/{task_id}'
-	log: bool = True
-
-
 class MAEFinetuneConfig(BaseTaskConfig):
 	"""MAE Finetune 任务配置"""
 
 	task_type: Annotated[Literal['mae_finetune'], tyro.conf.Suppress] = 'mae_finetune'  # type: ignore[assignment]
-	output: MAEFinetuneOutputConfig = Field(default_factory=MAEFinetuneOutputConfig)
+	output: LogOutputConfig = Field(default_factory=LogOutputConfig)
 	dataset: DatasetConfig = Field(default_factory=DatasetConfig)
 	model: MAEFinetuneModelConfig = Field(default_factory=MAEFinetuneModelConfig)
 	training: MAEFinetuneTrainingConfig = Field(default_factory=MAEFinetuneTrainingConfig)

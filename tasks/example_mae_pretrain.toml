@@ -6,7 +6,6 @@ title = "MAE Pretraining Example"
 description = "使用 MAE 进行自监督预训练"
 
 [dataset]
-type = "folder"
 root = "/path/to/images"  # 修改为实际数据路径
 extensions = [".jpg", ".jpeg", ".png"]
 

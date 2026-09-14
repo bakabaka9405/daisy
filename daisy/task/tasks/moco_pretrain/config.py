@@ -1,17 +1,18 @@
 """MoCo 预训练任务配置"""
 
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field
 import tyro.conf
 
-from ...base import BaseConfig, BaseOutputConfig, BaseTaskConfig
+from ...base import BaseConfig, BaseTaskConfig
+from ...shared import LogOutputConfig
 
 
 class MoCoDatasetConfig(BaseConfig):
 	"""MoCo 数据集配置"""
 
-	type: Literal['folder'] = 'folder'
 	root: str = ''
 	extensions: list[str] = Field(default_factory=lambda: ['.jpg', '.jpeg', '.png', '.bmp', '.webp'])
 
@@ -47,16 +48,9 @@ class MoCoTrainingConfig(BaseConfig):
 	use_amp: bool = True
 	num_workers: int = 4
 	save_freq: int = 20
-	resume: str | None = None
+	resume: Path | None = None
 	# 数据增强
 	input_size: int = 224
-
-
-class MoCoOutputConfig(BaseOutputConfig):
-	"""MoCo 输出配置"""
-
-	save_path: str = 'outputs/{task_id}'
-	log: bool = True
 
 
 class MoCoPretrainConfig(BaseTaskConfig):
@@ -64,7 +58,7 @@ class MoCoPretrainConfig(BaseTaskConfig):
 
 	task_type: Annotated[Literal['moco_pretrain'], tyro.conf.Suppress] = 'moco_pretrain'  # type: ignore[assignment]
 	engine: Literal['v2', 'v3'] = 'v3'
-	output: MoCoOutputConfig = Field(default_factory=MoCoOutputConfig)
+	output: LogOutputConfig = Field(default_factory=LogOutputConfig)
 	dataset: MoCoDatasetConfig = Field(default_factory=MoCoDatasetConfig)
 	model: MoCoModelConfig = Field(default_factory=MoCoModelConfig)
 	training: MoCoTrainingConfig = Field(default_factory=MoCoTrainingConfig)

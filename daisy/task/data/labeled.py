@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import cast
 
 import daisy
+
+from ..shared.dataset_config import DatasetConfig
 
 
 @dataclass(slots=True)
@@ -72,7 +74,7 @@ def _relative_sample_id(file_path: Path, *, root: Path) -> str:
 def _load_sheet_samples(
 	*,
 	dataset_root: Path,
-	sheet_path: str | Path,
+	sheet_path: Path,
 	sheet_name: str | int | None,
 	column: int,
 	label_offset: int,
@@ -80,7 +82,7 @@ def _load_sheet_samples(
 ) -> LabeledSamples:
 	feeder = daisy.feeder.load_feeder_from_sheet(
 		dataset_root=dataset_root,
-		sheet_path=Path(sheet_path),
+		sheet_path=sheet_path,
 		sheet_name=sheet_name if sheet_name is not None else 0,
 		column=column,
 		label_offset=label_offset,
@@ -96,13 +98,13 @@ def _load_folder_samples(root: Path) -> LabeledSamples:
 	return LabeledSamples(files=files, labels=labels)
 
 
-def load_labeled_samples(dataset_cfg: Any) -> LabeledSamples:
+def load_labeled_samples(dataset_cfg: DatasetConfig) -> LabeledSamples:
 	"""加载带标签样本"""
 	if dataset_cfg.type == 'sheet':
 		if not dataset_cfg.sheet:
 			raise ValueError('dataset.sheet is required when dataset.type = "sheet"')
 		return _load_sheet_samples(
-			dataset_root=Path(dataset_cfg.root),
+			dataset_root=dataset_cfg.root,
 			sheet_path=dataset_cfg.sheet,
 			sheet_name=dataset_cfg.sheet_name,
 			column=dataset_cfg.column,
@@ -110,18 +112,18 @@ def load_labeled_samples(dataset_cfg: Any) -> LabeledSamples:
 			have_header=dataset_cfg.have_header,
 		)
 	if dataset_cfg.type == 'folder':
-		return _load_folder_samples(Path(dataset_cfg.root))
+		return _load_folder_samples(dataset_cfg.root)
 	raise ValueError(f'Unknown dataset type: {dataset_cfg.type}')
 
 
 def build_train_val_selection(
-	dataset_cfg: Any,
+	dataset_cfg: DatasetConfig,
 	*,
 	default_seed: int | None = None,
 	context: str,
 ) -> TrainValSelection:
 	"""构建训练/验证数据划分"""
-	dataset_root = Path(dataset_cfg.root)
+	dataset_root = dataset_cfg.root
 	source_samples = load_labeled_samples(dataset_cfg)
 	dataset = source_samples.to_dataset()
 	split_cfg = dataset_cfg.split
@@ -170,13 +172,13 @@ def build_train_val_selection(
 
 
 def select_dataset_split(
-	dataset_cfg: Any,
+	dataset_cfg: DatasetConfig,
 	*,
 	split_name: str,
 	default_seed: int | None = None,
 ) -> DatasetSelection:
 	"""为评估/导出选择目标 split"""
-	dataset_root = Path(dataset_cfg.root)
+	dataset_root = dataset_cfg.root
 	source_samples = load_labeled_samples(dataset_cfg)
 	dataset = source_samples.to_dataset()
 	split_cfg = dataset_cfg.split

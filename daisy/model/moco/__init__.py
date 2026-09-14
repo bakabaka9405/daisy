@@ -3,6 +3,8 @@
 提供 MoCo v2 (queue-based) 和 MoCo v3 (queue-free, symmetrized) 模型。
 """
 
+from pathlib import Path
+
 from .builder_v2 import MoCoV2
 from .builder_v3 import MoCoV3, MoCoV3_ResNet, MoCoV3_ViT
 from .vit import VisionTransformerMoCo, ConvStem, MOCO_VIT_MODELS
@@ -13,7 +15,7 @@ import torch
 import torch.nn as nn
 
 
-def load_moco_pretrained_weights(model: nn.Module, checkpoint_path: str, engine: str = 'v3'):
+def load_moco_pretrained_weights(model: nn.Module, checkpoint_path: str | Path, engine: str = 'v3'):
 	"""从 MoCo checkpoint 中提取 encoder 权重到标准模型
 
 	Args:

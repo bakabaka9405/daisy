@@ -3,6 +3,7 @@
 from daisy.method.base import Method
 from daisy.method.classification import ClassificationMethod
 from daisy.method.mae import MAEFinetuneMethod, MAEPretrainMethod
+from daisy.method.moco import MoCoPretrainMethod
 from daisy.method.ordinal import (
 	METHODS,
 	CEMethod,
@@ -34,6 +35,7 @@ __all__ = [
 	'MSERankHingeMethod',
 	'MSERankNetMethod',
 	'Method',
+	'MoCoPretrainMethod',
 	'OrdinalContrastiveMethod',
 	'RPSMethod',
 	'SORDMethod',

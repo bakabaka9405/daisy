@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -16,19 +17,19 @@ class DatasetSplitConfig(BaseConfig):
 	val_ratio: float = 0.1
 	seed: int | None = None
 	stratified: bool = False
-	val_sheet: str | None = None
+	val_sheet: Path | None = None
 	val_sheet_name: str | None = None
-	preset_train_dir: str = 'train'
-	preset_val_dir: str = 'val'
-	preset_test_dir: str = 'test'
+	preset_train_dir: Path = Path('train')
+	preset_val_dir: Path = Path('val')
+	preset_test_dir: Path = Path('test')
 
 
 class DatasetConfig(BaseConfig):
 	"""带标签数据集配置"""
 
 	type: Literal['sheet', 'folder'] = 'sheet'
-	root: str = ''
-	sheet: str | None = None
+	root: Path = Path()
+	sheet: Path | None = None
 	sheet_name: str | None = None
 	column: int = 1
 	label_offset: int = 0

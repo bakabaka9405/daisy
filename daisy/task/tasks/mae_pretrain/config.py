@@ -1,17 +1,18 @@
 """MAE 预训练任务配置"""
 
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field
 import tyro.conf
 
 from ...base import BaseConfig, BaseTaskConfig
+from ...shared import LogOutputConfig
 
 
 class MAEDatasetConfig(BaseConfig):
 	"""MAE 数据集配置"""
 
-	type: Literal['folder'] = 'folder'
 	root: str = ''
 	extensions: list[str] = Field(default_factory=lambda: ['.jpg', '.jpeg', '.png', '.bmp', '.webp'])
 	sample_ratio: float = Field(default=1.0, gt=0.0, le=1.0)
@@ -54,22 +55,15 @@ class MAETrainingConfig(BaseConfig):
 	max_norm: float = 1.0
 	num_workers: int = 4
 	save_freq: int = 20  # 保存频率
-	resume: str | None = None  # 恢复训练的 checkpoint 路径
+	resume: Path | None = None  # 恢复训练的 checkpoint 路径
 	transform: MAETransformConfig = Field(default_factory=MAETransformConfig)
-
-
-class MAEOutputConfig(BaseConfig):
-	"""MAE 输出配置"""
-
-	save_path: str = 'outputs/{task_id}'
-	log: bool = True
 
 
 class MAEPretrainConfig(BaseTaskConfig):
 	"""MAE 预训练任务配置"""
 
 	task_type: Annotated[Literal['mae_pretrain'], tyro.conf.Suppress] = 'mae_pretrain'  # type: ignore[assignment]
-	output: MAEOutputConfig = Field(default_factory=MAEOutputConfig)
+	output: LogOutputConfig = Field(default_factory=LogOutputConfig)
 	dataset: MAEDatasetConfig = Field(default_factory=MAEDatasetConfig)
 	model: MAEModelConfig = Field(default_factory=MAEModelConfig)
 	training: MAETrainingConfig = Field(default_factory=MAETrainingConfig)

@@ -1,12 +1,13 @@
 """分类任务配置"""
 
+from pathlib import Path
 from typing import Annotated, Literal
 
 from pydantic import Field
 import tyro.conf
 
 from ...base import BaseConfig, BaseOutputConfig, BaseTaskConfig
-from ...shared import DatasetConfig as DatasetConfig, DatasetSplitConfig as DatasetSplitConfig
+from ...shared import DatasetConfig
 
 
 class ModelConfig(BaseConfig):
@@ -16,7 +17,7 @@ class ModelConfig(BaseConfig):
 	pretrained: bool = True
 	num_classes: int = 2
 	# 可选：加载预训练权重
-	checkpoint: str | None = None
+	checkpoint: Path | None = None
 
 
 class TransformConfig(BaseConfig):

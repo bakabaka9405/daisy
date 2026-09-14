@@ -1,4 +1,4 @@
-from . import analysis, classifier_trainer, dataset, feeder, moco_pretrain, util, task, model, metrics
+from . import analysis, classifier_trainer, dataset, feeder, util, task, model, metrics
 
 __all__ = [
 	'analysis',
@@ -7,7 +7,6 @@ __all__ = [
 	'util',
 	'classifier_trainer',
 	'task',
-	'moco_pretrain',
 	'model',
 	'metrics',
 ]

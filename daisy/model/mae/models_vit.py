@@ -8,6 +8,7 @@
 """
 
 from functools import partial
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -87,7 +88,7 @@ def create_vit_model(name: str, **kwargs) -> VisionTransformer:
 
 def load_mae_pretrained_weights(
 	model: VisionTransformer,
-	checkpoint_path: str,
+	checkpoint_path: str | Path,
 	init_head: bool = True,
 	head_init_std: float = 2e-5,
 	verbose: bool = True,

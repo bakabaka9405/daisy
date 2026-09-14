@@ -1,9 +1,9 @@
-"""Task 模块抽象基类"""
+"""Task 模块基础配置"""
 
-from abc import ABC, abstractmethod
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Annotated, cast
-import torch
+from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 import tyro.conf
@@ -34,38 +34,13 @@ class BaseOutputConfig(BaseConfig):
 	log: bool = True
 
 
-class BaseTaskConfig(BaseConfig, ABC):
+class BaseTaskConfig(BaseConfig):
 	"""所有任务配置的基类"""
 
 	# task_type 由子类定义具体 Literal 类型
-	task_type: Annotated[str, tyro.conf.Suppress]
+	task_type: Annotated[str, tyro.conf.Suppress] = ''
 	# meta 由基类统一提供默认工厂
 	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
 	# 任务文件路径（加载后自动设置）
 	task_file: Annotated[Path | None, tyro.conf.Suppress] = None
 	task_id: Annotated[str, tyro.conf.Suppress] = ''
-
-	@classmethod
-	def get_task_type(cls) -> str:
-		"""返回任务类型标识符"""
-		return cast(str, cls.model_fields['task_type'].default)
-
-
-class TaskRunner[T_Config: BaseTaskConfig](ABC):
-	"""任务执行器基类"""
-
-	@classmethod
-	def get_task_type(cls) -> str:
-		"""返回支持的任务类型"""
-		return cls.get_config_class().get_task_type()
-
-	@classmethod
-	@abstractmethod
-	def get_config_class(cls) -> type[BaseTaskConfig]:
-		"""返回配置类"""
-		pass
-
-	@abstractmethod
-	def run(self, config: T_Config, device: torch.device) -> Path:
-		"""执行任务，返回输出路径"""
-		pass

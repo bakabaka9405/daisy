@@ -123,7 +123,7 @@ def save_task_snapshot(
 ) -> None:
 	"""保存 task 配置快照"""
 	output_path = Path(output_path)
-	snapshot = config.model_dump(exclude={'task_file'}, exclude_none=True)
+	snapshot = config.model_dump(mode='json', exclude={'task_file'}, exclude_none=True)
 	snapshot['task_id'] = config.task_id
 	if config.task_file is not None:
 		snapshot['task_file'] = str(config.task_file)

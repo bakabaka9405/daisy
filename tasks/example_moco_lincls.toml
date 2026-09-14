@@ -1,0 +1,47 @@
+task_type = "moco_lincls"
+
+[meta]
+title = "moco_lincls 示例任务"
+description = "根据 moco_lincls 的注册配置自动生成"
+creator = "your_name"
+created_at = "2026-09-14"
+commit = "auto"
+
+[output]
+save_path = "outputs/{task_id}"
+save_best = true
+log = true
+
+[dataset]
+type = "sheet"
+root = ""
+column = 1
+label_offset = 0
+have_header = true
+
+[dataset.split]
+method = "ratio"
+val_ratio = 0.1
+stratified = false
+preset_train_dir = "train"
+preset_val_dir = "val"
+preset_test_dir = "test"
+
+[model]
+arch = "resnet50"
+num_classes = 1000
+pretrained_checkpoint = ""
+engine = "v3"
+
+[training]
+epochs = 100
+batch_size = 256
+lr = 30.0
+min_lr = 1e-06
+weight_decay = 0.0
+warmup_epochs = 0
+smoothing = 0.1
+accum_iter = 1
+use_amp = true
+num_workers = 4
+save_freq = 20
