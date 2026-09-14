@@ -1,14 +1,15 @@
 """分类任务配置"""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+import tyro.conf
 
-from ...base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
+from ...base import BaseConfig, BaseOutputConfig, BaseTaskConfig
 from ...shared import DatasetConfig as DatasetConfig, DatasetSplitConfig as DatasetSplitConfig
 
 
-class ModelConfig(BaseModel):
+class ModelConfig(BaseConfig):
 	"""模型配置"""
 
 	name: str = 'resnet34'
@@ -18,14 +19,14 @@ class ModelConfig(BaseModel):
 	checkpoint: str | None = None
 
 
-class TransformConfig(BaseModel):
+class TransformConfig(BaseConfig):
 	"""数据增强配置"""
 
 	train: str = 'rectangle_train'
 	val: str = 'rectangle_val'
 
 
-class TrainingConfig(BaseModel):
+class TrainingConfig(BaseConfig):
 	"""训练配置"""
 
 	seed: int | None = None
@@ -50,13 +51,8 @@ class TrainingConfig(BaseModel):
 class ClassificationConfig(BaseTaskConfig):
 	"""分类任务配置"""
 
-	task_type: Literal['classification'] = 'classification'  # type: ignore[assignment]
-	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
+	task_type: Annotated[Literal['classification'], tyro.conf.Suppress] = 'classification'  # type: ignore[assignment]
 	output: BaseOutputConfig = Field(default_factory=BaseOutputConfig)
 	dataset: DatasetConfig = Field(default_factory=DatasetConfig)
 	model: ModelConfig = Field(default_factory=ModelConfig)
 	training: TrainingConfig = Field(default_factory=TrainingConfig)
-
-	@classmethod
-	def get_task_type(cls) -> str:
-		return 'classification'

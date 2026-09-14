@@ -24,11 +24,6 @@ class EvalCheckpointRunner(TaskRunner['EvalCheckpointConfig']):
 
 	@classmethod
 	@override
-	def get_task_type(cls) -> str:
-		return 'eval_checkpoint'
-
-	@classmethod
-	@override
 	def get_config_class(cls) -> type[EvalCheckpointConfig]:
 		return EvalCheckpointConfig
 

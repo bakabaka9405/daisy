@@ -22,10 +22,6 @@ class PredictExportRunner(TaskRunner['PredictExportConfig']):
 	"""预测导出任务执行器"""
 
 	@classmethod
-	def get_task_type(cls) -> str:
-		return 'predict_export'
-
-	@classmethod
 	def get_config_class(cls) -> type[PredictExportConfig]:
 		return PredictExportConfig
 

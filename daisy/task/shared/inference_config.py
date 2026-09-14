@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from ..base import BaseConfig
 
 
-class InferenceModelConfig(BaseModel):
+class InferenceModelConfig(BaseConfig):
 	"""推理模型配置"""
 
 	family: Literal['classification', 'mae_finetune'] = 'classification'
@@ -20,7 +20,7 @@ class InferenceModelConfig(BaseModel):
 	img_size: int = 224
 
 
-class InferenceRuntimeConfig(BaseModel):
+class InferenceRuntimeConfig(BaseConfig):
 	"""推理运行配置"""
 
 	split_name: str = 'val'

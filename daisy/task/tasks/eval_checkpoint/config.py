@@ -1,10 +1,11 @@
 """checkpoint 评估任务配置"""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
+import tyro.conf
 
-from ...base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
+from ...base import BaseOutputConfig, BaseTaskConfig
 from ...shared import DatasetConfig, InferenceModelConfig, InferenceRuntimeConfig
 
 
@@ -26,13 +27,8 @@ class EvalCheckpointOutputConfig(BaseOutputConfig):
 class EvalCheckpointConfig(BaseTaskConfig):
 	"""checkpoint 评估任务配置"""
 
-	task_type: Literal['eval_checkpoint'] = 'eval_checkpoint'  # type: ignore[assignment]
-	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
+	task_type: Annotated[Literal['eval_checkpoint'], tyro.conf.Suppress] = 'eval_checkpoint'  # type: ignore[assignment]
 	output: EvalCheckpointOutputConfig = Field(default_factory=EvalCheckpointOutputConfig)
 	dataset: DatasetConfig = Field(default_factory=DatasetConfig)
 	model: EvalCheckpointModelConfig = Field(default_factory=EvalCheckpointModelConfig)
 	evaluation: EvalCheckpointRuntimeConfig = Field(default_factory=EvalCheckpointRuntimeConfig)
-
-	@classmethod
-	def get_task_type(cls) -> str:
-		return 'eval_checkpoint'

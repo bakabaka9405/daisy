@@ -1,10 +1,11 @@
 """预测导出任务配置"""
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
+import tyro.conf
 
-from ...base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
+from ...base import BaseOutputConfig, BaseTaskConfig
 from ...shared import DatasetConfig, InferenceModelConfig, InferenceRuntimeConfig
 
 
@@ -25,13 +26,8 @@ class PredictExportOutputConfig(BaseOutputConfig):
 class PredictExportConfig(BaseTaskConfig):
 	"""预测导出任务配置"""
 
-	task_type: Literal['predict_export'] = 'predict_export'  # type: ignore[assignment]
-	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
+	task_type: Annotated[Literal['predict_export'], tyro.conf.Suppress] = 'predict_export'  # type: ignore[assignment]
 	output: PredictExportOutputConfig = Field(default_factory=PredictExportOutputConfig)
 	dataset: DatasetConfig = Field(default_factory=DatasetConfig)
 	model: InferenceModelConfig = Field(default_factory=InferenceModelConfig)
 	prediction: PredictExportRuntimeConfig = Field(default_factory=PredictExportRuntimeConfig)
-
-	@classmethod
-	def get_task_type(cls) -> str:
-		return 'predict_export'

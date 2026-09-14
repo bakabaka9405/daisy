@@ -1,14 +1,15 @@
 """MAE Finetune 任务配置"""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+import tyro.conf
 
-from ...base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
+from ...base import BaseConfig, BaseTaskConfig
 from ...shared import DatasetConfig
 
 
-class MAEFinetuneModelConfig(BaseModel):
+class MAEFinetuneModelConfig(BaseConfig):
 	"""MAE Finetune 模型配置"""
 
 	name: str = 'vit_base_patch16'
@@ -20,7 +21,7 @@ class MAEFinetuneModelConfig(BaseModel):
 	checkpoint: str | None = None
 
 
-class MAEFinetuneAugConfig(BaseModel):
+class MAEFinetuneAugConfig(BaseConfig):
 	"""MAE Finetune 数据增强配置"""
 
 	input_size: int = 224
@@ -36,7 +37,7 @@ class MAEFinetuneAugConfig(BaseModel):
 	smoothing: float = 0.1
 
 
-class MAEFinetuneTrainingConfig(BaseModel):
+class MAEFinetuneTrainingConfig(BaseConfig):
 	"""MAE Finetune 训练配置"""
 
 	seed: int | None = None
@@ -56,7 +57,7 @@ class MAEFinetuneTrainingConfig(BaseModel):
 	augment: MAEFinetuneAugConfig = Field(default_factory=MAEFinetuneAugConfig)
 
 
-class MAEFinetuneOutputConfig(BaseOutputConfig):
+class MAEFinetuneOutputConfig(BaseConfig):
 	"""MAE Finetune 输出配置"""
 
 	save_path: str = 'outputs/{task_id}'
@@ -66,13 +67,8 @@ class MAEFinetuneOutputConfig(BaseOutputConfig):
 class MAEFinetuneConfig(BaseTaskConfig):
 	"""MAE Finetune 任务配置"""
 
-	task_type: Literal['mae_finetune'] = 'mae_finetune'  # type: ignore[assignment]
-	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
+	task_type: Annotated[Literal['mae_finetune'], tyro.conf.Suppress] = 'mae_finetune'  # type: ignore[assignment]
 	output: MAEFinetuneOutputConfig = Field(default_factory=MAEFinetuneOutputConfig)
 	dataset: DatasetConfig = Field(default_factory=DatasetConfig)
 	model: MAEFinetuneModelConfig = Field(default_factory=MAEFinetuneModelConfig)
 	training: MAEFinetuneTrainingConfig = Field(default_factory=MAEFinetuneTrainingConfig)
-
-	@classmethod
-	def get_task_type(cls) -> str:
-		return 'mae_finetune'

@@ -1,14 +1,15 @@
 """MoCo 线性探测评估任务配置"""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+import tyro.conf
 
-from ...base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
+from ...base import BaseConfig, BaseOutputConfig, BaseTaskConfig
 from ...shared import DatasetConfig
 
 
-class MoCoLinclsModelConfig(BaseModel):
+class MoCoLinclsModelConfig(BaseConfig):
 	"""MoCo 线性探测模型配置"""
 
 	arch: str = 'resnet50'
@@ -17,7 +18,7 @@ class MoCoLinclsModelConfig(BaseModel):
 	engine: Literal['v2', 'v3'] = 'v3'  # 用于确定权重提取方式
 
 
-class MoCoLinclsTrainingConfig(BaseModel):
+class MoCoLinclsTrainingConfig(BaseConfig):
 	"""MoCo 线性探测训练配置"""
 
 	epochs: int = 100
@@ -43,13 +44,8 @@ class MoCoLinclsOutputConfig(BaseOutputConfig):
 class MoCoLinclsConfig(BaseTaskConfig):
 	"""MoCo 线性探测评估任务配置"""
 
-	task_type: Literal['moco_lincls'] = 'moco_lincls'  # type: ignore[assignment]
-	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
+	task_type: Annotated[Literal['moco_lincls'], tyro.conf.Suppress] = 'moco_lincls'  # type: ignore[assignment]
 	output: MoCoLinclsOutputConfig = Field(default_factory=MoCoLinclsOutputConfig)
 	dataset: DatasetConfig = Field(default_factory=DatasetConfig)
 	model: MoCoLinclsModelConfig = Field(default_factory=MoCoLinclsModelConfig)
 	training: MoCoLinclsTrainingConfig = Field(default_factory=MoCoLinclsTrainingConfig)
-
-	@classmethod
-	def get_task_type(cls) -> str:
-		return 'moco_lincls'

@@ -1,13 +1,14 @@
 """MoCo 预训练任务配置"""
 
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+import tyro.conf
 
-from ...base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
+from ...base import BaseConfig, BaseOutputConfig, BaseTaskConfig
 
 
-class MoCoDatasetConfig(BaseModel):
+class MoCoDatasetConfig(BaseConfig):
 	"""MoCo 数据集配置"""
 
 	type: Literal['folder'] = 'folder'
@@ -15,7 +16,7 @@ class MoCoDatasetConfig(BaseModel):
 	extensions: list[str] = Field(default_factory=lambda: ['.jpg', '.jpeg', '.png', '.bmp', '.webp'])
 
 
-class MoCoModelConfig(BaseModel):
+class MoCoModelConfig(BaseConfig):
 	"""MoCo 模型配置"""
 
 	arch: str = 'resnet50'
@@ -30,7 +31,7 @@ class MoCoModelConfig(BaseModel):
 	stop_grad_conv1: bool = False  # 是否冻结 conv1 (仅 ViT)
 
 
-class MoCoTrainingConfig(BaseModel):
+class MoCoTrainingConfig(BaseConfig):
 	"""MoCo 训练配置"""
 
 	epochs: int = 200
@@ -61,14 +62,9 @@ class MoCoOutputConfig(BaseOutputConfig):
 class MoCoPretrainConfig(BaseTaskConfig):
 	"""MoCo 预训练任务配置"""
 
-	task_type: Literal['moco_pretrain'] = 'moco_pretrain'  # type: ignore[assignment]
+	task_type: Annotated[Literal['moco_pretrain'], tyro.conf.Suppress] = 'moco_pretrain'  # type: ignore[assignment]
 	engine: Literal['v2', 'v3'] = 'v3'
-	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
 	output: MoCoOutputConfig = Field(default_factory=MoCoOutputConfig)
 	dataset: MoCoDatasetConfig = Field(default_factory=MoCoDatasetConfig)
 	model: MoCoModelConfig = Field(default_factory=MoCoModelConfig)
 	training: MoCoTrainingConfig = Field(default_factory=MoCoTrainingConfig)
-
-	@classmethod
-	def get_task_type(cls) -> str:
-		return 'moco_pretrain'

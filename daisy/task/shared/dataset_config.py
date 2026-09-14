@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+
+from ..base import BaseConfig
 
 
-class DatasetSplitConfig(BaseModel):
+class DatasetSplitConfig(BaseConfig):
 	"""数据集划分配置"""
 
 	method: Literal['none', 'ratio', 'sheet', 'preset'] = 'ratio'
@@ -21,7 +23,7 @@ class DatasetSplitConfig(BaseModel):
 	preset_test_dir: str = 'test'
 
 
-class DatasetConfig(BaseModel):
+class DatasetConfig(BaseConfig):
 	"""带标签数据集配置"""
 
 	type: Literal['sheet', 'folder'] = 'sheet'

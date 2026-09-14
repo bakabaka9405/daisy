@@ -100,10 +100,6 @@ class MoCoPretrainRunner(TaskRunner['MoCoPretrainConfig']):
 	"""MoCo 预训练任务执行器"""
 
 	@classmethod
-	def get_task_type(cls) -> str:
-		return 'moco_pretrain'
-
-	@classmethod
 	def get_config_class(cls) -> type[MoCoPretrainConfig]:
 		return MoCoPretrainConfig
 

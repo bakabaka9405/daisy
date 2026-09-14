@@ -9,8 +9,6 @@ commit = "auto"
 
 [output]
 save_path = "outputs/{task_id}"
-keep_count = 1
-save_best = true
 log = true
 
 [dataset]

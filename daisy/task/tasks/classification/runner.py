@@ -24,11 +24,6 @@ class ClassificationRunner(TaskRunner[ClassificationConfig]):
 
 	@classmethod
 	@override
-	def get_task_type(cls) -> str:
-		return 'classification'
-
-	@classmethod
-	@override
 	def get_config_class(cls) -> type[ClassificationConfig]:
 		return ClassificationConfig
 

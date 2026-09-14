@@ -14,12 +14,11 @@ extensions = [".jpg", ".jpeg", ".png"]
 name = "mae_vit_base_patch16"  # 可选: mae_vit_base_patch16, mae_vit_large_patch16, mae_vit_huge_patch14
 img_size = 224
 # timm_pretrained = "vit_base_patch16_224.augreg_in1k"  # 可选：初始化编码器
-# checkpoint = "/path/to/checkpoint.pth"  # 可选：从 checkpoint 恢复
 
 [training]
 epochs = 400
 batch_size = 64
-blr = 1.5e-4  # 基础学习率, 实际 lr = blr * batch_size / 256
+blr = 1.5e-4  # 基础学习率, 实际 lr = blr * batch_size * accum_iter / 256
 weight_decay = 0.05
 warmup_epochs = 40
 mask_ratio = 0.75
@@ -30,6 +29,7 @@ clip_grad = false
 max_norm = 1.0
 num_workers = 4
 save_freq = 20
+# resume = "/path/to/checkpoint.pth"  # 可选：恢复训练的 checkpoint 路径
 
 [training.transform]
 input_size = 224

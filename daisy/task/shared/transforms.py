@@ -7,7 +7,7 @@ from torchvision.transforms import InterpolationMode, v2 as transforms
 
 import daisy
 from daisy.util.transform import ZeroOneNormalize
-from typing import Literal
+from typing import Any, Callable, Literal, cast
 
 
 def get_classification_transform(name: str):
@@ -33,8 +33,8 @@ def get_mae_finetune_train_transform(
 	remode: str = 'pixel',
 	recount: int = 1,
 ):
-	"""获取 MAE Finetune 训练 transform"""
-	return create_transform(
+	"""获取 MAE Finetune 训练 transform（输入 Tensor，输出归一化后的训练 Tensor）"""
+	timm_transform = create_transform(
 		input_size=input_size,
 		is_training=True,
 		color_jitter=0.0,
@@ -46,6 +46,7 @@ def get_mae_finetune_train_transform(
 		mean=(0.485, 0.456, 0.406),
 		std=(0.229, 0.224, 0.225),
 	)
+	return transforms.Compose([transforms.ToPILImage(), cast(Callable[..., Any], timm_transform)])
 
 
 def get_mae_finetune_val_transform(

@@ -20,10 +20,6 @@ class MoCoLinclsRunner(TaskRunner['MoCoLinclsConfig']):
 	"""MoCo 线性探测评估任务执行器"""
 
 	@classmethod
-	def get_task_type(cls) -> str:
-		return 'moco_lincls'
-
-	@classmethod
 	def get_config_class(cls) -> type[MoCoLinclsConfig]:
 		return MoCoLinclsConfig
 

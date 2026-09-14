@@ -1,13 +1,14 @@
 """MAE 预训练任务配置"""
 
-from typing import Literal, override
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
+import tyro.conf
 
-from ...base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
+from ...base import BaseConfig, BaseTaskConfig
 
 
-class MAEDatasetConfig(BaseModel):
+class MAEDatasetConfig(BaseConfig):
 	"""MAE 数据集配置"""
 
 	type: Literal['folder'] = 'folder'
@@ -17,17 +18,15 @@ class MAEDatasetConfig(BaseModel):
 	sample_seed: int | None = None
 
 
-class MAEModelConfig(BaseModel):
+class MAEModelConfig(BaseConfig):
 	"""MAE 模型配置"""
 
 	name: str = 'mae_vit_base_patch16'
 	img_size: int = 224
 	timm_pretrained: str | None = None
-	# 可选：加载预训练权重
-	checkpoint: str | None = None
 
 
-class MAETransformConfig(BaseModel):
+class MAETransformConfig(BaseConfig):
 	"""MAE 数据增强配置"""
 
 	input_size: int = 224
@@ -38,7 +37,7 @@ class MAETransformConfig(BaseModel):
 	hflip: bool = True
 
 
-class MAETrainingConfig(BaseModel):
+class MAETrainingConfig(BaseConfig):
 	"""MAE 训练配置"""
 
 	seed: int | None = None
@@ -59,7 +58,7 @@ class MAETrainingConfig(BaseModel):
 	transform: MAETransformConfig = Field(default_factory=MAETransformConfig)
 
 
-class MAEOutputConfig(BaseOutputConfig):
+class MAEOutputConfig(BaseConfig):
 	"""MAE 输出配置"""
 
 	save_path: str = 'outputs/{task_id}'
@@ -69,14 +68,8 @@ class MAEOutputConfig(BaseOutputConfig):
 class MAEPretrainConfig(BaseTaskConfig):
 	"""MAE 预训练任务配置"""
 
-	task_type: Literal['mae_pretrain'] = 'mae_pretrain'  # type: ignore[assignment]
-	meta: BaseMetaConfig = Field(default_factory=BaseMetaConfig)
+	task_type: Annotated[Literal['mae_pretrain'], tyro.conf.Suppress] = 'mae_pretrain'  # type: ignore[assignment]
 	output: MAEOutputConfig = Field(default_factory=MAEOutputConfig)
 	dataset: MAEDatasetConfig = Field(default_factory=MAEDatasetConfig)
 	model: MAEModelConfig = Field(default_factory=MAEModelConfig)
 	training: MAETrainingConfig = Field(default_factory=MAETrainingConfig)
-
-	@classmethod
-	@override
-	def get_task_type(cls) -> str:
-		return 'mae_pretrain'
