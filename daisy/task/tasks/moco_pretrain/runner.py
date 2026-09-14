@@ -107,10 +107,6 @@ class MoCoPretrainRunner(TaskRunner['MoCoPretrainConfig']):
 	def get_config_class(cls) -> type[MoCoPretrainConfig]:
 		return MoCoPretrainConfig
 
-	@classmethod
-	def get_ui_display_name(cls) -> str:
-		return 'MoCo 预训练'
-
 	def run(self, config: MoCoPretrainConfig, device: torch.device) -> Path:  # type: ignore[override]
 		"""执行 MoCo 预训练任务"""
 		run_context = prepare_task_run(

@@ -17,7 +17,6 @@ from daisy.util.transform import LazyNormalization, LazyNormalizedTensor
 from ...base import TaskRunner
 from ...registry import TaskRegistry
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
-from ...ui_config import UIFieldConfig
 from .config import MAEPretrainConfig
 
 
@@ -59,35 +58,6 @@ class MAEPretrainRunner(TaskRunner):
 	@override
 	def get_config_class(cls) -> type[MAEPretrainConfig]:
 		return MAEPretrainConfig
-
-	@classmethod
-	@override
-	def get_ui_display_name(cls) -> str:
-		return 'MAE 预训练'
-
-	@classmethod
-	@override
-	def get_ui_field_overrides(cls) -> dict[str, UIFieldConfig]:
-		return {
-			'meta.title': UIFieldConfig(label='任务标题'),
-			'meta.description': UIFieldConfig(label='描述', component='textarea'),
-			'meta.created_at': UIFieldConfig(hidden=True),
-			'meta.commit': UIFieldConfig(hidden=True),
-			'dataset.root': UIFieldConfig(label='数据目录'),
-			'model.name': UIFieldConfig(
-				label='模型',
-				component='dropdown',
-				choices=('mae_vit_base_patch16', 'mae_vit_large_patch16', 'mae_vit_huge_patch14'),
-				allow_custom=True,
-			),
-			'model.timm_pretrained': UIFieldConfig(label='timm 预训练模型'),
-			'training.epochs': UIFieldConfig(label='训练轮数'),
-			'training.batch_size': UIFieldConfig(label='Batch Size'),
-			'training.blr': UIFieldConfig(label='基础学习率'),
-			'training.warmup_epochs': UIFieldConfig(label='Warmup 轮数'),
-			'training.mask_ratio': UIFieldConfig(label='Mask 比例', component='slider', min_value=0.5, max_value=0.9, step=0.05),
-			'output.save_path': UIFieldConfig(hidden=True),
-		}
 
 	@override
 	def run(self, config: MAEPretrainConfig, device: torch.device) -> Path:  # type: ignore[override]

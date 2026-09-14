@@ -29,10 +29,6 @@ class PredictExportRunner(TaskRunner['PredictExportConfig']):
 	def get_config_class(cls) -> type[PredictExportConfig]:
 		return PredictExportConfig
 
-	@classmethod
-	def get_ui_display_name(cls) -> str:
-		return '预测导出'
-
 	def run(self, config: PredictExportConfig, device: torch.device) -> Path:
 		runtime_cfg = config.prediction
 		run_context = prepare_task_run(config, device, seed=runtime_cfg.seed)

@@ -21,8 +21,7 @@
 - `serialization.py`：统一保存 task 配置；
 - `shared/`：放共享配置模型、共享 transform 等可跨任务复用的定义；
 - `data/`：放带标签数据加载、split 选择等共享数据流；
-- `tasks/<task_name>/`：任务专属配置与执行逻辑；
-- `ui_builder.py` 与 `ui_config.py`：从配置模型和 runner UI 配置生成界面。
+- `tasks/<task_name>/`：任务专属配置与执行逻辑。
 
 ### 2.1 任务发现
 
@@ -47,13 +46,6 @@ runner 应优先复用 `daisy/task/runtime.py` 中的共享流程：
 
 若某个 task 需要额外运行信息，应在 `save_run_snapshot(..., extra=...)` 中追加，而不是重新拼装整套运行时元数据。
 
-### 2.4 UI 元数据单一来源
-
-- UI 字段配置统一由 `TaskRunner.get_ui_field_overrides()` 返回；
-- 字段配置类型统一使用 `daisy/task/ui_config.py` 中的 `UIFieldConfig`；
-- 不再使用 `json_schema_extra` 或历史 `ui_schema.py` 携带 UI 元数据；
-- 自定义 UI 仍可通过 `build_custom_ui()` 提供，但自动 UI 的字段控制应只走 `UIFieldConfig`。
-
 ## 3. 新增 task 类型的实现规范
 
 新增 task 时应遵循以下流程：
@@ -62,8 +54,7 @@ runner 应优先复用 `daisy/task/runtime.py` 中的共享流程：
 2. 在 runner 上使用 `@TaskRegistry.register`；
 3. 保持 `get_task_type()`、注册键和配置类中的 `Literal[...]` 值一致；
 4. 共享配置优先放入 `shared/`，共享数据流程优先放入 `data/`；
-5. UI 自动表单字段配置通过 `get_ui_field_overrides()` 返回 `UIFieldConfig`；
-6. 运行时输出、快照和完成提示优先复用 `runtime.py` 的统一辅助函数。
+5. 运行时输出、快照和完成提示优先复用 `runtime.py` 的统一辅助函数。
 
 ## 4. task 文件格式
 
@@ -102,14 +93,14 @@ save_path = "outputs/{task_id}"
 
 ### 5.1 通用规则
 
-- 根目录 `tasks/` 用于仓库级示例任务或 UI 创建的通用任务；
+- 根目录 `tasks/` 用于仓库级示例任务或通用任务；
 - 项目级 task 应放在各自的项目目录中，例如 `proj/mae/tasks/`；
-- 当前 CLI/UI 默认通过顶层 `*.toml` 扫描任务，不依赖递归搜索，因此项目级正式 task 实例应采用扁平文件名，不要把正式实例继续嵌套到多级子目录中；
+- 当前 CLI 默认通过顶层 `*.toml` 扫描任务，不依赖递归搜索，因此项目级正式 task 实例应采用扁平文件名，不要把正式实例继续嵌套到多级子目录中；
 - 若需要模板，可单独放在 `templates/` 子目录，由项目级 batch 或人工复制生成实例。
 
 ### 5.2 文件名规则
 
-- 通用任务或 UI 自动创建任务可继续使用 `yyyymmdd-id[-comment].toml`；
+- 通用任务可继续使用 `yyyymmdd-id[-comment].toml`；
 - 项目级任务可以在此基础上定义更严格的命名约束，但必须在项目文档中写明；
 - `proj/mae/tasks/` 已冻结为阶段化命名：`p{phase}-{topic}-{variant}.toml`。
 

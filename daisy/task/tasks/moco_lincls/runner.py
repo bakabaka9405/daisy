@@ -27,10 +27,6 @@ class MoCoLinclsRunner(TaskRunner['MoCoLinclsConfig']):
 	def get_config_class(cls) -> type[MoCoLinclsConfig]:
 		return MoCoLinclsConfig
 
-	@classmethod
-	def get_ui_display_name(cls) -> str:
-		return 'MoCo 线性探测'
-
 	def run(self, config: MoCoLinclsConfig, device: torch.device) -> Path:  # type: ignore[override]
 		"""执行 MoCo 线性探测评估任务"""
 		run_context = prepare_task_run(config, device)

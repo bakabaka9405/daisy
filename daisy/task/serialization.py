@@ -94,12 +94,10 @@ def build_example_config(task_type: str) -> BaseTaskConfig:
 
 	tasks.discover_tasks()
 	config_cls = TaskRegistry.get_config_class(task_type)
-	runner_cls = TaskRegistry.get_runner(task_type)
 	config = config_cls.model_validate(_build_example_data(config_cls))
 
-	display_name = runner_cls.get_ui_display_name()
 	if not config.meta.title:
-		config.meta.title = f'{display_name} 示例任务'
+		config.meta.title = f'{task_type} 示例任务'
 	if not config.meta.description:
 		config.meta.description = f'根据 {task_type} 的注册配置自动生成'
 	if not config.meta.creator:

@@ -4,12 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 import torch
 
-from collections.abc import Callable
-from typing import Any
-
 from pydantic import BaseModel, Field
-
-from .ui_config import UIFieldConfig
 
 
 class BaseMetaConfig(BaseModel):
@@ -71,34 +66,3 @@ class TaskRunner[T_Config: BaseTaskConfig](ABC):
 	def run(self, config: T_Config, device: torch.device) -> Path:
 		"""执行任务，返回输出路径"""
 		pass
-
-
-	@classmethod
-	def get_ui_display_name(cls) -> str:
-		"""UI 显示名称，默认返回 task_type"""
-		return cls.get_task_type()
-
-	@classmethod
-	def get_ui_field_overrides(cls) -> dict[str, UIFieldConfig]:
-		"""字段 UI 配置覆盖
-
-		返回字典，键格式: 'section.field' 或 'section.subsection.field'
-
-		示例:
-			return {
-				'training.lr': UIFieldConfig(label='学习率', component='number'),
-				'dataset.split.val_ratio': UIFieldConfig(component='slider', min_value=0.05, max_value=0.3),
-			}
-		"""
-		return {}
-
-	@classmethod
-	def build_custom_ui(cls, gr_module: Any) -> tuple[list[Any], Callable[..., Any]] | None:
-		"""完全自定义 UI
-
-		如果返回 None，则使用自动生成的 UI。
-		否则返回 (components, submit_callback):
-			- components: Gradio 组件列表
-			- submit_callback: 提交回调函数，接收所有组件值
-		"""
-		return None

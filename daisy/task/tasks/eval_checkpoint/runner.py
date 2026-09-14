@@ -28,10 +28,6 @@ class EvalCheckpointRunner(TaskRunner['EvalCheckpointConfig']):
 	def get_config_class(cls) -> type[EvalCheckpointConfig]:
 		return EvalCheckpointConfig
 
-	@classmethod
-	def get_ui_display_name(cls) -> str:
-		return 'Checkpoint 评估'
-
 	def run(self, config: EvalCheckpointConfig, device: torch.device) -> Path:
 		runtime_cfg = config.evaluation
 		run_context = prepare_task_run(config, device, seed=runtime_cfg.seed)

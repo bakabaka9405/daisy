@@ -12,7 +12,6 @@ from ...data import build_train_val_selection
 from ...registry import TaskRegistry
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from ...shared import get_mae_finetune_train_transform, get_mae_finetune_val_transform
-from ...ui_config import UIFieldConfig
 from .config import MAEFinetuneConfig
 
 if TYPE_CHECKING:
@@ -30,41 +29,6 @@ class MAEFinetuneRunner(TaskRunner[MAEFinetuneConfig]):
 	@classmethod
 	def get_config_class(cls) -> type[MAEFinetuneConfig]:
 		return MAEFinetuneConfig
-
-	@classmethod
-	def get_ui_display_name(cls) -> str:
-		return 'MAE 微调'
-
-	@classmethod
-	def get_ui_field_overrides(cls) -> dict[str, UIFieldConfig]:
-		return {
-			'meta.title': UIFieldConfig(label='任务标题'),
-			'meta.description': UIFieldConfig(label='描述', component='textarea'),
-			'meta.created_at': UIFieldConfig(hidden=True),
-			'meta.commit': UIFieldConfig(hidden=True),
-			'dataset.root': UIFieldConfig(label='数据根目录'),
-			'dataset.sheet': UIFieldConfig(label='标注文件'),
-			'model.name': UIFieldConfig(
-				label='模型',
-				component='dropdown',
-				choices=('vit_base_patch16', 'vit_large_patch16', 'vit_huge_patch14'),
-				allow_custom=True,
-			),
-			'model.num_classes': UIFieldConfig(label='类别数'),
-			'model.checkpoint': UIFieldConfig(label='MAE 预训练权重'),
-			'training.epochs': UIFieldConfig(label='训练轮数'),
-			'training.batch_size': UIFieldConfig(label='Batch Size'),
-			'training.blr': UIFieldConfig(label='基础学习率'),
-			'training.layer_decay': UIFieldConfig(
-				label='Layer Decay',
-				component='slider',
-				min_value=0.5,
-				max_value=0.9,
-				step=0.05,
-			),
-			'training.warmup_epochs': UIFieldConfig(label='Warmup 轮数'),
-			'output.save_path': UIFieldConfig(hidden=True),
-		}
 
 	def run(self, config: MAEFinetuneConfig, device: 'torch.device') -> Path:
 		"""执行 MAE Finetune 任务"""

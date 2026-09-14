@@ -4,7 +4,6 @@
 	python -m daisy run <task.toml>     # 运行任务
 	python -m daisy list                # 列出所有任务
 	python -m daisy example <task_type> [output]  # 导出示例配置
-	python -m daisy ui                  # 启动 Web UI
 """
 
 import argparse
@@ -50,17 +49,6 @@ def cmd_list(args):
 			print(f'{f.stem:<30} [Error: {e}]')
 
 
-def cmd_ui(args):
-	"""启动 Web UI"""
-	try:
-		from daisy.task.ui import launch_ui
-
-		launch_ui(args.port)
-	except ImportError:
-		print('UI 模块需要安装 gradio: pip install gradio')
-		sys.exit(1)
-
-
 def cmd_example(args):
 	"""导出任务示例配置"""
 	from daisy.task import export_example_config
@@ -89,10 +77,6 @@ def main():
 	list_parser = subparsers.add_parser('list', help='列出所有任务')
 	list_parser.add_argument('--tasks-dir', '-d', default='tasks', help='任务目录')
 
-	# ui 命令
-	ui_parser = subparsers.add_parser('ui', help='启动 Web UI')
-	ui_parser.add_argument('--port', '-p', type=int, default=7860, help='端口号')
-
 	# example 命令
 	example_parser = subparsers.add_parser('example', help='导出任务示例配置')
 	example_parser.add_argument('task_type', help='任务类型')
@@ -107,8 +91,6 @@ def main():
 		cmd_list(args)
 	elif args.command == 'example':
 		cmd_example(args)
-	elif args.command == 'ui':
-		cmd_ui(args)
 	else:
 		parser.print_help()
 

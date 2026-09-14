@@ -11,7 +11,6 @@ from ...data import build_train_val_selection
 from ...registry import TaskRegistry
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from ...shared import get_classification_transform
-from ...ui_config import UIFieldConfig
 from .config import ClassificationConfig
 
 if TYPE_CHECKING:
@@ -29,53 +28,6 @@ class ClassificationRunner(TaskRunner['ClassificationConfig']):
 	@classmethod
 	def get_config_class(cls) -> type[ClassificationConfig]:
 		return ClassificationConfig
-
-	@classmethod
-	def get_ui_display_name(cls) -> str:
-		return '图像分类'
-
-	@classmethod
-	def get_ui_field_overrides(cls) -> dict[str, UIFieldConfig]:
-		return {
-			'meta.title': UIFieldConfig(label='任务标题'),
-			'meta.description': UIFieldConfig(label='描述', component='textarea'),
-			'meta.creator': UIFieldConfig(label='创建者'),
-			'meta.created_at': UIFieldConfig(hidden=True),
-			'meta.commit': UIFieldConfig(hidden=True),
-			'dataset.type': UIFieldConfig(label='数据集类型'),
-			'dataset.root': UIFieldConfig(label='数据根目录'),
-			'dataset.sheet': UIFieldConfig(label='标注文件'),
-			'dataset.column': UIFieldConfig(label='标签列'),
-			'dataset.split.val_ratio': UIFieldConfig(label='验证集比例', component='slider', min_value=0.05, max_value=0.3, step=0.01),
-			'model.name': UIFieldConfig(
-				label='模型',
-				component='dropdown',
-				choices=('resnet34', 'resnet50', 'resnet101', 'efficientnet_b0', 'convnext_tiny'),
-				allow_custom=True,
-			),
-			'model.num_classes': UIFieldConfig(label='类别数'),
-			'model.pretrained': UIFieldConfig(label='使用预训练权重'),
-			'training.epochs': UIFieldConfig(label='训练轮数'),
-			'training.batch_size': UIFieldConfig(label='Batch Size'),
-			'training.lr': UIFieldConfig(label='学习率'),
-			'training.warmup_epochs': UIFieldConfig(label='Warmup 轮数'),
-			'training.weight_decay': UIFieldConfig(label='Weight Decay'),
-			'training.cmp_obj': UIFieldConfig(label='优化目标'),
-			'training.transform.train': UIFieldConfig(
-				label='训练 Transform',
-				component='dropdown',
-				choices=('rectangle_train', 'rectangle_train_slight', 'stretch_train'),
-			),
-			'training.transform.val': UIFieldConfig(
-				label='验证 Transform',
-				component='dropdown',
-				choices=('rectangle_val', 'stretch_val'),
-			),
-			'output.save_path': UIFieldConfig(hidden=True),
-			'output.keep_count': UIFieldConfig(label='保留检查点数'),
-			'output.save_best': UIFieldConfig(label='保存最佳模型'),
-			'output.log': UIFieldConfig(label='记录日志'),
-		}
 
 	def run(self, config: ClassificationConfig, device: 'torch.device') -> Path:
 		"""执行分类训练任务"""
