@@ -8,9 +8,20 @@ import torch
 import torch.nn as nn
 from timm.data.mixup import Mixup
 from torch import Tensor
+from timm.loss.cross_entropy import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 
-from daisy.classifier_trainer import create_criterion
 from daisy.method.base import Method
+
+
+def create_criterion(mixup_enabled: bool, smoothing: float) -> nn.Module:
+	"""根据配置创建损失函数"""
+	if mixup_enabled:
+		# Mixup/CutMix 需要 soft target
+		return SoftTargetCrossEntropy()
+	elif smoothing > 0:
+		return LabelSmoothingCrossEntropy(smoothing=smoothing)
+	else:
+		return nn.CrossEntropyLoss()
 
 
 class ClassificationMethod(Method[nn.Module]):

@@ -10,12 +10,69 @@ from typing import Any
 import daisy
 import torch
 import torch.nn as nn
+import numpy as np
 from timm.data.loader import MultiEpochsDataLoader
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
-from daisy.classifier_trainer import evaluate
 from daisy.dataset.index_dataset import IndexDataset
 from daisy.method.classification import ClassificationMethod
 from daisy.training import Eval, Trainer
+from daisy.metrics.classification import EvalMetrics, calc_confusion_matrix
+from daisy.metrics import auroc_score
+
+
+def evaluate(
+	scores: torch.Tensor,
+	targets: torch.Tensor,
+	criterion: nn.Module,
+	num_classes: int,
+	compute_metrics: bool = True,
+) -> EvalMetrics:
+	"""
+	模型评估
+
+	Args:
+		compute_metrics: 是否计算 precision/recall/f1
+	"""
+	loss = criterion(scores.float(), targets)
+	y_pred = torch.argmax(scores, dim=1).numpy()
+	y_true = targets.numpy()
+
+	# 准确率
+	acc = accuracy_score(y_true, y_pred)
+
+	# 计算其他指标
+	if compute_metrics:
+		prec = precision_score(y_true, y_pred, average='macro', zero_division=0)  # type: ignore[arg-type]
+		rec = recall_score(y_true, y_pred, average='macro', zero_division=0)  # type: ignore[arg-type]
+		f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)  # type: ignore[arg-type]
+		matrix = calc_confusion_matrix(y_true, y_pred, num_classes)
+
+		# 计算 AUROC
+		y_outputs = scores.numpy()
+		try:
+			auroc_result = auroc_score(
+				y_true.astype(np.int64, copy=False),
+				y_outputs.astype(np.float64, copy=False),
+				mode='macro',
+			)
+			auroc_val = float(auroc_result['macro'] if isinstance(auroc_result, dict) else auroc_result)
+		except Exception:
+			auroc_val = 0.0
+	else:
+		prec = rec = f1 = 0.0
+		matrix = None
+		auroc_val = 0.0
+
+	return EvalMetrics(
+		loss=loss.item(),
+		acc=float(acc),
+		precision=float(prec),
+		recall=float(rec),
+		f1=float(f1),
+		auroc=auroc_val,
+		confusion_matrix=matrix,
+	)
 
 
 def prepare_classification_training(
