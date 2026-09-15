@@ -5,28 +5,37 @@
 - MoCo v3: https://github.com/facebookresearch/moco-v3
 """
 
+import math
+
 import numpy as np
 import torch
+from timm.layers.helpers import to_2tuple
 
 
-def get_2d_sincos_pos_embed(embed_dim: int, grid_size: int, cls_token: bool = False) -> np.ndarray:
+def get_2d_sincos_pos_embed(
+	embed_dim: int,
+	grid_size: int | tuple[int, int],
+	cls_token: bool = False,
+) -> np.ndarray:
 	"""
 	生成 2D 正弦余弦位置编码
 
 	Args:
 		embed_dim: 嵌入维度
-		grid_size: 网格大小（高度和宽度）
+		grid_size: 网格大小（整数或 (grid_h, grid_w) 元组）
 		cls_token: 是否包含 cls token
 
 	Returns:
-		pos_embed: [grid_size*grid_size, embed_dim] 或 [1+grid_size*grid_size, embed_dim]
+		pos_embed: [grid_h*grid_w, embed_dim] 或 [1+grid_h*grid_w, embed_dim]
 	"""
-	grid_h = np.arange(grid_size, dtype=np.float32)
-	grid_w = np.arange(grid_size, dtype=np.float32)
-	grid = np.meshgrid(grid_w, grid_h)  # w goes first
+	gh, gw = to_2tuple(grid_size)
+	grid_h, grid_w = int(gh), int(gw)
+	grid_h_arr = np.arange(grid_h, dtype=np.float32)
+	grid_w_arr = np.arange(grid_w, dtype=np.float32)
+	grid = np.meshgrid(grid_w_arr, grid_h_arr)  # w goes first
 	grid = np.stack(grid, axis=0)
 
-	grid = grid.reshape([2, 1, grid_size, grid_size])
+	grid = grid.reshape([2, 1, grid_h, grid_w])
 	pos_embed = get_2d_sincos_pos_embed_from_grid(embed_dim, grid)
 	if cls_token:
 		pos_embed = np.concatenate([np.zeros([1, embed_dim]), pos_embed], axis=0)
@@ -71,31 +80,59 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim: int, pos: np.ndarray) -> np.nda
 	return emb
 
 
-def interpolate_pos_embed(model, checkpoint_model: dict[str, torch.Tensor]) -> None:
+def interpolate_pos_embed(
+	model,
+	checkpoint_model: dict[str, torch.Tensor],
+	source_grid_size: tuple[int, int] | None = None,
+) -> None:
 	"""
-	插值位置编码以支持高分辨率
+	插值位置编码以支持不同输入分辨率。
 
 	Args:
 		model: 目标模型
 		checkpoint_model: checkpoint 中的模型状态字典
+		source_grid_size: 源 checkpoint 的网格大小 (grid_h, grid_w)。
+			若为 None 则尝试推断正方形网格；若源网格为矩形（即使 token 总数为完全平方数），必须显式指定。
 	"""
 	if 'pos_embed' in checkpoint_model:
 		pos_embed_checkpoint = checkpoint_model['pos_embed']
 		embedding_size = pos_embed_checkpoint.shape[-1]
 		num_patches = model.patch_embed.num_patches
 		num_extra_tokens = model.pos_embed.shape[-2] - num_patches
-		# height (== width) for the checkpoint position embedding
-		orig_size = int((pos_embed_checkpoint.shape[-2] - num_extra_tokens) ** 0.5)
-		# height (== width) for the new position embedding
-		new_size = int(num_patches**0.5)
+		num_checkpoint_tokens = pos_embed_checkpoint.shape[-2] - num_extra_tokens
+
+		if source_grid_size is None:
+			orig_h = math.isqrt(num_checkpoint_tokens)
+			if orig_h * orig_h != num_checkpoint_tokens:
+				raise ValueError(
+					f'Cannot infer square source grid size from {num_checkpoint_tokens} tokens; '
+					f'source_grid_size must be explicitly provided for non-square checkpoints.'
+				)
+			orig_grid_size = (orig_h, orig_h)
+		else:
+			orig_h, orig_w = source_grid_size
+			if orig_h * orig_w != num_checkpoint_tokens:
+				raise ValueError(
+					f'Explicit source_grid_size {source_grid_size} ({orig_h * orig_w} tokens) '
+					f'does not match checkpoint positional token count ({num_checkpoint_tokens}).'
+				)
+			orig_grid_size = (orig_h, orig_w)
+
+		target_grid_size: tuple[int, int] = model.patch_embed.grid_size
 		# class_token and dist_token are kept unchanged
-		if orig_size != new_size:
-			print(f'Position interpolate from {orig_size}x{orig_size} to {new_size}x{new_size}')
+		if orig_grid_size != target_grid_size:
+			print(f'Position interpolate from {orig_grid_size[0]}x{orig_grid_size[1]} to {target_grid_size[0]}x{target_grid_size[1]}')
 			extra_tokens = pos_embed_checkpoint[:, :num_extra_tokens]
 			# only the position tokens are interpolated
 			pos_tokens = pos_embed_checkpoint[:, num_extra_tokens:]
-			pos_tokens = pos_tokens.reshape(-1, orig_size, orig_size, embedding_size).permute(0, 3, 1, 2)
-			pos_tokens = torch.nn.functional.interpolate(pos_tokens, size=(new_size, new_size), mode='bicubic', align_corners=False)
+			pos_tokens = pos_tokens.reshape(-1, orig_grid_size[0], orig_grid_size[1], embedding_size).permute(0, 3, 1, 2)
+			pos_tokens = torch.nn.functional.interpolate(
+				pos_tokens,
+				size=target_grid_size,
+				mode='bicubic',
+				align_corners=False,
+				antialias=False,
+			)
 			pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
 			new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
 			checkpoint_model['pos_embed'] = new_pos_embed

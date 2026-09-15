@@ -19,9 +19,11 @@ from .config import MAEPretrainConfig
 
 
 def get_mae_transform(
-	input_size: int = 224,
+	input_size: int | tuple[int, int] = 224,
 	scale_min: float = 0.2,
 	scale_max: float = 1.0,
+	ratio_min: float = 0.75,
+	ratio_max: float = 1.3333,
 	hflip: bool = True,
 ) -> Callable[[torch.Tensor], LazyNormalizedTensor]:
 	"""获取 MAE 预训练的 transform
@@ -32,6 +34,7 @@ def get_mae_transform(
 		transforms.RandomResizedCrop(
 			input_size,
 			scale=(scale_min, scale_max),
+			ratio=(ratio_min, ratio_max),
 			interpolation=InterpolationMode.BICUBIC,
 		),
 	]
@@ -86,9 +89,11 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 	# 获取 transform 并构建数据集（无标签，LabelT=None）
 	transform_cfg = training_cfg.transform
 	transform = get_mae_transform(
-		input_size=transform_cfg.input_size,
+		input_size=config.model.img_size,
 		scale_min=transform_cfg.scale_min,
 		scale_max=transform_cfg.scale_max,
+		ratio_min=transform_cfg.ratio_min,
+		ratio_max=transform_cfg.ratio_max,
 		hflip=transform_cfg.hflip,
 	)
 	dataset: DiskDataset[LazyNormalizedTensor, None] = DiskDataset(files, None, transform)

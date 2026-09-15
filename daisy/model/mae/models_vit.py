@@ -19,7 +19,7 @@ from .pos_embed import interpolate_pos_embed
 
 
 def vit_base_patch16(**kwargs) -> VisionTransformer:
-	"""ViT-Base/16 模型"""
+	"""ViT-Base/16 模型，支持通过 img_size 传入整数或 (H, W) 元组"""
 	return VisionTransformer(
 		patch_size=16,
 		embed_dim=768,
@@ -33,7 +33,7 @@ def vit_base_patch16(**kwargs) -> VisionTransformer:
 
 
 def vit_large_patch16(**kwargs) -> VisionTransformer:
-	"""ViT-Large/16 模型"""
+	"""ViT-Large/16 模型，支持通过 img_size 传入整数或 (H, W) 元组"""
 	return VisionTransformer(
 		patch_size=16,
 		embed_dim=1024,
@@ -47,7 +47,7 @@ def vit_large_patch16(**kwargs) -> VisionTransformer:
 
 
 def vit_huge_patch14(**kwargs) -> VisionTransformer:
-	"""ViT-Huge/14 模型"""
+	"""ViT-Huge/14 模型，支持通过 img_size 传入整数或 (H, W) 元组"""
 	return VisionTransformer(
 		patch_size=14,
 		embed_dim=1280,
@@ -76,7 +76,7 @@ def create_vit_model(name: str, **kwargs) -> VisionTransformer:
 			- num_classes: 分类数
 			- global_pool: 池化方式 ('avg', 'token', '')
 			- drop_path_rate: DropPath 比率
-			- img_size: 输入图像大小
+			- img_size: 输入图像大小（整数或 (H, W) 元组）
 
 	Returns:
 		ViT 模型实例
@@ -92,6 +92,8 @@ def load_mae_pretrained_weights(
 	init_head: bool = True,
 	head_init_std: float = 2e-5,
 	verbose: bool = True,
+	*,
+	source_grid_size: tuple[int, int] | None = None,
 ) -> None:
 	"""从 MAE 预训练 checkpoint 加载权重到 ViT 模型
 
@@ -99,7 +101,10 @@ def load_mae_pretrained_weights(
 		model: ViT 模型
 		checkpoint_path: MAE 预训练权重路径
 		init_head: 是否重新初始化分类头
+		head_init_std: 分类头初始化标准差
 		verbose: 是否打印加载信息
+		source_grid_size: 源 checkpoint 的网格大小 (grid_h, grid_w)。
+			若源网格为矩形（即使 token 总数为完全平方数），必须显式指定。
 	"""
 	checkpoint = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
 
@@ -119,7 +124,7 @@ def load_mae_pretrained_weights(
 				del checkpoint_model[k]
 
 	# 插值位置编码（如果分辨率不同）
-	interpolate_pos_embed(model, checkpoint_model)
+	interpolate_pos_embed(model, checkpoint_model, source_grid_size=source_grid_size)
 
 	# 加载权重
 	msg = model.load_state_dict(checkpoint_model, strict=False)

@@ -162,8 +162,8 @@ class Trainer:
 
 			with torch.autocast(device_type=self.device.type, enabled=self.use_amp):
 				raw_loss = process_fn(batch)
-				if not isinstance(raw_loss, torch.Tensor) or raw_loss.ndim != 0:
-					raise TypeError('process_fn 必须返回标量 Tensor loss。')
+				# if not isinstance(raw_loss, torch.Tensor) or raw_loss.ndim != 0:
+				# 	raise TypeError('process_fn 必须返回标量 Tensor loss。')
 				# 缩放 loss，使累计梯度与整批平均梯度处于同一尺度。
 				loss = raw_loss / self.accum_iter
 

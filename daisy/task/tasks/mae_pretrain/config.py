@@ -23,17 +23,18 @@ class MAEModelConfig(BaseConfig):
 	"""MAE 模型配置"""
 
 	name: str = 'mae_vit_base_patch16'
-	img_size: int = 224
+	img_size: int | tuple[int, int] = 224  # 图像尺寸，支持整数或 (H, W) 元组
 	timm_pretrained: str | None = None
 
 
 class MAETransformConfig(BaseConfig):
 	"""MAE 数据增强配置"""
-
-	input_size: int = 224
 	# RandomResizedCrop 的 scale 参数
 	scale_min: float = 0.2
 	scale_max: float = 1.0
+	# RandomResizedCrop 的 ratio 参数
+	ratio_min: float = 0.75
+	ratio_max: float = 1.3333
 	# 是否水平翻转
 	hflip: bool = True
 

@@ -217,8 +217,7 @@ def get_rectangle_train_transform_slight():
 			transforms.RandomResizedCrop((112, 224), scale=(0.9, 1.0), ratio=(1.9, 2.1)),
 			transforms.ColorJitter(brightness=0.05, contrast=0.05, saturation=0.05, hue=0.02),
 			transforms.RandomHorizontalFlip(),
-			ZeroOneNormalize(),
-			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+			LazyNormalization([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 			# transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5]),
 		]
 	)
@@ -230,10 +229,9 @@ def get_rectangle_train_transform():
 			transforms.RandomZoomOut(),
 			transforms.RandomRotation(degrees=(-10, 10), interpolation=InterpolationMode.BILINEAR),
 			transforms.RandomResizedCrop((112, 224), scale=(0.9, 1.0), ratio=(1.9, 2.1)),
-			transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.2),
+			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
 			transforms.RandomHorizontalFlip(),
-			ZeroOneNormalize(),
-			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+			LazyNormalization([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 		]
 	)
 
@@ -242,8 +240,7 @@ def get_rectangle_val_transform():
 	return transforms.Compose(
 		[
 			transforms.Resize((112, 224)),
-			ZeroOneNormalize(),
-			transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+			LazyNormalization([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
 		]
 	)
 

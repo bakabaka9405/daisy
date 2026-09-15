@@ -25,7 +25,7 @@ class MaskedAutoencoderViT(nn.Module):
 	@override
 	def __init__(
 		self,
-		img_size: int = 224,
+		img_size: int | tuple[int, int] = 224,
 		patch_size: int = 16,
 		in_chans: int = 3,
 		embed_dim: int = 1024,
@@ -41,6 +41,10 @@ class MaskedAutoencoderViT(nn.Module):
 
 		# MAE encoder specifics
 		self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
+		img_h, img_w = cast(tuple[int, int], self.patch_embed.img_size)
+		patch_h, patch_w = cast(tuple[int, int], self.patch_embed.patch_size)
+		if img_h % patch_h != 0 or img_w % patch_w != 0:
+			raise ValueError(f'Image dimensions {(img_h, img_w)} must be divisible by patch dimensions {(patch_h, patch_w)}')
 		num_patches = self.patch_embed.num_patches
 
 		self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -93,16 +97,17 @@ class MaskedAutoencoderViT(nn.Module):
 	def initialize_weights(self):
 		"""初始化权重"""
 		# initialize (and freeze) pos_embed by sin-cos embedding
+		grid_size = cast(tuple[int, int], self.patch_embed.grid_size)
 		pos_embed = get_2d_sincos_pos_embed(
 			self.pos_embed.shape[-1],
-			int(self.patch_embed.num_patches**0.5),
+			grid_size,
 			cls_token=True,
 		)
 		self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
 		decoder_pos_embed = get_2d_sincos_pos_embed(
 			self.decoder_pos_embed.shape[-1],
-			int(self.patch_embed.num_patches**0.5),
+			grid_size,
 			cls_token=True,
 		)
 		self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
@@ -133,18 +138,22 @@ class MaskedAutoencoderViT(nn.Module):
 		将图像转换为 patch 序列
 
 		Args:
-			imgs: (N, 3, H, W)
+			imgs: (N, C, H, W)
 
 		Returns:
-			x: (N, L, patch_size**2 * 3)
+			x: (N, L, patch_size**2 * C)
 		"""
 		p = cast(int, self.patch_embed.patch_size[0])
-		assert imgs.shape[2] == imgs.shape[3] and imgs.shape[2] % p == 0
+		c = int(self.patch_embed.proj.in_channels)
+		img_h, img_w = cast(tuple[int, int], self.patch_embed.img_size)
+		grid_h, grid_w = cast(tuple[int, int], self.patch_embed.grid_size)
 
-		h = w = imgs.shape[2] // p
-		x = imgs.reshape(shape=(imgs.shape[0], 3, h, p, w, p))
+		if imgs.ndim != 4 or imgs.shape[1] != c or imgs.shape[2] != img_h or imgs.shape[3] != img_w:
+			raise ValueError(f'Expected input image shape (N, {c}, {img_h}, {img_w}), but got {tuple(imgs.shape)}')
+
+		x = imgs.reshape(shape=(imgs.shape[0], c, grid_h, p, grid_w, p))
 		x = torch.einsum('nchpwq->nhwpqc', x)
-		x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * 3))
+		x = x.reshape(shape=(imgs.shape[0], grid_h * grid_w, p**2 * c))
 		return x
 
 	def unpatchify(self, x: torch.Tensor) -> torch.Tensor:
@@ -152,18 +161,23 @@ class MaskedAutoencoderViT(nn.Module):
 		将 patch 序列转换回图像
 
 		Args:
-			x: (N, L, patch_size**2 * 3)
+			x: (N, L, patch_size**2 * C)
 
 		Returns:
-			imgs: (N, 3, H, W)
+			imgs: (N, C, H, W)
 		"""
 		p = cast(int, self.patch_embed.patch_size[0])
-		h = w = int(x.shape[1] ** 0.5)
-		assert h * w == x.shape[1]
+		c = int(self.patch_embed.proj.in_channels)
+		grid_h, grid_w = cast(tuple[int, int], self.patch_embed.grid_size)
+		expected_tokens = grid_h * grid_w
+		expected_features = p**2 * c
 
-		x = x.reshape(shape=(x.shape[0], h, w, p, p, 3))
+		if x.ndim != 3 or x.shape[1] != expected_tokens or x.shape[2] != expected_features:
+			raise ValueError(f'Expected token tensor shape (N, {expected_tokens}, {expected_features}), but got {tuple(x.shape)}')
+
+		x = x.reshape(shape=(x.shape[0], grid_h, grid_w, p, p, c))
 		x = torch.einsum('nhwpqc->nchpwq', x)
-		imgs = x.reshape(shape=(x.shape[0], 3, h * p, h * p))
+		imgs = x.reshape(shape=(x.shape[0], c, grid_h * p, grid_w * p))
 		return imgs
 
 	def random_masking(self, x: torch.Tensor, mask_ratio: float):
@@ -256,15 +270,15 @@ class MaskedAutoencoderViT(nn.Module):
 		MAE 前向传播
 
 		Args:
-			imgs: 输入图像 [N, 3, H, W]
+			imgs: 输入图像 [N, C, H, W]
 			mask_ratio: masking 比例
 
 		Returns:
-			pred: 预测的 patch [N, L, p*p*3]
+			pred: 预测的 patch [N, L, p*p*C]
 			mask: binary mask [N, L]
 		"""
 		latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio)
-		pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
+		pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*C]
 		return pred, mask
 
 
@@ -292,7 +306,7 @@ def load_timm_pretrained_encoder_weights(model: MaskedAutoencoderViT, model_name
 
 # Model factory functions
 def mae_vit_base_patch16_dec512d8b(**kwargs) -> MaskedAutoencoderViT:
-	"""MAE ViT-Base with 512-dim decoder, 8 blocks"""
+	"""MAE ViT-Base with 512-dim decoder, 8 blocks，支持通过 img_size 传入整数或 (H, W) 元组"""
 	model = MaskedAutoencoderViT(
 		patch_size=16,
 		embed_dim=768,
@@ -309,7 +323,7 @@ def mae_vit_base_patch16_dec512d8b(**kwargs) -> MaskedAutoencoderViT:
 
 
 def mae_vit_large_patch16_dec512d8b(**kwargs) -> MaskedAutoencoderViT:
-	"""MAE ViT-Large with 512-dim decoder, 8 blocks"""
+	"""MAE ViT-Large with 512-dim decoder, 8 blocks，支持通过 img_size 传入整数或 (H, W) 元组"""
 	model = MaskedAutoencoderViT(
 		patch_size=16,
 		embed_dim=1024,
@@ -326,7 +340,7 @@ def mae_vit_large_patch16_dec512d8b(**kwargs) -> MaskedAutoencoderViT:
 
 
 def mae_vit_huge_patch14_dec512d8b(**kwargs) -> MaskedAutoencoderViT:
-	"""MAE ViT-Huge with 512-dim decoder, 8 blocks"""
+	"""MAE ViT-Huge with 512-dim decoder, 8 blocks，支持通过 img_size 传入整数或 (H, W) 元组"""
 	model = MaskedAutoencoderViT(
 		patch_size=14,
 		embed_dim=1280,

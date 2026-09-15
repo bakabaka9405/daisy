@@ -89,6 +89,7 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 		use_amp: bool = True,
 		accum_iter: int = 1,
 		clip_grad: float | None = None,
+		optimizer: torch.optim.Optimizer | None = None,
 	) -> None:
 		if num_classes < 2:
 			raise ValueError(f'num_classes must be >= 2, got {num_classes}')
@@ -101,6 +102,7 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 			use_amp=use_amp,
 			accum_iter=accum_iter,
 			clip_grad=clip_grad,
+			optimizer=optimizer,
 		)
 
 	@abstractmethod
