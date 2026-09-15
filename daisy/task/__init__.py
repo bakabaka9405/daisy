@@ -29,13 +29,7 @@ from .tasks.classification.config import (
 	TrainingConfig,
 	TransformConfig,
 )
-from .tasks.eval_checkpoint.config import EvalCheckpointConfig
-from .tasks.mae_finetune.config import MAEFinetuneConfig
 from .tasks.mae_pretrain.config import MAEPretrainConfig
-from .tasks.moco_lincls.config import MoCoLinclsConfig
-from .tasks.moco_pretrain.config import MoCoPretrainConfig
-from .tasks.ordinal.config import OrdinalConfig
-from .tasks.predict_export.config import PredictExportConfig
 
 __all__ = [
 	# 基础类
@@ -59,13 +53,7 @@ __all__ = [
 	'LogOutputConfig',
 	# 任务配置
 	'ClassificationConfig',
-	'MAEFinetuneConfig',
 	'MAEPretrainConfig',
-	'EvalCheckpointConfig',
-	'PredictExportConfig',
-	'MoCoLinclsConfig',
-	'MoCoPretrainConfig',
-	'OrdinalConfig',
 	# 分类任务细粒度配置
 	'ModelConfig',
 	'TrainingConfig',

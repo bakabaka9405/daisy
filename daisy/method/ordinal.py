@@ -105,19 +105,9 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 
 	@classmethod
 	@abstractmethod
-	def create_model(cls, backbone: nn.Module, num_classes: int) -> M:
-		"""构建算法专属完整模型。"""
-		...
-
-	@classmethod
-	@abstractmethod
 	def decode_features(cls, model: M, feat: Tensor, *, num_classes: int) -> Tensor:
 		"""由特征解码得到一维 long 类别预测。"""
 		...
-
-	@override
-	def build_model(self, backbone: nn.Module) -> M:
-		return self.create_model(backbone, self.num_classes)
 
 	@override
 	def predict_step(self, X: Tensor) -> torch.Tensor:
@@ -132,10 +122,9 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 class ClassificationBaseMethod(OrdinalBaseMethod[ClassificationModel]):
 	"""使用多分类线性头的有序方法基类。"""
 
-	@classmethod
 	@override
-	def create_model(cls, backbone: nn.Module, num_classes: int) -> ClassificationModel:
-		return ClassificationModel(backbone, num_classes)
+	def build_model(self, backbone: nn.Module) -> ClassificationModel:
+		return ClassificationModel(backbone, self.num_classes)
 
 	@classmethod
 	@override
@@ -243,9 +232,8 @@ class UnimodalMethod(ClassificationBaseMethod):
 class MSERankBaseMethod(OrdinalBaseMethod[ScalarModel]):
 	"""MSE 锚定排序方法基类。"""
 
-	@classmethod
 	@override
-	def create_model(cls, backbone: nn.Module, num_classes: int) -> ScalarModel:
+	def build_model(self, backbone: nn.Module) -> ScalarModel:
 		return ScalarModel(backbone, bias=True)
 
 	@classmethod
@@ -283,10 +271,9 @@ class MSERankHingeMethod(MSERankBaseMethod):
 class CLMMethod(OrdinalBaseMethod[CLMModel]):
 	"""累积链接模型（Cumulative Link Model）方法。"""
 
-	@classmethod
 	@override
-	def create_model(cls, backbone: nn.Module, num_classes: int) -> CLMModel:
-		return CLMModel(backbone, num_classes)
+	def build_model(self, backbone: nn.Module) -> CLMModel:
+		return CLMModel(backbone, self.num_classes)
 
 	@classmethod
 	@override
@@ -307,10 +294,9 @@ class CLMMethod(OrdinalBaseMethod[CLMModel]):
 class CORALMethod(OrdinalBaseMethod[CORALModel]):
 	"""CORAL 有序回归方法。"""
 
-	@classmethod
 	@override
-	def create_model(cls, backbone: nn.Module, num_classes: int) -> CORALModel:
-		return CORALModel(backbone, num_classes)
+	def build_model(self, backbone: nn.Module) -> CORALModel:
+		return CORALModel(backbone, self.num_classes)
 
 	@classmethod
 	@override
@@ -330,10 +316,9 @@ class CORALMethod(OrdinalBaseMethod[CORALModel]):
 class CORNMethod(OrdinalBaseMethod[CORNModel]):
 	"""CORN 条件有序回归方法。"""
 
-	@classmethod
 	@override
-	def create_model(cls, backbone: nn.Module, num_classes: int) -> CORNModel:
-		return CORNModel(backbone, num_classes)
+	def build_model(self, backbone: nn.Module) -> CORNModel:
+		return CORNModel(backbone, self.num_classes)
 
 	@classmethod
 	@override
@@ -358,10 +343,9 @@ class CORNMethod(OrdinalBaseMethod[CORNModel]):
 class OrdinalContrastiveMethod(OrdinalBaseMethod[ContrastiveClassificationModel]):
 	"""有序对比学习方法。"""
 
-	@classmethod
 	@override
-	def create_model(cls, backbone: nn.Module, num_classes: int) -> ContrastiveClassificationModel:
-		return ContrastiveClassificationModel(backbone, num_classes)
+	def build_model(self, backbone: nn.Module) -> ContrastiveClassificationModel:
+		return ContrastiveClassificationModel(backbone, self.num_classes)
 
 	@classmethod
 	@override

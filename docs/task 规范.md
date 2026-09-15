@@ -79,11 +79,9 @@ save_path = "outputs/{task_id}"
 各任务配置采用明确的输出模型与数据集字段定义：
 
 - 输出模型模式：
-  - `classification` 与 `ordinal` 采用 `BaseOutputConfig`，包含 `save_path`、`keep_count`、`save_best` 与 `log`；
-  - `mae_pretrain`、`mae_finetune` 与 `moco_pretrain` 共享 `LogOutputConfig`，包含 `save_path` 与 `log`；
-  - `eval_checkpoint` 采用 `EvalCheckpointOutputConfig`，仅包含 `save_path`；
-  - `predict_export` 采用 `PredictExportOutputConfig`，包含 `save_path` 与 `filename`；
-- 预训练数据集模式：`MAEDatasetConfig` 与 `MoCoDatasetConfig` 面向目录存储结构，移除 `type` 字段，直接指定 `root` 与 `extensions`。
+  - `classification` 采用 `BaseOutputConfig`，包含 `save_path`、`keep_count`、`save_best` 与 `log`；
+  - `mae_pretrain` 采用 `LogOutputConfig`，包含 `save_path` 与 `log`；
+- 预训练数据集模式：`MAEDatasetConfig` 面向目录存储结构，直接指定 `root` 与 `extensions`。
 
 ### 4.2 配置序列化与示例生成
 
@@ -102,37 +100,14 @@ save_path = "outputs/{task_id}"
 - `output.save_best`：保存最优权重 `best_model.pth`；`output.keep_count > 0` 独立控制滚动检查点 `checkpoint_NNNN.pth`；
 - `output.log`：生成 `logs/log_YYYYMMDD_HHMMSS.csv`，记录 `train_loss` 及验证集 `loss`、`acc`、`f1`、`precision`、`recall`、`auroc`。
 
-### 5.2 MAE
+### 5.2 MAE 预训练
 
-预训练使用 `MAEPretrainMethod` 与 `make_dataloader`，微调使用 `MAEFinetuneMethod` 与 `prepare_classification_training`，配合 Trainer 插件执行。
+预训练使用 `MAEPretrainMethod` 与 `make_dataloader`，配合 Trainer 插件执行。
 
-- 学习率：`eff_batch_size = training.batch_size * training.accum_iter`，`actual_lr = training.blr * eff_batch_size / 256.0`。微调的 `blr` 默认 `5e-4`；直接指定 `lr` 时设置 `blr=None`，例如 `--training.blr None --training.lr 0.001`。两种方式均使用 cosine 调度，最终学习率写入快照的 `runtime.resolved_lr`；
+- 学习率：`eff_batch_size = training.batch_size * training.accum_iter`，`actual_lr = training.blr * eff_batch_size / 256.0`。使用 cosine 调度，最终学习率写入快照的 `runtime.resolved_lr`；
 - 预训练恢复：`training.resume` 加载 `model`、`optimizer`、`scaler`，从零基编号 `checkpoint['epoch'] + 1` 继续至目标 `epochs`，优先于 `model.timm_pretrained` 初始化；
 - 预训练保存：每轮更新完整训练状态 `checkpoint_latest.pth`，最终轮保存 `checkpoint_{epoch:04d}.pth`；`training.save_freq > 0` 时额外按该间隔保存编号检查点；
-- 微调保存：按验证集 `f1` 保存最优权重 `best_model.pth`；`training.save_freq > 0` 时按间隔保存纯权重 `checkpoint_{epoch:04d}.pth`；
-- 输出：`output.save_path` 指定目录，`output.log` 启用 `logs/` 下的 CSV 日志。预训练日志为 `mae_log_YYYYMMDD_HHMMSS.csv`，记录训练损失与学习率；微调日志记录各轮验证指标。
-
-### 5.3 有序分类
-
-使用 `daisy.method.ordinal.METHODS` 注册的 13 种有序算法，由 `model.method` 指定。
-
-- 骨干网络：内部使用 `timm.create_model(..., num_classes=0)` 提取特征，由外层模型包装类推断特征维度；要求 `model.num_classes >= 2`；
-- 权重恢复：`model.checkpoint` 提供时在 Method 实例化后加载完整有序模型状态字典；
-- 梯度裁剪：`training.clip_grad` 为可选的浮点范数值，直接传入训练器执行裁剪；
-- 验证指标：使用 `method.predict` 输出的整数类别索引计算 `mae`、`rmse`、`acc` 与二次加权 `kappa`（未定义时保持 `NaN`），通过 `BestModel` 按 `mae` 最小保存 `best_model.pth`；
-- 输出产物：复用 `output.save_path` 目录，由 `Checkpoint` 依据 `output.keep_count` 滚动保留检查点，由 `CSVLog` 输出训练与验证指标。
-
-### 5.4 MoCo 预训练与线性探测
-
-- 预训练：`task_type = "moco_pretrain"`，基于 `MoCoPretrainMethod` 支持 `v2` 与 `v3` 引擎；支持 `sgd`、`adamw` 与 `lars` 优化器；调度支持余弦退火（`v2` 为 epoch 粒度，`v3` 为 iteration 粒度，`min_lr = 0.0`）与 `step` 策略，支持动量调度；检查点保存包含 `model`、`optimizer`、`scaler`、`epoch` 与 `engine` 的完整字典，持续覆盖 `checkpoint_latest.pth`，在最终轮及 `save_freq > 0` 间隔轮次保存编号检查点（`save_freq <= 0` 时仅保留最新与最终检查点）；通过 `training.resume` 恢复训练；
-- 线性探测：`task_type = "moco_lincls"`，基于 `ClassificationMethod`。骨干网络在训练期间全局保持 eval 模式（冻结权重与 BatchNorm 运行统计量），仅优化线性分类头（目前支持标准 timm 单头分类模型）；使用 AdamW 优化器与余弦退火（`min_lr = 1e-6`，`smoothing = 0.1`）；保存按验证集 `f1` 最优的分类器权重 `best_model.pth`，并在 `save_freq > 0` 时周期性保存常规分类器权重。
-
-### 5.5 检查点评估与预测导出
-
-`eval_checkpoint` 与 `predict_export` 任务复用 `inference_common` 共享管线，支持 `classification`、`mae_finetune` 与 `ordinal` 三类模型。
-
-- 模型构建：`ordinal` 的 `model.method` 须与训练方法一致，直接调用方法类构建模型与解码特征，无需初始化优化器；有序任务的 `include_logits` 须为 `false`；
-- 导出产物：`eval_checkpoint` 输出评估汇总 `metrics.json` 与逐样本预测 `predictions.csv`；`predict_export` 输出 `prediction_summary.json` 与指定的预测明细文件。
+- 输出：`output.save_path` 指定目录，`output.log` 启用 `logs/` 下的 CSV 日志。预训练日志为 `mae_log_YYYYMMDD_HHMMSS.csv`，记录训练损失与学习率。
 
 ## 6. 文件组织与命名
 
