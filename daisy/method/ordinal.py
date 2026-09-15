@@ -103,20 +103,15 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 			clip_grad=clip_grad,
 		)
 
-	@classmethod
 	@abstractmethod
-	def decode_features(cls, model: M, feat: Tensor, *, num_classes: int) -> Tensor:
+	def predict_from_features(self, feat: Tensor) -> Tensor:
 		"""由特征解码得到一维 long 类别预测。"""
 		...
 
 	@override
 	def predict_step(self, X: Tensor) -> torch.Tensor:
 		feat = self.model.forward_features(X)
-		return self.decode_predictions(feat.float())
-
-	def decode_predictions(self, feat: torch.Tensor) -> torch.Tensor:
-		"""由特征解码得到一维 long 类别预测。"""
-		return self.decode_features(self.model, feat, num_classes=self.num_classes)
+		return self.predict_from_features(feat.float())
 
 
 class ClassificationBaseMethod(OrdinalBaseMethod[ClassificationModel]):
@@ -126,12 +121,9 @@ class ClassificationBaseMethod(OrdinalBaseMethod[ClassificationModel]):
 	def build_model(self, backbone: nn.Module) -> ClassificationModel:
 		return ClassificationModel(backbone, self.num_classes)
 
-	@classmethod
 	@override
-	def decode_features(
-		cls, model: ClassificationModel, feat: torch.Tensor, *, num_classes: int
-	) -> torch.Tensor:
-		return model.fc(feat).argmax(dim=1)
+	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
+		return self.model.fc(feat).argmax(dim=1)
 
 
 class CEMethod(ClassificationBaseMethod):
@@ -236,12 +228,9 @@ class MSERankBaseMethod(OrdinalBaseMethod[ScalarModel]):
 	def build_model(self, backbone: nn.Module) -> ScalarModel:
 		return ScalarModel(backbone, bias=True)
 
-	@classmethod
 	@override
-	def decode_features(
-		cls, model: ScalarModel, feat: torch.Tensor, *, num_classes: int
-	) -> torch.Tensor:
-		return model.fc(feat).squeeze(-1).round().clamp(0, num_classes - 1).long()
+	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
+		return self.model.fc(feat).squeeze(-1).round().clamp(0, self.num_classes - 1).long()
 
 
 class MSERankNetMethod(MSERankBaseMethod):
@@ -275,13 +264,10 @@ class CLMMethod(OrdinalBaseMethod[CLMModel]):
 	def build_model(self, backbone: nn.Module) -> CLMModel:
 		return CLMModel(backbone, self.num_classes)
 
-	@classmethod
 	@override
-	def decode_features(
-		cls, model: CLMModel, feat: torch.Tensor, *, num_classes: int
-	) -> torch.Tensor:
-		score = model.fc(feat).squeeze(-1)
-		return _clm_log_probabilities(model, score).argmax(dim=1)
+	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
+		score = self.model.fc(feat).squeeze(-1)
+		return _clm_log_probabilities(self.model, score).argmax(dim=1)
 
 	def process(self, batch: Any) -> torch.Tensor:
 		images, targets = batch
@@ -298,12 +284,9 @@ class CORALMethod(OrdinalBaseMethod[CORALModel]):
 	def build_model(self, backbone: nn.Module) -> CORALModel:
 		return CORALModel(backbone, self.num_classes)
 
-	@classmethod
 	@override
-	def decode_features(
-		cls, model: CORALModel, feat: torch.Tensor, *, num_classes: int
-	) -> torch.Tensor:
-		return ((model.fc(feat) + model.coral_bias) > 0).sum(dim=1).long()
+	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
+		return ((self.model.fc(feat) + self.model.coral_bias) > 0).sum(dim=1).long()
 
 	def process(self, batch: Any) -> torch.Tensor:
 		images, targets = batch
@@ -320,12 +303,9 @@ class CORNMethod(OrdinalBaseMethod[CORNModel]):
 	def build_model(self, backbone: nn.Module) -> CORNModel:
 		return CORNModel(backbone, self.num_classes)
 
-	@classmethod
 	@override
-	def decode_features(
-		cls, model: CORNModel, feat: torch.Tensor, *, num_classes: int
-	) -> torch.Tensor:
-		cum = torch.sigmoid(model.fc(feat)).cumprod(dim=1)
+	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
+		cum = torch.sigmoid(self.model.fc(feat)).cumprod(dim=1)
 		return (cum > 0.5).sum(dim=1).long()
 
 	def process(self, batch: Any) -> torch.Tensor:
@@ -347,12 +327,9 @@ class OrdinalContrastiveMethod(OrdinalBaseMethod[ContrastiveClassificationModel]
 	def build_model(self, backbone: nn.Module) -> ContrastiveClassificationModel:
 		return ContrastiveClassificationModel(backbone, self.num_classes)
 
-	@classmethod
 	@override
-	def decode_features(
-		cls, model: ContrastiveClassificationModel, feat: torch.Tensor, *, num_classes: int
-	) -> torch.Tensor:
-		return model.fc(feat).argmax(dim=1)
+	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
+		return self.model.fc(feat).argmax(dim=1)
 
 	def process(self, batch: Any) -> torch.Tensor:
 		images, targets = batch
