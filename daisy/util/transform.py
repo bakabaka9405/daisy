@@ -223,10 +223,10 @@ def get_rectangle_train_transform_slight():
 	)
 
 
-def get_rectangle_train_transform():
+def get_rectangle_train_transform(zoom_out_max: float = 4.0):
 	return transforms.Compose(
 		[
-			transforms.RandomZoomOut(),
+			transforms.RandomZoomOut(side_range=(1.0, zoom_out_max)),
 			transforms.RandomRotation(degrees=(-10, 10), interpolation=InterpolationMode.BILINEAR),
 			transforms.RandomResizedCrop((112, 224), scale=(0.9, 1.0), ratio=(1.9, 2.1)),
 			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),

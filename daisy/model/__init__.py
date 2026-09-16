@@ -2,5 +2,6 @@
 
 from . import mae
 from . import moco
+from .multihead import MultiHeadModel
 
-__all__ = ['mae', 'moco']
+__all__ = ['MultiHeadModel', 'mae', 'moco']

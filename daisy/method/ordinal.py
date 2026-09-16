@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+import math
 from typing import Any, override
 
 import torch
@@ -149,7 +150,40 @@ class LabelSmoothingCEMethod(ClassificationBaseMethod):
 
 
 class SORDMethod(ClassificationBaseMethod):
-	"""软序回归方法（Soft Ordinal Regression）。"""
+	"""软序回归方法（Soft Ordinal Regression）。
+
+	使用温度系数缩放类别距离，调节软标签目标概率分布的集中程度。
+	"""
+
+	@override
+	def __init__(
+		self,
+		backbone: nn.Module,
+		num_classes: int,
+		*,
+		device: torch.device,
+		lr: float,
+		weight_decay: float = 0.05,
+		use_amp: bool = True,
+		accum_iter: int = 1,
+		clip_grad: float | None = None,
+		optimizer: torch.optim.Optimizer | None = None,
+		temperature: float = 1.0,
+	) -> None:
+		if not math.isfinite(temperature) or temperature <= 0.0:
+			raise ValueError(f'Temperature must be a finite positive number, got {temperature}')
+		super().__init__(
+			backbone,
+			num_classes,
+			device=device,
+			lr=lr,
+			weight_decay=weight_decay,
+			use_amp=use_amp,
+			accum_iter=accum_iter,
+			clip_grad=clip_grad,
+			optimizer=optimizer,
+		)
+		self.temperature: float = float(temperature)
 
 	def process(self, batch: Any) -> torch.Tensor:
 		images, targets = batch
@@ -157,7 +191,7 @@ class SORDMethod(ClassificationBaseMethod):
 		targets = targets.to(feat.device)
 		logits = self.model.fc(feat)
 		classes = torch.arange(self.num_classes, device=feat.device, dtype=feat.dtype)
-		target_dist = torch.softmax(-(targets.unsqueeze(1) - classes).abs(), dim=1)
+		target_dist = torch.softmax(-(targets.unsqueeze(1) - classes).abs() / self.temperature, dim=1)
 		return F.cross_entropy(logits, target_dist)
 
 

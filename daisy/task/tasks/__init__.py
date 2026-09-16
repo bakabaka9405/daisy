@@ -13,12 +13,15 @@ from .classification.config import ClassificationConfig
 from .classification.runner import run as run_classification
 from .mae_pretrain.config import MAEPretrainConfig
 from .mae_pretrain.runner import run as run_mae_pretrain
+from .multitask_classification.config import MultiTaskClassificationConfig
+from .multitask_classification.runner import run as run_multitask_classification
 
 type TaskEntry = tuple[type[BaseTaskConfig], Callable[[Any, torch.device], Path]]
 
 TASKS: dict[str, TaskEntry] = {
 	'classification': (ClassificationConfig, run_classification),
 	'mae_pretrain': (MAEPretrainConfig, run_mae_pretrain),
+	'multitask_classification': (MultiTaskClassificationConfig, run_multitask_classification),
 }
 
 
