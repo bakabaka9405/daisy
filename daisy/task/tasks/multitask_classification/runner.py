@@ -77,6 +77,16 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 	run_context = prepare_task_run(config, device, seed=training_cfg.seed)
 	output_path = run_context.output_path
 
+	# 解析学习率：blr 按有效批大小换算，与 lr 二选一
+	eff_batch_size = training_cfg.batch_size * training_cfg.accum_iter
+	if training_cfg.lr is not None:
+		resolved_lr = training_cfg.lr
+	elif training_cfg.blr is not None:
+		resolved_lr = training_cfg.blr * eff_batch_size / 256.0
+	else:
+		raise ValueError('Either training.lr or training.blr must be set')
+	print(f'Effective batch size: {eff_batch_size}, Learning rate: {resolved_lr:.2e}')
+
 	# 加载标注与统一划分
 	print('\nLoading dataset...')
 	dataset_cfg = config.dataset
@@ -108,7 +118,7 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 	val_dataset = DiskDataset([files[i] for i in val_index], [labels[i] for i in val_index], val_transform)
 	test_dataset = DiskDataset([files[i] for i in test_index], [labels[i] for i in test_index], val_transform)
 
-	save_run_snapshot(output_path, config, run_context)
+	save_run_snapshot(output_path, config, run_context, extra={'resolved_lr': resolved_lr})
 
 	# 创建共享 backbone 与多任务头
 	print('\nCreating model...')
@@ -126,7 +136,7 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 		backbone,
 		num_classes_list,
 		device=device,
-		lr=training_cfg.lr,
+		lr=resolved_lr,
 		weight_decay=training_cfg.weight_decay,
 		smoothing=training_cfg.smoothing,
 		use_amp=training_cfg.use_amp,
@@ -196,7 +206,7 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 	# 配置并挂载训练插件（Eval 先注册，确保指标先于依赖它的插件生成）
 	trainer = method.trainer
 	if training_cfg.use_scheduler:
-		trainer.use(CosineAnnealingLR(lr=training_cfg.lr, warmup_epochs=training_cfg.warmup_epochs))
+		trainer.use(CosineAnnealingLR(lr=resolved_lr, warmup_epochs=training_cfg.warmup_epochs))
 
 	evaluator = Eval(eval_fn=eval_fn)
 	trainer.use(evaluator)

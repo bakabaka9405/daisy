@@ -1,9 +1,9 @@
 """多任务分类任务配置"""
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 import tyro.conf
 
 from ...base import BaseConfig, BaseOutputConfig, BaseTaskConfig
@@ -60,7 +60,8 @@ class MultiTaskTrainingConfig(BaseConfig):
 	seed: int | None = None
 	epochs: int = 50
 	batch_size: int = 64
-	lr: float = 1e-3
+	blr: float | None = None  # 基础学习率，按 lr = blr * batch_size * accum_iter / 256 换算
+	lr: float | None = None  # 实际学习率，与 blr 二选一
 	weight_decay: float = 0.05
 	warmup_epochs: int = 5
 	smoothing: float = 0.1
@@ -71,6 +72,13 @@ class MultiTaskTrainingConfig(BaseConfig):
 	max_norm: float = 1.0
 	num_workers: int = 6
 	transform: MultiTaskTransformConfig = Field(default_factory=MultiTaskTransformConfig)
+
+	@model_validator(mode='after')
+	def _check_learning_rate(self) -> Self:
+		"""blr 与 lr 互斥，二者至多设置一个。"""
+		if self.blr is not None and self.lr is not None:
+			raise ValueError('training.blr and training.lr are mutually exclusive')
+		return self
 
 
 class MultiTaskClassificationConfig(BaseTaskConfig):
