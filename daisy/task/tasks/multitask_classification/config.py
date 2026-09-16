@@ -70,7 +70,7 @@ class MultiTaskTrainingConfig(BaseConfig):
 	use_amp: bool = True
 	clip_grad: bool = False
 	max_norm: float = 1.0
-	num_workers: int = 6
+	num_workers: int | tuple[int, int] = 6
 	transform: MultiTaskTransformConfig = Field(default_factory=MultiTaskTransformConfig)
 
 	@model_validator(mode='after')

@@ -144,13 +144,18 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 		clip_grad=training_cfg.max_norm if training_cfg.clip_grad else None,
 	)
 
+	if isinstance(training_cfg.num_workers, int):
+		train_workers, val_workers = training_cfg.num_workers, training_cfg.num_workers
+	else:
+		train_workers, val_workers = training_cfg.num_workers
+
 	train_loader = make_dataloader(
 		train_dataset,
 		training_cfg.batch_size,
 		device,
 		shuffle=True,
 		drop_last=True,
-		num_workers=training_cfg.num_workers,
+		num_workers=train_workers,
 	)
 	val_loader = make_dataloader(
 		val_dataset,
@@ -158,7 +163,7 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 		device,
 		shuffle=False,
 		drop_last=False,
-		num_workers=training_cfg.num_workers,
+		num_workers=val_workers,
 	)
 	test_loader = make_dataloader(
 		test_dataset,
@@ -166,7 +171,7 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 		device,
 		shuffle=False,
 		drop_last=False,
-		num_workers=training_cfg.num_workers,
+		num_workers=val_workers,
 	)
 
 	# 按任务收集预测与概率
