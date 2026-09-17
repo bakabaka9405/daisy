@@ -1,23 +1,22 @@
 """多任务分类任务执行器"""
 
+from functools import partial
 from pathlib import Path
 import time
-from typing import Any
 
-import numpy as np
-from timm import create_model
 import torch
 
 from daisy.dataset import DiskDataset
 from daisy.feeder import load_feeder_from_sheet
+from daisy.method.classification import create_criterion
 from daisy.method.multihead_classification import MultiHeadClassificationMethod
-from daisy.metrics import auroc_score, fast_calc_metrics, mae_score
-from daisy.model.mae import create_vit_model, load_mae_pretrained_weights, param_groups_lrd
-from daisy.training import BestModel, CosineAnnealingLR, CSVLog, EpochPrint, Eval
-from daisy.typing import GenericDataLoader
+from daisy.method.ordinal import sord_loss
+from daisy.multitask_classification import calculate_multihead_metrics, collect_multihead_predictions
+from daisy.training import BestModel, CosineAnnealingLR, CSVLog, EpochPrint, Eval, Trainer
 from daisy.util.data import make_dataloader
 from ...runtime import prepare_task_run, print_task_completed, save_json, save_run_snapshot
 from ...shared import get_classification_transform
+from .components import build_lrd_optimizer_factory, create_multihead_model
 from .config import MultiTaskClassificationConfig, MultiTaskDatasetConfig
 
 
@@ -75,6 +74,7 @@ def _select(files: list[Path], split_map: dict[str, int], value: int) -> list[in
 def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 	"""执行多任务分类训练任务"""
 	training_cfg = config.training
+	eval_cfg = config.evaluation
 	run_context = prepare_task_run(config, device, seed=training_cfg.seed)
 	output_path = run_context.output_path
 
@@ -119,7 +119,7 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 	val_dataset = DiskDataset([files[i] for i in val_index], [labels[i] for i in val_index], val_transform)
 	test_dataset = DiskDataset([files[i] for i in test_index], [labels[i] for i in test_index], val_transform)
 
-	extra: dict[str, Any] = {'resolved_lr': resolved_lr}
+	extra: dict[str, float | int] = {'resolved_lr': resolved_lr}
 	if config.model.checkpoint_path is not None:
 		ckpt_stat = Path(config.model.checkpoint_path).stat()
 		extra['checkpoint_size'] = ckpt_stat.st_size
@@ -128,82 +128,37 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 
 	# 创建共享 backbone 与多任务头
 	print('\nCreating model...')
-	model_cfg = config.model
-	if model_cfg.checkpoint_path is not None:
-		mae_kwargs: dict[str, Any] = {
-			'num_classes': 0,
-			'drop_path_rate': model_cfg.drop_path_rate,
-		}
-		if model_cfg.global_pool is not None:
-			mae_kwargs['global_pool'] = model_cfg.global_pool
-		if model_cfg.img_size is not None:
-			mae_kwargs['img_size'] = model_cfg.img_size
-		backbone = create_vit_model(model_cfg.name, **mae_kwargs).to(device)
-		if model_cfg.compile_backend is not None:
-			backbone.compile(backend=model_cfg.compile_backend)
-		load_mae_pretrained_weights(
-			backbone,
-			checkpoint_path=model_cfg.checkpoint_path,
-			init_head=False,
-			verbose=False,
-			source_grid_size=model_cfg.source_grid_size,
-		)
-	else:
-		model_kwargs: dict[str, Any] = {'pretrained': model_cfg.pretrained, 'num_classes': 0}
-		if model_cfg.img_size is not None:
-			model_kwargs['img_size'] = model_cfg.img_size
-		if model_cfg.drop_path_rate > 0:
-			model_kwargs['drop_path_rate'] = model_cfg.drop_path_rate
-		backbone = create_model(model_cfg.name, **model_kwargs)
-	print(f'Model: {model_cfg.name}, tasks: {len(num_classes_list)}')
+	model = create_multihead_model(config.model, num_classes_list)
+	print(f'Model: {config.model.name}, tasks: {len(num_classes_list)}')
 
-	# 构建优化器（若配置 layer_decay）
-	optimizer: torch.optim.Optimizer | None = None
+	# 选择目标损失函数
+	if training_cfg.objective == 'ce':
+		criterion = create_criterion(False, training_cfg.smoothing)
+	elif training_cfg.objective == 'sord':
+		criterion = partial(sord_loss, temperature=training_cfg.sord_temperature)
+	else:
+		raise ValueError(f'Unsupported objective: {training_cfg.objective}')
+
+	# 构建可选的 LRD 优化器工厂
+	optimizer_factory = None
 	if training_cfg.layer_decay is not None:
-		param_groups = param_groups_lrd(
-			backbone,
-			weight_decay=training_cfg.weight_decay,
-			layer_decay=training_cfg.layer_decay,
-		)
-		is_cuda = device.type == 'cuda'
-		optimizer = torch.optim.AdamW(
-			param_groups,
-			lr=resolved_lr,
-			betas=(0.9, 0.999),
-			fused=is_cuda,
+		optimizer_factory = build_lrd_optimizer_factory(
+			training_cfg.layer_decay,
+			is_cuda=device.type == 'cuda',
 		)
 
 	# 构建多任务分类方法
 	method = MultiHeadClassificationMethod(
-		backbone,
-		num_classes_list,
+		model,
+		criterion,
 		device=device,
 		lr=resolved_lr,
 		weight_decay=training_cfg.weight_decay,
-		smoothing=training_cfg.smoothing,
-		objective=training_cfg.objective,
-		sord_temperature=training_cfg.sord_temperature,
 		use_amp=training_cfg.use_amp,
 		accum_iter=training_cfg.accum_iter,
 		clip_grad=training_cfg.max_norm if training_cfg.clip_grad else None,
-		optimizer=optimizer,
+		optimizer_factory=optimizer_factory,
 	)
-
-	# 补充分类头参数至优化器
-	if optimizer is not None:
-		existing_ids = {id(p) for pg in optimizer.param_groups for p in pg['params']}
-		head_groups: dict[float, list[torch.nn.Parameter]] = {training_cfg.weight_decay: [], 0.0: []}
-		for p in method.model.parameters():
-			if p.requires_grad and id(p) not in existing_ids:
-				head_groups[training_cfg.weight_decay if p.ndim > 1 else 0.0].append(p)
-		for wd, params in head_groups.items():
-			if params:
-				optimizer.add_param_group({'params': params, 'weight_decay': wd, 'lr_scale': 1.0, 'lr': resolved_lr})
-
-		opt_params = [p for pg in optimizer.param_groups for p in pg['params']]
-		model_trainable = [p for p in method.model.parameters() if p.requires_grad]
-		assert len(opt_params) == len(set(opt_params)), 'Duplicate parameters found in optimizer.'
-		assert set(opt_params) == set(model_trainable), 'Optimizer parameters do not match trainable model parameters.'
 
 	if isinstance(training_cfg.num_workers, int):
 		train_workers, val_workers = training_cfg.num_workers, training_cfg.num_workers
@@ -235,49 +190,23 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 		num_workers=val_workers,
 	)
 
-	# 按任务收集预测与概率
-	def evaluate_loader(loader: GenericDataLoader) -> tuple[list[list[int]], list[list[int]], list[np.ndarray]]:
-		model = method.model
-		was_training = model.training
-		model.eval()
-		preds: list[list[int]] = [[] for _ in num_classes_list]
-		trues: list[list[int]] = [[] for _ in num_classes_list]
-		probs: list[list[list[float]]] = [[] for _ in num_classes_list]
-		try:
-			with torch.no_grad():
-				for images, targets in loader:
-					logits_list = model(images)
-					for task_idx in range(len(num_classes_list)):
-						logits = logits_list[task_idx]
-						preds[task_idx].extend(logits.argmax(dim=1).cpu().tolist())
-						trues[task_idx].extend(targets[task_idx].cpu().tolist())
-						probs[task_idx].extend(torch.softmax(logits, dim=1).cpu().tolist())
-		finally:
-			model.train(was_training)
-		return trues, preds, [np.asarray(task_probs, dtype=np.float64) for task_probs in probs]
-
 	# 训练期验证：各任务指标与平均指标
-	def eval_fn(trainer: Any) -> dict[str, float]:
-		trues, preds, _ = evaluate_loader(val_loader)
-		metrics: dict[str, float] = {}
-		f1_values: list[float] = []
-		mae_values: list[float] = []
-		for task_idx, num_classes in enumerate(num_classes_list):
-			task_metrics = fast_calc_metrics(trues[task_idx], preds[task_idx], num_classes=num_classes)
-			task_mae = float(
-				mae_score(
-					np.asarray(trues[task_idx], dtype=np.float64),
-					np.asarray(preds[task_idx], dtype=np.float64),
-				)
-			)
-			metrics[f'task{task_idx + 1}_f1'] = task_metrics.f1
-			metrics[f'task{task_idx + 1}_acc'] = task_metrics.acc
-			metrics[f'task{task_idx + 1}_mae'] = task_mae
-			f1_values.append(task_metrics.f1)
-			mae_values.append(task_mae)
-		metrics['avg_f1'] = sum(f1_values) / len(f1_values)
-		metrics['avg_mae'] = sum(mae_values) / len(mae_values)
-		return metrics
+	def eval_fn(_trainer: Trainer) -> dict[str, float]:
+		need_probs = 'auroc' in eval_cfg.val_metrics
+		results = collect_multihead_predictions(method.model, val_loader, probabilities=need_probs)
+		task_metrics = calculate_multihead_metrics(results, num_classes_list, eval_cfg.val_metrics)
+
+		flattened: dict[str, float] = {}
+		for task_key, m_dict in task_metrics.items():
+			for m_name, val in m_dict.items():
+				flattened[f'{task_key}_{m_name}'] = val
+
+		num_tasks = len(num_classes_list)
+		for avg_m in eval_cfg.average_metrics:
+			vals = [task_metrics[f'task{t_idx + 1}'][avg_m] for t_idx in range(num_tasks)]
+			flattened[f'avg_{avg_m}'] = sum(vals) / len(vals)
+
+		return flattened
 
 	# 配置并挂载训练插件（Eval 先注册，确保指标先于依赖它的插件生成）
 	trainer = method.trainer
@@ -295,7 +224,14 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 	trainer.use(evaluator)
 
 	if config.output.save_best:
-		trainer.use(BestModel(evaluator, watch_metric='avg_f1', mode='max', save_path=output_path))
+		trainer.use(
+			BestModel(
+				evaluator,
+				watch_metric=eval_cfg.watch_metric,
+				mode=eval_cfg.watch_mode,
+				save_path=output_path,
+			)
+		)
 	if config.output.log:
 		log_path = output_path / 'logs' / f'log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
 		trainer.use(CSVLog(log_path=log_path, evaluator=evaluator))
@@ -310,35 +246,20 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 		method.model.load_state_dict(torch.load(output_path / 'best_model.pth', map_location='cpu', weights_only=True))
 
 	print('\n=== Test evaluation ===')
-	test_trues, test_preds, test_probs = evaluate_loader(test_loader)
-	test_metrics: dict[str, dict[str, float]] = {}
-	for task_idx, num_classes in enumerate(num_classes_list):
-		task_metrics = fast_calc_metrics(test_trues[task_idx], test_preds[task_idx], num_classes=num_classes)
-		task_mae = float(
-			mae_score(
-				np.asarray(test_trues[task_idx], dtype=np.float64),
-				np.asarray(test_preds[task_idx], dtype=np.float64),
-			)
-		)
-		auroc = auroc_score(
-			np.asarray(test_trues[task_idx], dtype=np.int64),
-			test_probs[task_idx],
-			mode='macro',
-		)
-		auroc_value = float(auroc['macro'] if isinstance(auroc, dict) else auroc)
-		test_metrics[f'task{task_idx + 1}'] = {
-			'acc': float(task_metrics.acc),
-			'precision': float(task_metrics.precision),
-			'recall': float(task_metrics.recall),
-			'f1': float(task_metrics.f1),
-			'auroc': auroc_value,
-			'mae': task_mae,
-		}
-		print(
-			f'  Task {task_idx + 1}: Acc={task_metrics.acc:.4f}, Prec={task_metrics.precision:.4f}, '
-			f'Recall={task_metrics.recall:.4f}, F1={task_metrics.f1:.4f}, AUROC={auroc_value:.4f}, MAE={task_mae:.4f}'
-		)
-	save_json(output_path / 'test_metrics.json', test_metrics)
+	if len(test_index) == 0:
+		print('Test dataset is empty, skipping final test evaluation.')
+	else:
+		need_test_probs = 'auroc' in eval_cfg.test_metrics
+		test_results = collect_multihead_predictions(method.model, test_loader, probabilities=need_test_probs)
+		test_metrics = calculate_multihead_metrics(test_results, num_classes_list, eval_cfg.test_metrics)
+
+		for task_idx in range(len(num_classes_list)):
+			task_key = f'task{task_idx + 1}'
+			m_dict = test_metrics[task_key]
+			formatted = ', '.join(f'{k.capitalize()}={v:.4f}' for k, v in m_dict.items())
+			print(f'  Task {task_idx + 1}: {formatted}')
+
+		save_json(output_path / 'test_metrics.json', test_metrics)
 
 	print_task_completed(output_path)
 	return output_path

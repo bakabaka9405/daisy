@@ -3,9 +3,10 @@
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 import tyro.conf
 
+from daisy.multitask_classification import ClassificationMetric
 from ...base import BaseConfig, BaseOutputConfig, BaseTaskConfig
 
 
@@ -13,7 +14,7 @@ class TaskHeadConfig(BaseConfig):
 	"""单个任务的标注列与类别配置"""
 
 	column: int
-	num_classes: int
+	num_classes: int = Field(ge=2)
 	label_offset: int = 0
 
 
@@ -35,7 +36,7 @@ class MultiTaskDatasetConfig(BaseConfig):
 	train_value: int = 1
 	val_value: int = 2
 	test_value: int = 3
-	tasks: list[TaskHeadConfig] = Field(default_factory=list)
+	tasks: list[TaskHeadConfig] = Field(default_factory=list, min_length=1)
 
 
 class MultiTaskModelConfig(BaseConfig):
@@ -79,7 +80,7 @@ class MultiTaskTrainingConfig(BaseConfig):
 	max_norm: float = 1.0
 	num_workers: int | tuple[int, int] = 6
 	objective: Literal['ce', 'sord'] = 'ce'
-	sord_temperature: float = 1.0
+	sord_temperature: float = Field(default=1.0, gt=0, allow_inf_nan=False)
 	transform: MultiTaskTransformConfig = Field(default_factory=MultiTaskTransformConfig)
 
 	@model_validator(mode='after')
@@ -87,6 +88,40 @@ class MultiTaskTrainingConfig(BaseConfig):
 		"""blr 与 lr 互斥，二者至多设置一个。"""
 		if self.blr is not None and self.lr is not None:
 			raise ValueError('training.blr and training.lr are mutually exclusive')
+		return self
+
+
+class MultiTaskEvaluationConfig(BaseConfig):
+	"""多任务评估配置"""
+
+	val_metrics: list[ClassificationMetric] = Field(default_factory=lambda: ['f1', 'acc'])
+	test_metrics: list[ClassificationMetric] = Field(default_factory=lambda: ['acc', 'precision', 'recall', 'f1', 'auroc'])
+	average_metrics: list[ClassificationMetric] = Field(default_factory=lambda: ['f1'])
+	watch_metric: str = 'avg_f1'
+	watch_mode: Literal['min', 'max'] = 'max'
+
+	@field_validator('val_metrics', 'test_metrics')
+	@classmethod
+	def _validate_nonempty_metrics(cls, v: list[ClassificationMetric]) -> list[ClassificationMetric]:
+		if not v:
+			raise ValueError('Metrics list must not be empty')
+		if len(v) != len(set(v)):
+			raise ValueError(f'Duplicate metrics found: {v}')
+		return v
+
+	@field_validator('average_metrics')
+	@classmethod
+	def _validate_average_metrics(cls, v: list[ClassificationMetric]) -> list[ClassificationMetric]:
+		if len(v) != len(set(v)):
+			raise ValueError(f'Duplicate metrics found: {v}')
+		return v
+
+	@model_validator(mode='after')
+	def _validate_averages_subset(self) -> Self:
+		val_set = set(self.val_metrics)
+		avg_set = set(self.average_metrics)
+		if not avg_set.issubset(val_set):
+			raise ValueError(f'average_metrics ({self.average_metrics}) must be a subset of val_metrics ({self.val_metrics})')
 		return self
 
 
@@ -98,3 +133,19 @@ class MultiTaskClassificationConfig(BaseTaskConfig):
 	dataset: MultiTaskDatasetConfig = Field(default_factory=MultiTaskDatasetConfig)
 	model: MultiTaskModelConfig = Field(default_factory=MultiTaskModelConfig)
 	training: MultiTaskTrainingConfig = Field(default_factory=MultiTaskTrainingConfig)
+	evaluation: MultiTaskEvaluationConfig = Field(default_factory=MultiTaskEvaluationConfig)
+
+	@model_validator(mode='after')
+	def _validate_watched_metric(self) -> Self:
+		if not self.output.save_best:
+			return self
+		eval_cfg = self.evaluation
+		valid_watch: set[str] = {f'avg_{m}' for m in eval_cfg.average_metrics}
+		for task_idx in range(len(self.dataset.tasks)):
+			for m in eval_cfg.val_metrics:
+				valid_watch.add(f'task{task_idx + 1}_{m}')
+		if eval_cfg.watch_metric not in valid_watch:
+			raise ValueError(
+				f"watch_metric '{eval_cfg.watch_metric}' is not available in validation metrics. Available metrics: {sorted(valid_watch)}"
+			)
+		return self

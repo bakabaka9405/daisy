@@ -2,53 +2,45 @@
 
 from __future__ import annotations
 
-import math
-from typing import Any, Literal, override
+from collections.abc import Callable, Sequence
+from typing import override
 
 import torch
 import torch.nn as nn
+from torch import Tensor
+from torch.optim import Optimizer
 
 from daisy.method.base import Method
-from daisy.method.classification import create_criterion
-from daisy.method.ordinal import sord_loss
 from daisy.model.multihead import MultiHeadModel
+
+ClassificationLoss = Callable[[Tensor, Tensor], Tensor]
+OptimizerFactory = Callable[[MultiHeadModel, float, float], Optimizer]
 
 
 class MultiHeadClassificationMethod(Method[MultiHeadModel]):
-	"""共享 backbone、每个任务一个分类头的多任务分类方法。
-
-	batch 约定为 ``(images, targets)``，其中 ``targets`` 是长度为任务数的标签序列，
-	第 ``i`` 个元素对应该任务头。每个任务使用标准分类损失或 SORD 损失，按任务平均。
-	"""
+	"""共享 backbone、每个任务一个分类头的多任务分类方法。"""
 
 	@override
 	def __init__(
 		self,
-		backbone: nn.Module,
-		num_classes_list: list[int],
+		model: MultiHeadModel,
+		criterion: ClassificationLoss,
 		*,
 		device: torch.device,
 		lr: float,
 		weight_decay: float = 0.05,
-		smoothing: float = 0.0,
-		objective: Literal['ce', 'sord'] = 'ce',
-		sord_temperature: float = 1.0,
 		use_amp: bool = True,
 		accum_iter: int = 1,
 		clip_grad: float | None = None,
-		optimizer: torch.optim.Optimizer | None = None,
+		optimizer: Optimizer | None = None,
+		optimizer_factory: OptimizerFactory | None = None,
 	) -> None:
-		if objective not in ('ce', 'sord'):
-			raise ValueError(f"Unsupported objective: '{objective}', expected 'ce' or 'sord'")
-		if not math.isfinite(sord_temperature) or sord_temperature <= 0.0:
-			raise ValueError(f'sord_temperature must be a finite positive number, got {sord_temperature}')
+		# 设置当前算法特有的模型、损失函数与优化器工厂
+		self.criterion: ClassificationLoss = criterion
+		self._custom_optimizer_factory: OptimizerFactory | None = optimizer_factory
 
-		self.num_classes_list = list(num_classes_list)
-		self.objective: Literal['ce', 'sord'] = objective
-		self.sord_temperature: float = float(sord_temperature)
-		self.criterion = create_criterion(False, smoothing)
 		super().__init__(
-			backbone,
+			model,
 			device=device,
 			lr=lr,
 			weight_decay=weight_decay,
@@ -60,13 +52,22 @@ class MultiHeadClassificationMethod(Method[MultiHeadModel]):
 
 	@override
 	def build_model(self, backbone: nn.Module) -> MultiHeadModel:
-		return MultiHeadModel(backbone, self.num_classes_list)
+		"""校验并返回 MultiHeadModel 实例。"""
+		if not isinstance(backbone, MultiHeadModel):
+			raise TypeError(f'Expected MultiHeadModel, got {type(backbone).__name__}')
+		return backbone
 
-	def process(self, batch: Any) -> torch.Tensor:
+	@override
+	def build_optimizer(self, model: MultiHeadModel, *, lr: float, weight_decay: float) -> Optimizer:
+		"""使用自定义工厂或默认基类构建优化器。"""
+		if self._custom_optimizer_factory is not None:
+			return self._custom_optimizer_factory(model, lr, weight_decay)
+		return super().build_optimizer(model, lr=lr, weight_decay=weight_decay)
+
+	def process(self, batch: tuple[Tensor, Sequence[Tensor]]) -> torch.Tensor:
+		"""执行单批计算并按任务头平均损失。"""
 		images, targets = batch
 		logits_list = self.model(images)
-		if self.objective == 'ce':
-			losses = [self.criterion(logits, target) for logits, target in zip(logits_list, targets)]
-		else:
-			losses = [sord_loss(logits, target, self.sord_temperature) for logits, target in zip(logits_list, targets)]
+		losses = [self.criterion(logits, target) for logits, target in zip(logits_list, targets, strict=True)]
+
 		return torch.stack(losses).mean()
