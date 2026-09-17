@@ -13,15 +13,12 @@ from .classification.config import ClassificationConfig
 from .classification.runner import run as run_classification
 from .mae_pretrain.config import MAEPretrainConfig
 from .mae_pretrain.runner import run as run_mae_pretrain
-from .multitask_classification.config import MultiTaskClassificationConfig
-from .multitask_classification.runner import run as run_multitask_classification
 
 type TaskEntry = tuple[type[BaseTaskConfig], Callable[[Any, torch.device], Path]]
 
 TASKS: dict[str, TaskEntry] = {
 	'classification': (ClassificationConfig, run_classification),
 	'mae_pretrain': (MAEPretrainConfig, run_mae_pretrain),
-	'multitask_classification': (MultiTaskClassificationConfig, run_multitask_classification),
 }
 
 
@@ -33,8 +30,26 @@ def get_task(task_type: str) -> TaskEntry:
 	return task
 
 
+def register_task[ConfigT: BaseTaskConfig](
+	name: str,
+	config_cls: type[ConfigT],
+	run_fn: Callable[[ConfigT, torch.device], Path],
+) -> None:
+	"""注册任务类型及其对应的配置类与执行函数。
+
+	Args:
+		name: 任务类型唯一标识符
+		config_cls: 任务配置类（须继承 BaseTaskConfig）
+		run_fn: 任务执行函数
+	"""
+	if name in TASKS:
+		raise ValueError(f"Task '{name}' is already registered.")
+	TASKS[name] = (config_cls, run_fn)
+
+
 __all__ = [
 	'TASKS',
 	'get_task',
+	'register_task',
 	'TaskEntry',
 ]

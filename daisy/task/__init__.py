@@ -22,7 +22,7 @@ from .base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
 from .runner import load_config, run_task
 from .serialization import build_example_config, export_example_config, save_config
 from .shared import DatasetConfig, DatasetSplitConfig, InferenceModelConfig, InferenceRuntimeConfig, LogOutputConfig
-from .tasks import TASKS, get_task
+from .tasks import TASKS, get_task, register_task
 from .tasks.classification.config import (
 	ClassificationConfig,
 	ModelConfig,
@@ -30,14 +30,6 @@ from .tasks.classification.config import (
 	TransformConfig,
 )
 from .tasks.mae_pretrain.config import MAEPretrainConfig
-from .tasks.multitask_classification.config import (
-	MultiTaskClassificationConfig,
-	MultiTaskDatasetConfig,
-	MultiTaskModelConfig,
-	MultiTaskTrainingConfig,
-	MultiTaskTransformConfig,
-	TaskHeadConfig,
-)
 
 __all__ = [
 	# 基础类
@@ -47,6 +39,7 @@ __all__ = [
 	# 任务字典与查找
 	'TASKS',
 	'get_task',
+	'register_task',
 	# 主要接口
 	'load_config',
 	'run_task',
@@ -62,15 +55,8 @@ __all__ = [
 	# 任务配置
 	'ClassificationConfig',
 	'MAEPretrainConfig',
-	'MultiTaskClassificationConfig',
 	# 分类任务细粒度配置
 	'ModelConfig',
 	'TrainingConfig',
 	'TransformConfig',
-	# 多任务分类细粒度配置
-	'MultiTaskDatasetConfig',
-	'MultiTaskModelConfig',
-	'MultiTaskTrainingConfig',
-	'MultiTaskTransformConfig',
-	'TaskHeadConfig',
 ]
