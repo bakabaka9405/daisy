@@ -12,6 +12,7 @@ from torch import Tensor
 
 from daisy.method.base import Method
 from daisy.training.state import TrainState
+from daisy.training.trainer import Trainer
 
 
 class MoCoPretrainMethod(Method[nn.Module]):
@@ -22,7 +23,6 @@ class MoCoPretrainMethod(Method[nn.Module]):
 		self,
 		model: nn.Module,
 		*,
-		device: torch.device,
 		engine: Literal['v2', 'v3'] = 'v3',
 		lr: float = 0.03,
 		weight_decay: float = 1e-4,
@@ -30,29 +30,24 @@ class MoCoPretrainMethod(Method[nn.Module]):
 		optimizer_type: Literal['sgd', 'adamw', 'lars'] = 'sgd',
 		moco_m: float = 0.999,
 		moco_m_cos: bool = False,
-		use_amp: bool = True,
-		clip_grad: float | None = None,
-		optimizer: torch.optim.Optimizer | None = None,
 	) -> None:
 		self.engine = engine
-		self.optimizer_type = optimizer_type
 		self.momentum = momentum
+		self.optimizer_type = optimizer_type
 		self.moco_m = moco_m
 		self.moco_m_cos = moco_m_cos
 		self.current_m: float = moco_m
 
 		super().__init__(
 			model,
-			device=device,
 			lr=lr,
 			weight_decay=weight_decay,
-			use_amp=use_amp,
-			accum_iter=1,
-			clip_grad=clip_grad,
-			optimizer=optimizer,
 		)
 
-		self.trainer.on_batch_start(self._update_momentum)
+	@override
+	def register(self, trainer: Trainer) -> None:
+		super().register(trainer)
+		trainer.on_batch_start(self._update_momentum)
 
 	@override
 	def build_model(self, backbone: nn.Module) -> nn.Module:
@@ -67,28 +62,14 @@ class MoCoPretrainMethod(Method[nn.Module]):
 		lr: float,
 		weight_decay: float,
 	) -> torch.optim.Optimizer:
-		"""根据指定优化算法组装参数优化器，保持参数原始拓扑与遍历顺序。"""
+		"""按 optimizer_type 构建 SGD/LARS/AdamW 默认优化器。"""
 		if self.optimizer_type == 'lars':
 			from daisy.model.moco.lars import LARS
 
-			return LARS(
-				model.parameters(),
-				lr=lr,
-				weight_decay=weight_decay,
-				momentum=self.momentum,
-			)
+			return LARS(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=self.momentum)
 		if self.optimizer_type == 'adamw':
-			return torch.optim.AdamW(
-				model.parameters(),
-				lr=lr,
-				weight_decay=weight_decay,
-			)
-		return torch.optim.SGD(
-			model.parameters(),
-			lr=lr,
-			momentum=self.momentum,
-			weight_decay=weight_decay,
-		)
+			return torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+		return torch.optim.SGD(model.parameters(), lr=lr, momentum=self.momentum, weight_decay=weight_decay)
 
 	def _update_momentum(self, state: TrainState) -> None:
 		"""在各批次开始时依进度坐标计算并写入当前动量编码器更新系数。"""
@@ -100,8 +81,6 @@ class MoCoPretrainMethod(Method[nn.Module]):
 				self.current_m = self.moco_m
 		else:
 			self.current_m = float(getattr(self.model, 'm', self.moco_m))
-
-		state.extras['moco_m'] = self.current_m
 
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> Tensor:
 		"""解包双视图张量，分发 v2 与 v3 对比损失并阻断非有限数值的反向传播。"""

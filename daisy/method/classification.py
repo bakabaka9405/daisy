@@ -33,16 +33,11 @@ class ClassificationMethod(Method[nn.Module]):
 		model: nn.Module,
 		num_classes: int,
 		*,
-		device: torch.device,
 		lr: float,
 		weight_decay: float = 0.05,
 		mixup: float = 0.0,
 		cutmix: float = 0.0,
 		smoothing: float = 0.0,
-		use_amp: bool = True,
-		accum_iter: int = 1,
-		clip_grad: float | None = None,
-		optimizer: torch.optim.Optimizer | None = None,
 	) -> None:
 		self.num_classes = num_classes
 		mixup_enabled = mixup > 0.0 or cutmix > 0.0
@@ -62,13 +57,8 @@ class ClassificationMethod(Method[nn.Module]):
 		)
 		super().__init__(
 			model,
-			device=device,
 			lr=lr,
 			weight_decay=weight_decay,
-			use_amp=use_amp,
-			accum_iter=accum_iter,
-			clip_grad=clip_grad,
-			optimizer=optimizer,
 		)
 
 	@override

@@ -28,10 +28,10 @@ class MultiTaskDatasetConfig(BaseConfig):
 
 	root: Path = Path()
 	annotation_sheet: Path | None = None
-	annotation_sheet_name: int | str | None = None
+	annotation_sheet_name: int | str = 0
 	have_header: bool = True
 	split_sheet: Path | None = None
-	split_sheet_name: int | str | None = None
+	split_sheet_name: int | str = 0
 	split_column: int = 1
 	train_value: int = 1
 	val_value: int = 2

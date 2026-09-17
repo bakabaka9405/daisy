@@ -8,7 +8,7 @@ import torch
 
 from daisy.classification import prepare_classification_training
 from daisy.method.classification import ClassificationMethod
-from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, EpochPrint
+from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, EpochPrint, Trainer
 from ...data import build_train_val_selection
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from ...shared import get_classification_transform
@@ -63,22 +63,27 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 	# 训练
 	print('\nStarting training...')
 
-	# 实例化分类方法
+	# 实例化分类方法并作为核心插件装配训练器
 	method = ClassificationMethod(
 		model,
 		num_classes=model_cfg.num_classes,
-		device=device,
 		lr=training_cfg.lr,
 		weight_decay=training_cfg.weight_decay,
 		smoothing=training_cfg.smoothing,
+	)
+
+	trainer = Trainer(
+		device=device,
 		use_amp=training_cfg.use_amp,
 		accum_iter=training_cfg.accum_iter,
 		clip_grad=training_cfg.max_norm if training_cfg.clip_grad else None,
 	)
+	trainer.use(method)
 
 	# 构建 DataLoader 并自动注册 Eval 插件
 	train_loader, evaluator = prepare_classification_training(
 		method,
+		trainer,
 		(train_dataset, val_dataset),
 		batch_size=training_cfg.batch_size,
 		train_transform=train_transform,
@@ -87,8 +92,6 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 	)
 
 	# 配置并挂载训练插件
-	trainer = method.trainer
-
 	if training_cfg.use_scheduler:
 		trainer.use(
 			CosineAnnealingLR(
@@ -133,7 +136,7 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 			)
 		)
 
-	method.fit(train_loader, epochs=training_cfg.epochs)
+	trainer.fit(train_loader, epochs=training_cfg.epochs)
 
 	print_task_completed(output_path)
 

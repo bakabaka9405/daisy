@@ -77,6 +77,7 @@ def evaluate(
 
 def prepare_classification_training(
 	method: ClassificationMethod,
+	trainer: Trainer,
 	dataset: tuple[IndexDataset, IndexDataset] | IndexDataset,
 	*,
 	batch_size: int = 64,
@@ -87,7 +88,7 @@ def prepare_classification_training(
 	pin_memory: bool = True,
 	drop_last: bool = False,
 ) -> tuple[MultiEpochsDataLoader, Eval]:
-	"""配置分类任务的 DataLoader 并向方法 Trainer 注册 Eval 插件。"""
+	"""配置分类任务的 DataLoader 并向 Trainer 注册 Eval 插件。"""
 	if isinstance(dataset, tuple):
 		train_dataset, val_dataset = dataset
 	else:
@@ -126,9 +127,9 @@ def prepare_classification_training(
 	val_criterion = nn.CrossEntropyLoss()
 	val_targets = torch.as_tensor(val_dataset.getRawData()[1], dtype=torch.long)
 
-	def eval_fn(trainer: Trainer) -> dict[str, float]:
+	def eval_fn(active_trainer: Trainer) -> dict[str, float]:
 		metrics = evaluate(
-			scores=method.predict(val_loader),
+			scores=active_trainer.inference(val_loader, lambda batch: method.predict_step(batch[0])),
 			targets=val_targets,
 			criterion=val_criterion,
 			num_classes=method.num_classes,
@@ -144,6 +145,6 @@ def prepare_classification_training(
 		}
 
 	evaluator = Eval(eval_fn=eval_fn)
-	method.trainer.use(evaluator)
+	trainer.use(evaluator)
 
 	return train_loader, evaluator

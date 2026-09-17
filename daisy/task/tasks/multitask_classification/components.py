@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import timm
@@ -69,56 +69,55 @@ def create_multihead_model(
 	return MultiHeadModel(backbone, num_classes_list, feature_dim=feature_dim)
 
 
-def build_lrd_optimizer_factory(
+def build_lrd_optimizer(
+	model: MultiHeadModel,
+	lr: float,
+	weight_decay: float,
+	*,
 	layer_decay: float,
 	is_cuda: bool,
-) -> Callable[[MultiHeadModel, float, float], Optimizer]:
-	"""构建 layer-wise lr decay 优化器工厂。
+) -> Optimizer:
+	"""构建带 layer-wise lr decay 的 AdamW 优化器。
 
-	工厂接收已构建并在目标设备上的 MultiHeadModel 以及 lr、weight_decay。
 	在 model.backbone 上应用 param_groups_lrd，分类头参数以 lr_scale=1.0 分为 decay/no-decay 组。
 	"""
+	param_groups = param_groups_lrd(
+		model.backbone,
+		weight_decay=weight_decay,
+		layer_decay=layer_decay,
+	)
 
-	def optimizer_factory(model: MultiHeadModel, lr: float, weight_decay: float) -> Optimizer:
-		param_groups = param_groups_lrd(
-			model.backbone,
-			weight_decay=weight_decay,
-			layer_decay=layer_decay,
+	head_decay_params: list[torch.nn.Parameter] = []
+	head_no_decay_params: list[torch.nn.Parameter] = []
+
+	for p in model.heads.parameters():
+		if not p.requires_grad:
+			continue
+		if p.ndim > 1:
+			head_decay_params.append(p)
+		else:
+			head_no_decay_params.append(p)
+
+	if head_decay_params:
+		param_groups.append(
+			{
+				'params': head_decay_params,
+				'weight_decay': weight_decay,
+				'lr_scale': 1.0,
+			}
+		)
+	if head_no_decay_params:
+		param_groups.append(
+			{
+				'params': head_no_decay_params,
+				'weight_decay': 0.0,
+				'lr_scale': 1.0,
+			}
 		)
 
-		head_decay_params: list[torch.nn.Parameter] = []
-		head_no_decay_params: list[torch.nn.Parameter] = []
-
-		for p in model.heads.parameters():
-			if not p.requires_grad:
-				continue
-			if p.ndim > 1:
-				head_decay_params.append(p)
-			else:
-				head_no_decay_params.append(p)
-
-		if head_decay_params:
-			param_groups.append(
-				{
-					'params': head_decay_params,
-					'weight_decay': weight_decay,
-					'lr_scale': 1.0,
-				}
-			)
-		if head_no_decay_params:
-			param_groups.append(
-				{
-					'params': head_no_decay_params,
-					'weight_decay': 0.0,
-					'lr_scale': 1.0,
-				}
-			)
-
-		return AdamW(
-			param_groups,
-			lr=lr,
-			betas=(0.9, 0.999),
-			fused=is_cuda,
-		)
-
-	return optimizer_factory
+	return AdamW(
+		param_groups,
+		lr=lr,
+		betas=(0.9, 0.999),
+		fused=is_cuda,
+	)

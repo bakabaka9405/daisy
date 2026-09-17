@@ -11,7 +11,7 @@ from torchvision.transforms import v2 as transforms, InterpolationMode
 from daisy.dataset import DiskDataset, load_files_from_folder
 from daisy.method.mae import MAEPretrainMethod
 from daisy.model.mae import create_mae_model, load_timm_pretrained_encoder_weights
-from daisy.training import CosineAnnealingLR, Timer, TrainState
+from daisy.training import CosineAnnealingLR, Timer, Trainer, TrainState
 from daisy.util import make_dataloader
 from daisy.util.transform import LazyNormalization, LazyNormalizedTensor
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
@@ -127,19 +127,21 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 
 	model.to(device).compile(backend='inductor')
 
-	# 构建 MAE 方法实例
+	# 构建 MAE 方法并作为核心插件装配训练器
 	method = MAEPretrainMethod(
 		model,
-		device=device,
 		lr=lr,
 		weight_decay=training_cfg.weight_decay,
 		mask_ratio=training_cfg.mask_ratio,
 		norm_pix_loss=training_cfg.norm_pix_loss,
+	)
+	trainer = Trainer(
+		device=device,
 		use_amp=training_cfg.use_amp,
 		accum_iter=training_cfg.accum_iter,
 		clip_grad=training_cfg.max_norm if training_cfg.clip_grad else None,
 	)
-	trainer = method.trainer
+	trainer.use(method)
 	optimizer = trainer.optimizer
 	assert optimizer is not None
 
@@ -203,7 +205,7 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 
 	print('Ready to train...')
 	print('\nStarting MAE pretraining...')
-	method.fit(loader, epochs, start_epoch=start_epoch)
+	trainer.fit(loader, epochs, start_epoch=start_epoch)
 
 	print_task_completed(output_path)
 	return output_path

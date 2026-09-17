@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from typing import override
 
-import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.optim import AdamW, Optimizer
 
 from daisy.method.base import Method
-from daisy.method.classification import ClassificationMethod
-from daisy.model.mae import MaskedAutoencoderViT, param_groups_lrd
+from daisy.model.mae import MaskedAutoencoderViT
 
 
 class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
@@ -22,27 +20,17 @@ class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
 		self,
 		model: MaskedAutoencoderViT,
 		*,
-		device: torch.device,
 		lr: float,
 		weight_decay: float = 0.05,
 		mask_ratio: float = 0.75,
 		norm_pix_loss: bool = False,
-		use_amp: bool = True,
-		accum_iter: int = 1,
-		clip_grad: float | None = None,
-		optimizer: Optimizer | None = None,
 	) -> None:
 		self.mask_ratio = mask_ratio
 		self.norm_pix_loss = norm_pix_loss
 		super().__init__(
 			model,
-			device=device,
 			lr=lr,
 			weight_decay=weight_decay,
-			use_amp=use_amp,
-			accum_iter=accum_iter,
-			clip_grad=clip_grad,
-			optimizer=optimizer,
 		)
 
 	@override
@@ -60,7 +48,7 @@ class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
 		lr: float,
 		weight_decay: float,
 	) -> Optimizer:
-		"""构建带偏置与归一化层过滤的 AdamW 优化器。"""
+		"""构建 bias/norm 不衰减、其余参数衰减并使用 beta2=0.95 的 AdamW。"""
 		param_groups = [
 			{'params': [p for n, p in model.named_parameters() if 'bias' not in n and 'norm' not in n]},
 			{'params': [p for n, p in model.named_parameters() if 'bias' in n or 'norm' in n], 'weight_decay': 0.0},

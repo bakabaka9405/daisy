@@ -16,12 +16,8 @@ from daisy.training import BestModel, CosineAnnealingLR, CSVLog, EpochPrint, Eva
 from daisy.util.data import make_dataloader
 from ...runtime import prepare_task_run, print_task_completed, save_json, save_run_snapshot
 from ...shared import get_classification_transform
-from .components import build_lrd_optimizer_factory, create_multihead_model
+from .components import build_lrd_optimizer, create_multihead_model
 from .config import MultiTaskClassificationConfig, MultiTaskDatasetConfig
-
-
-def _resolve_sheet_name(name: int | str | None) -> int | str:
-	return 0 if name is None else name
 
 
 def _load_annotation(dataset_cfg: MultiTaskDatasetConfig) -> tuple[list[Path], list[list[int]]]:
@@ -37,7 +33,7 @@ def _load_annotation(dataset_cfg: MultiTaskDatasetConfig) -> tuple[list[Path], l
 		feeder = load_feeder_from_sheet(
 			dataset_root=dataset_cfg.root,
 			sheet_path=dataset_cfg.annotation_sheet,
-			sheet_name=_resolve_sheet_name(dataset_cfg.annotation_sheet_name),
+			sheet_name=dataset_cfg.annotation_sheet_name,
 			column=task.column,
 			label_offset=task.label_offset,
 			have_header=dataset_cfg.have_header,
@@ -59,7 +55,7 @@ def _load_split_map(dataset_cfg: MultiTaskDatasetConfig) -> dict[str, int]:
 	feeder = load_feeder_from_sheet(
 		dataset_root=dataset_cfg.root,
 		sheet_path=dataset_cfg.split_sheet,
-		sheet_name=_resolve_sheet_name(dataset_cfg.split_sheet_name),
+		sheet_name=dataset_cfg.split_sheet_name,
 		column=dataset_cfg.split_column,
 		have_header=dataset_cfg.have_header,
 	)
@@ -139,26 +135,30 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 	else:
 		raise ValueError(f'Unsupported objective: {training_cfg.objective}')
 
-	# 构建可选的 LRD 优化器工厂
-	optimizer_factory = None
-	if training_cfg.layer_decay is not None:
-		optimizer_factory = build_lrd_optimizer_factory(
-			training_cfg.layer_decay,
-			is_cuda=device.type == 'cuda',
-		)
-
-	# 构建多任务分类方法
+	# 构建多任务分类方法并作为核心插件装配训练器
 	method = MultiHeadClassificationMethod(
 		model,
 		criterion,
-		device=device,
 		lr=resolved_lr,
 		weight_decay=training_cfg.weight_decay,
+	)
+	trainer = Trainer(
+		device=device,
 		use_amp=training_cfg.use_amp,
 		accum_iter=training_cfg.accum_iter,
 		clip_grad=training_cfg.max_norm if training_cfg.clip_grad else None,
-		optimizer_factory=optimizer_factory,
 	)
+	trainer.use(method)
+
+	# layer-wise lr decay 时以自定义优化器覆盖方法默认的 AdamW
+	if training_cfg.layer_decay is not None:
+		trainer.optimizer = build_lrd_optimizer(
+			model,
+			resolved_lr,
+			training_cfg.weight_decay,
+			layer_decay=training_cfg.layer_decay,
+			is_cuda=device.type == 'cuda',
+		)
 
 	if isinstance(training_cfg.num_workers, int):
 		train_workers, val_workers = training_cfg.num_workers, training_cfg.num_workers
@@ -193,7 +193,7 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 	# 训练期验证：各任务指标与平均指标
 	def eval_fn(_trainer: Trainer) -> dict[str, float]:
 		need_probs = 'auroc' in eval_cfg.val_metrics
-		results = collect_multihead_predictions(method.model, val_loader, probabilities=need_probs)
+		results = collect_multihead_predictions(model, val_loader, probabilities=need_probs)
 		task_metrics = calculate_multihead_metrics(results, num_classes_list, eval_cfg.val_metrics)
 
 		flattened: dict[str, float] = {}
@@ -209,7 +209,6 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 		return flattened
 
 	# 配置并挂载训练插件（Eval 先注册，确保指标先于依赖它的插件生成）
-	trainer = method.trainer
 	if training_cfg.use_scheduler:
 		trainer.use(
 			CosineAnnealingLR(
@@ -239,18 +238,18 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 
 	# 执行训练
 	print('\nStarting training...')
-	method.fit(train_loader, epochs=training_cfg.epochs)
+	trainer.fit(train_loader, epochs=training_cfg.epochs)
 
 	# 加载最佳模型并在测试集上评估
 	if config.output.save_best:
-		method.model.load_state_dict(torch.load(output_path / 'best_model.pth', map_location='cpu', weights_only=True))
+		model.load_state_dict(torch.load(output_path / 'best_model.pth', map_location='cpu', weights_only=True))
 
 	print('\n=== Test evaluation ===')
 	if len(test_index) == 0:
 		print('Test dataset is empty, skipping final test evaluation.')
 	else:
 		need_test_probs = 'auroc' in eval_cfg.test_metrics
-		test_results = collect_multihead_predictions(method.model, test_loader, probabilities=need_test_probs)
+		test_results = collect_multihead_predictions(model, test_loader, probabilities=need_test_probs)
 		test_metrics = calculate_multihead_metrics(test_results, num_classes_list, eval_cfg.test_metrics)
 
 		for task_idx in range(len(num_classes_list)):

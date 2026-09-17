@@ -24,7 +24,7 @@ class Trainer:
 
 	def __init__(
 		self,
-		model: nn.Module,
+		model: nn.Module | None = None,
 		optimizer: torch.optim.Optimizer | None = None,
 		process_fn: ProcessFn | None = None,
 		device: torch.device | None = None,
@@ -99,6 +99,8 @@ class Trainer:
 
 	def fit(self, train_loader: DataLoader, epochs: int, *, start_epoch: int = 0) -> TrainState:
 		"""执行 ``[start_epoch, epochs)`` 区间训练并返回最终状态。"""
+		if self.model is None:
+			raise RuntimeError('fit 需要 model。')
 		if self.optimizer is None:
 			raise RuntimeError('fit 需要 optimizer。')
 		if self.process_fn is None:
@@ -143,6 +145,8 @@ class Trainer:
 		return state
 
 	def _train_one_epoch(self, train_loader: Prefetcher, state: TrainState) -> float:
+		if self.model is None:
+			raise RuntimeError('Model is required for _train_one_epoch.')
 		if self.optimizer is None:
 			raise RuntimeError('Optimizer is required for _train_one_epoch.')
 		if self.process_fn is None:
@@ -191,6 +195,9 @@ class Trainer:
 	@torch.no_grad()
 	def inference(self, data_loader: DataLoader, predict_fn: Callable[[Any], torch.Tensor]) -> torch.Tensor:
 		"""按 batch 顺序拼接预测结果，返回 CPU 张量。"""
+		if self.model is None:
+			raise RuntimeError('inference 需要 model。')
+
 		loader = data_loader if isinstance(data_loader, Prefetcher) else Prefetcher(data_loader, self.device)
 		was_training = self.model.training
 		self.model.to(self.device)

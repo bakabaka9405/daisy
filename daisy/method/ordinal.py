@@ -84,26 +84,16 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 		backbone: nn.Module,
 		num_classes: int,
 		*,
-		device: torch.device,
 		lr: float,
 		weight_decay: float = 0.05,
-		use_amp: bool = True,
-		accum_iter: int = 1,
-		clip_grad: float | None = None,
-		optimizer: torch.optim.Optimizer | None = None,
 	) -> None:
 		if num_classes < 2:
 			raise ValueError(f'num_classes must be >= 2, got {num_classes}')
 		self.num_classes = num_classes
 		super().__init__(
 			backbone,
-			device=device,
 			lr=lr,
 			weight_decay=weight_decay,
-			use_amp=use_amp,
-			accum_iter=accum_iter,
-			clip_grad=clip_grad,
-			optimizer=optimizer,
 		)
 
 	@abstractmethod
@@ -175,13 +165,8 @@ class SORDMethod(ClassificationBaseMethod):
 		backbone: nn.Module,
 		num_classes: int,
 		*,
-		device: torch.device,
 		lr: float,
 		weight_decay: float = 0.05,
-		use_amp: bool = True,
-		accum_iter: int = 1,
-		clip_grad: float | None = None,
-		optimizer: torch.optim.Optimizer | None = None,
 		temperature: float = 1.0,
 	) -> None:
 		if not math.isfinite(temperature) or temperature <= 0.0:
@@ -189,13 +174,8 @@ class SORDMethod(ClassificationBaseMethod):
 		super().__init__(
 			backbone,
 			num_classes,
-			device=device,
 			lr=lr,
 			weight_decay=weight_decay,
-			use_amp=use_amp,
-			accum_iter=accum_iter,
-			clip_grad=clip_grad,
-			optimizer=optimizer,
 		)
 		self.temperature: float = float(temperature)
 
