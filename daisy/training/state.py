@@ -9,7 +9,7 @@ import torch.nn as nn
 
 @dataclass
 class TrainState:
-	"""训练循环状态；Trainer 负责更新，Plugin 仅可写入 ``extras``。"""
+	"""训练循环状态；Trainer 负责更新。"""
 
 	model: nn.Module = field(repr=False)
 	optimizer: torch.optim.Optimizer | None = field(repr=False)
@@ -22,9 +22,8 @@ class TrainState:
 	global_step: int = 0  # 优化器更新次数
 
 	batch_loss: torch.Tensor = field(default_factory=lambda: torch.zeros(()))
-	epoch_train_loss: float = 0.0  # 当前 epoch 的 batch 平均 loss
-
-	extras: dict[str, Any] = field(default_factory=dict)
+	stop_training: bool = False
+	record: dict[str, Any] = field(default_factory=dict)
 
 	@property
 	def current_lr(self) -> float:
@@ -32,8 +31,3 @@ class TrainState:
 		if self.optimizer is None:
 			raise RuntimeError('current_lr 需要 optimizer。')
 		return self.optimizer.param_groups[0]['lr']
-
-	@property
-	def stop_training(self) -> bool:
-		"""读取 Plugin 通过 ``extras`` 发出的终止请求。"""
-		return bool(self.extras.get('stop_training', False))

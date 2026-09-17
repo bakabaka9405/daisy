@@ -87,7 +87,7 @@ def prepare_classification_training(
 	num_workers: int | tuple[int, int] = 4,
 	pin_memory: bool = True,
 	drop_last: bool = False,
-) -> tuple[MultiEpochsDataLoader, Eval]:
+) -> MultiEpochsDataLoader:
 	"""配置分类任务的 DataLoader 并向 Trainer 注册 Eval 插件。"""
 	if isinstance(dataset, tuple):
 		train_dataset, val_dataset = dataset
@@ -144,7 +144,6 @@ def prepare_classification_training(
 			'auroc': metrics.auroc,
 		}
 
-	evaluator = Eval(eval_fn=eval_fn)
-	trainer.use(evaluator)
+	trainer.use(Eval(eval_fn=eval_fn))
 
-	return train_loader, evaluator
+	return train_loader

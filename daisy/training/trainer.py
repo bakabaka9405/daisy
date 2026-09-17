@@ -20,6 +20,7 @@ class Trainer:
 
 	每个 batch 由 Prefetcher 完整搬运到设备；``process_fn`` 在 autocast 下返回
 	保留计算图的标量 loss，Trainer 负责反向、梯度累积、梯度裁剪、scaler 与优化器更新。
+	当前 epoch 的标量指标保存在 ``state.record`` 中，并在下一轮开始前清空。
 	"""
 
 	def __init__(
@@ -125,13 +126,16 @@ class Trainer:
 			fn(state)
 
 		for epoch in range(start_epoch, epochs):
+			state.record.clear()
 			state.epoch = epoch
 			state.total_batches = len(loader)
 
 			for fn in self._on_epoch_start:
 				fn(state)
 
-			state.epoch_train_loss = self._train_one_epoch(loader, state)
+			mean_loss = self._train_one_epoch(loader, state)
+			state.record['train/loss'] = mean_loss
+			state.record['optim/lr'] = optimizer.param_groups[0]['lr']
 
 			for fn in self._on_epoch_end:
 				fn(state)

@@ -81,7 +81,7 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 	trainer.use(method)
 
 	# 构建 DataLoader 并自动注册 Eval 插件
-	train_loader, evaluator = prepare_classification_training(
+	train_loader = prepare_classification_training(
 		method,
 		trainer,
 		(train_dataset, val_dataset),
@@ -100,12 +100,12 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 			)
 		)
 
-	watch_metric = 'precision' if training_cfg.cmp_obj == 'prec' else training_cfg.cmp_obj
+	cmp_name = 'precision' if training_cfg.cmp_obj == 'prec' else training_cfg.cmp_obj
+	watch_metric = f'val/{cmp_name}'
 
 	if config.output.save_best:
 		trainer.use(
 			BestModel(
-				evaluator,
 				watch_metric=watch_metric,
 				mode='max',
 				save_path=output_path,
@@ -120,18 +120,28 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 			)
 		)
 
+	eval_keys = [
+		'train/loss',
+		'optim/lr',
+		'val/loss',
+		'val/acc',
+		'val/f1',
+		'val/precision',
+		'val/recall',
+		'val/auroc',
+	]
+
 	if config.output.log:
 		log_path = output_path / 'logs' / f'log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
-		trainer.use(CSVLog(log_path=log_path, evaluator=evaluator))
+		trainer.use(CSVLog(log_path=log_path, watch=eval_keys))
 
-	trainer.use(EpochPrint(evaluator=evaluator))
+	trainer.use(EpochPrint(watch=eval_keys))
 
 	if training_cfg.early_stop:
 		trainer.use(
 			EarlyStop(
-				evaluator,
-				patience=training_cfg.early_stop_epoch,
 				watch_metric=watch_metric,
+				patience=training_cfg.early_stop_epoch,
 				mode='max',
 			)
 		)

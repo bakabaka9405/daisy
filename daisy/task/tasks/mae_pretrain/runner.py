@@ -11,7 +11,7 @@ from torchvision.transforms import v2 as transforms, InterpolationMode
 from daisy.dataset import DiskDataset, load_files_from_folder
 from daisy.method.mae import MAEPretrainMethod
 from daisy.model.mae import create_mae_model, load_timm_pretrained_encoder_weights
-from daisy.training import CosineAnnealingLR, Timer, Trainer, TrainState
+from daisy.training import CosineAnnealingLR, CSVLog, EpochPrint, Timer, Trainer, TrainState
 from daisy.util import make_dataloader
 from daisy.util.transform import LazyNormalization, LazyNormalizedTensor
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
@@ -146,35 +146,24 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 	assert optimizer is not None
 
 	# 配置调度器与计时器插件
-	timer = Timer()
 	trainer.use(
 		CosineAnnealingLR(lr=lr, min_lr=0, warmup_epochs=training_cfg.warmup_epochs, per_iteration=True),
-		timer,
+		Timer(),
 	)
 
-	# 准备日志文件
-	if config.output.log:
-		log_dir = output_path / 'logs'
-		log_dir.mkdir(parents=True, exist_ok=True)
-		log_file = log_dir / f'mae_log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
-		if not log_file.exists():
-			with open(log_file, 'w', encoding='utf-8') as f:
-				f.write('epoch,lr,train_loss\n')
-	else:
-		log_file = None
+	# 准备日志输出与记录插件
+	trainer.use(EpochPrint(watch=['optim/lr', 'train/loss', 'time/epoch']))
 
-	# 注册 epoch 结束回调：指标输出、CSV 记录与完整检查点保存
+	if config.output.log:
+		log_file = output_path / 'logs' / f'mae_log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
+		trainer.use(CSVLog(log_path=log_file, watch=['optim/lr', 'train/loss']))
+
+	# 注册 epoch 结束回调：完整检查点保存
 	save_freq = training_cfg.save_freq
 	epochs = training_cfg.epochs
 
 	def on_epoch_end(state: TrainState) -> None:
 		epoch = state.epoch + 1
-		train_loss = state.epoch_train_loss
-		print(f'Epoch {epoch}/{epochs}, Train Loss: {train_loss:.4f}, Time: {timer.elapsed:.1f}s')
-
-		if log_file is not None:
-			with open(log_file, 'a', encoding='utf-8') as f:
-				f.write(f'{epoch},{state.current_lr:.6f},{train_loss:.4f}\n')
 
 		checkpoint = {
 			'model': model.state_dict(),
