@@ -11,7 +11,8 @@ import torch
 from daisy.dataset import DiskDataset
 from daisy.feeder import load_feeder_from_sheet
 from daisy.method.multihead_classification import MultiHeadClassificationMethod
-from daisy.metrics import auroc_score, fast_calc_metrics
+from daisy.metrics import auroc_score, fast_calc_metrics, mae_score
+from daisy.model.mae import create_vit_model, load_mae_pretrained_weights, param_groups_lrd
 from daisy.training import BestModel, CosineAnnealingLR, CSVLog, EpochPrint, Eval
 from daisy.typing import GenericDataLoader
 from daisy.util.data import make_dataloader
@@ -118,18 +119,59 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 	val_dataset = DiskDataset([files[i] for i in val_index], [labels[i] for i in val_index], val_transform)
 	test_dataset = DiskDataset([files[i] for i in test_index], [labels[i] for i in test_index], val_transform)
 
-	save_run_snapshot(output_path, config, run_context, extra={'resolved_lr': resolved_lr})
+	extra: dict[str, Any] = {'resolved_lr': resolved_lr}
+	if config.model.checkpoint_path is not None:
+		ckpt_stat = Path(config.model.checkpoint_path).stat()
+		extra['checkpoint_size'] = ckpt_stat.st_size
+		extra['checkpoint_mtime'] = ckpt_stat.st_mtime
+	save_run_snapshot(output_path, config, run_context, extra=extra)
 
 	# 创建共享 backbone 与多任务头
 	print('\nCreating model...')
 	model_cfg = config.model
-	model_kwargs: dict[str, Any] = {'pretrained': model_cfg.pretrained, 'num_classes': 0}
-	if model_cfg.img_size is not None:
-		model_kwargs['img_size'] = model_cfg.img_size
-	if model_cfg.drop_path_rate > 0:
-		model_kwargs['drop_path_rate'] = model_cfg.drop_path_rate
-	backbone = create_model(model_cfg.name, **model_kwargs)
+	if model_cfg.checkpoint_path is not None:
+		mae_kwargs: dict[str, Any] = {
+			'num_classes': 0,
+			'drop_path_rate': model_cfg.drop_path_rate,
+		}
+		if model_cfg.global_pool is not None:
+			mae_kwargs['global_pool'] = model_cfg.global_pool
+		if model_cfg.img_size is not None:
+			mae_kwargs['img_size'] = model_cfg.img_size
+		backbone = create_vit_model(model_cfg.name, **mae_kwargs).to(device)
+		if model_cfg.compile_backend is not None:
+			backbone.compile(backend=model_cfg.compile_backend)
+		load_mae_pretrained_weights(
+			backbone,
+			checkpoint_path=model_cfg.checkpoint_path,
+			init_head=False,
+			verbose=False,
+			source_grid_size=model_cfg.source_grid_size,
+		)
+	else:
+		model_kwargs: dict[str, Any] = {'pretrained': model_cfg.pretrained, 'num_classes': 0}
+		if model_cfg.img_size is not None:
+			model_kwargs['img_size'] = model_cfg.img_size
+		if model_cfg.drop_path_rate > 0:
+			model_kwargs['drop_path_rate'] = model_cfg.drop_path_rate
+		backbone = create_model(model_cfg.name, **model_kwargs)
 	print(f'Model: {model_cfg.name}, tasks: {len(num_classes_list)}')
+
+	# 构建优化器（若配置 layer_decay）
+	optimizer: torch.optim.Optimizer | None = None
+	if training_cfg.layer_decay is not None:
+		param_groups = param_groups_lrd(
+			backbone,
+			weight_decay=training_cfg.weight_decay,
+			layer_decay=training_cfg.layer_decay,
+		)
+		is_cuda = device.type == 'cuda'
+		optimizer = torch.optim.AdamW(
+			param_groups,
+			lr=resolved_lr,
+			betas=(0.9, 0.999),
+			fused=is_cuda,
+		)
 
 	# 构建多任务分类方法
 	method = MultiHeadClassificationMethod(
@@ -139,10 +181,29 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 		lr=resolved_lr,
 		weight_decay=training_cfg.weight_decay,
 		smoothing=training_cfg.smoothing,
+		objective=training_cfg.objective,
+		sord_temperature=training_cfg.sord_temperature,
 		use_amp=training_cfg.use_amp,
 		accum_iter=training_cfg.accum_iter,
 		clip_grad=training_cfg.max_norm if training_cfg.clip_grad else None,
+		optimizer=optimizer,
 	)
+
+	# 补充分类头参数至优化器
+	if optimizer is not None:
+		existing_ids = {id(p) for pg in optimizer.param_groups for p in pg['params']}
+		head_groups: dict[float, list[torch.nn.Parameter]] = {training_cfg.weight_decay: [], 0.0: []}
+		for p in method.model.parameters():
+			if p.requires_grad and id(p) not in existing_ids:
+				head_groups[training_cfg.weight_decay if p.ndim > 1 else 0.0].append(p)
+		for wd, params in head_groups.items():
+			if params:
+				optimizer.add_param_group({'params': params, 'weight_decay': wd, 'lr_scale': 1.0, 'lr': resolved_lr})
+
+		opt_params = [p for pg in optimizer.param_groups for p in pg['params']]
+		model_trainable = [p for p in method.model.parameters() if p.requires_grad]
+		assert len(opt_params) == len(set(opt_params)), 'Duplicate parameters found in optimizer.'
+		assert set(opt_params) == set(model_trainable), 'Optimizer parameters do not match trainable model parameters.'
 
 	if isinstance(training_cfg.num_workers, int):
 		train_workers, val_workers = training_cfg.num_workers, training_cfg.num_workers
@@ -195,23 +256,40 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 			model.train(was_training)
 		return trues, preds, [np.asarray(task_probs, dtype=np.float64) for task_probs in probs]
 
-	# 训练期验证：各任务 f1 与平均 f1
+	# 训练期验证：各任务指标与平均指标
 	def eval_fn(trainer: Any) -> dict[str, float]:
 		trues, preds, _ = evaluate_loader(val_loader)
 		metrics: dict[str, float] = {}
 		f1_values: list[float] = []
+		mae_values: list[float] = []
 		for task_idx, num_classes in enumerate(num_classes_list):
 			task_metrics = fast_calc_metrics(trues[task_idx], preds[task_idx], num_classes=num_classes)
+			task_mae = float(
+				mae_score(
+					np.asarray(trues[task_idx], dtype=np.float64),
+					np.asarray(preds[task_idx], dtype=np.float64),
+				)
+			)
 			metrics[f'task{task_idx + 1}_f1'] = task_metrics.f1
 			metrics[f'task{task_idx + 1}_acc'] = task_metrics.acc
+			metrics[f'task{task_idx + 1}_mae'] = task_mae
 			f1_values.append(task_metrics.f1)
+			mae_values.append(task_mae)
 		metrics['avg_f1'] = sum(f1_values) / len(f1_values)
+		metrics['avg_mae'] = sum(mae_values) / len(mae_values)
 		return metrics
 
 	# 配置并挂载训练插件（Eval 先注册，确保指标先于依赖它的插件生成）
 	trainer = method.trainer
 	if training_cfg.use_scheduler:
-		trainer.use(CosineAnnealingLR(lr=resolved_lr, warmup_epochs=training_cfg.warmup_epochs))
+		trainer.use(
+			CosineAnnealingLR(
+				lr=resolved_lr,
+				min_lr=training_cfg.min_lr,
+				warmup_epochs=training_cfg.warmup_epochs,
+				per_iteration=training_cfg.per_iteration,
+			)
+		)
 
 	evaluator = Eval(eval_fn=eval_fn)
 	trainer.use(evaluator)
@@ -236,6 +314,12 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 	test_metrics: dict[str, dict[str, float]] = {}
 	for task_idx, num_classes in enumerate(num_classes_list):
 		task_metrics = fast_calc_metrics(test_trues[task_idx], test_preds[task_idx], num_classes=num_classes)
+		task_mae = float(
+			mae_score(
+				np.asarray(test_trues[task_idx], dtype=np.float64),
+				np.asarray(test_preds[task_idx], dtype=np.float64),
+			)
+		)
 		auroc = auroc_score(
 			np.asarray(test_trues[task_idx], dtype=np.int64),
 			test_probs[task_idx],
@@ -248,10 +332,11 @@ def run(config: MultiTaskClassificationConfig, device: torch.device) -> Path:
 			'recall': float(task_metrics.recall),
 			'f1': float(task_metrics.f1),
 			'auroc': auroc_value,
+			'mae': task_mae,
 		}
 		print(
 			f'  Task {task_idx + 1}: Acc={task_metrics.acc:.4f}, Prec={task_metrics.precision:.4f}, '
-			f'Recall={task_metrics.recall:.4f}, F1={task_metrics.f1:.4f}, AUROC={auroc_value:.4f}'
+			f'Recall={task_metrics.recall:.4f}, F1={task_metrics.f1:.4f}, AUROC={auroc_value:.4f}, MAE={task_mae:.4f}'
 		)
 	save_json(output_path / 'test_metrics.json', test_metrics)
 

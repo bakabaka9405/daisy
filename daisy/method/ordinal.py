@@ -149,6 +149,20 @@ class LabelSmoothingCEMethod(ClassificationBaseMethod):
 		return F.cross_entropy(self.model.fc(feat), targets.long(), label_smoothing=0.1)
 
 
+def sord_loss(logits: Tensor, targets: Tensor, temperature: float = 1.0) -> Tensor:
+	"""计算软序回归（SORD）损失。
+
+	使用温度系数缩放类别距离，调节软标签目标概率分布的集中程度后计算交叉熵损失。
+	"""
+	if not math.isfinite(temperature) or temperature <= 0.0:
+		raise ValueError(f'Temperature must be a finite positive number, got {temperature}')
+	num_classes = logits.shape[1]
+	targets = targets.to(device=logits.device)
+	classes = torch.arange(num_classes, device=logits.device, dtype=logits.dtype)
+	target_dist = torch.softmax(-(targets.view(-1, 1) - classes).abs() / temperature, dim=1)
+	return F.cross_entropy(logits, target_dist)
+
+
 class SORDMethod(ClassificationBaseMethod):
 	"""软序回归方法（Soft Ordinal Regression）。
 
@@ -188,11 +202,8 @@ class SORDMethod(ClassificationBaseMethod):
 	def process(self, batch: Any) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
-		targets = targets.to(feat.device)
 		logits = self.model.fc(feat)
-		classes = torch.arange(self.num_classes, device=feat.device, dtype=feat.dtype)
-		target_dist = torch.softmax(-(targets.unsqueeze(1) - classes).abs() / self.temperature, dim=1)
-		return F.cross_entropy(logits, target_dist)
+		return sord_loss(logits, targets, self.temperature)
 
 
 class RPSMethod(ClassificationBaseMethod):

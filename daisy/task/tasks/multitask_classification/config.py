@@ -45,6 +45,10 @@ class MultiTaskModelConfig(BaseConfig):
 	pretrained: bool = True
 	img_size: int | tuple[int, int] | None = None
 	drop_path_rate: float = 0.0
+	checkpoint_path: Path | None = None
+	source_grid_size: tuple[int, int] | None = None
+	global_pool: str | None = None
+	compile_backend: str | None = None
 
 
 class MultiTaskTransformConfig(BaseConfig):
@@ -63,7 +67,10 @@ class MultiTaskTrainingConfig(BaseConfig):
 	blr: float | None = None  # 基础学习率，按 lr = blr * batch_size * accum_iter / 256 换算
 	lr: float | None = None  # 实际学习率，与 blr 二选一
 	weight_decay: float = 0.05
+	layer_decay: float | None = None
 	warmup_epochs: int = 5
+	min_lr: float = 1e-6
+	per_iteration: bool = False
 	smoothing: float = 0.1
 	accum_iter: int = 1
 	use_scheduler: bool = True
@@ -71,6 +78,8 @@ class MultiTaskTrainingConfig(BaseConfig):
 	clip_grad: bool = False
 	max_norm: float = 1.0
 	num_workers: int | tuple[int, int] = 6
+	objective: Literal['ce', 'sord'] = 'ce'
+	sord_temperature: float = 1.0
 	transform: MultiTaskTransformConfig = Field(default_factory=MultiTaskTransformConfig)
 
 	@model_validator(mode='after')
