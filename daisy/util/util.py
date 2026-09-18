@@ -37,6 +37,15 @@ def enable_cudnn_benchmark():
 	torch.backends.cudnn.deterministic = False
 
 
+def resolve_lr(batch_size: int, accum_iter: int, *, lr: float | None = None, blr: float | None = None) -> float:
+	"""解析实际学习率：优先返回显式 lr，否则按 blr * 有效批大小 / 256 换算。"""
+	if lr is not None:
+		return lr
+	if blr is not None:
+		return blr * batch_size * accum_iter / 256.0
+	raise ValueError('Either lr or blr must be set')
+
+
 def DecodeImageFromFile(path: str, device: torch.device | None = None) -> Tensor:
 	res = decode_image(path, ImageReadMode.RGB)
 	if device is not None:
