@@ -1,22 +1,41 @@
+from .disk_dataset import DiskDataset
 from .index_dataset import IndexDataset
 import numpy
 from ..util import (
 	gather_list_by_indexes as gather,
 	shuffle_correlated_lists,
 )
-from collections.abc import Generator
+from collections.abc import Generator, Mapping
+from typing import Any
 
 
 def _get_rng(seed: int | None = None):
 	return numpy.random.default_rng(seed)
 
 
-def split_by_label[ImageT, LabelT](dataset: IndexDataset[ImageT, LabelT]) -> dict[LabelT, list]:
+def assert_disjoint_file_splits[ImageT, LabelT](splits: Mapping[str, DiskDataset[ImageT, LabelT]]) -> None:
+	"""集中检查各 split 间文件路径互斥性"""
+	split_names = list(splits.keys())
+	paths_by_split: dict[str, set[str]] = {
+		name: {p.resolve().as_posix() for p in splits[name].file_paths} for name in split_names
+	}
+	for i in range(len(split_names)):
+		for j in range(i + 1, len(split_names)):
+			name_a, name_b = split_names[i], split_names[j]
+			overlap = paths_by_split[name_a] & paths_by_split[name_b]
+			if overlap:
+				raise ValueError(
+					f'Split path overlap detected between {name_a!r} and {name_b!r}: '
+					f'{len(overlap)} samples, e.g. {sorted(overlap)[:5]}'
+				)
+
+
+def group_by_label[ImageT, LabelT](dataset: IndexDataset[ImageT, LabelT]) -> dict[LabelT, list]:
 	"""将数据集按标签分割为多个子集"""
 	label_to_indices: dict[LabelT, list] = {}
 	data, labels = dataset.getRawData()
 	if labels is None:
-		raise ValueError('split_by_label requires a labeled dataset')
+		raise ValueError('group_by_label requires a labeled dataset')
 	for i, j in zip(data, labels):
 		if j not in label_to_indices:
 			label_to_indices[j] = []
@@ -48,40 +67,52 @@ def stratified_data_split[T: IndexDataset](
 	val_ratio: float = 0.1,
 	seed: int | None = None,
 	shuffle: bool = True,
+	stratify_labels: list[int] | None = None,
 ) -> tuple[T, T]:
 	"""按类别分层划分训练/验证集"""
-	dataset_type = type(dataset)
-	label_dict = split_by_label(dataset)
 	rng = _get_rng(seed)
 
-	train_pairs: list[tuple[object, object]] = []
-	val_pairs: list[tuple[object, object]] = []
+	if stratify_labels is not None:
+		if len(stratify_labels) != len(dataset):
+			raise ValueError(
+				f'stratify_labels length ({len(stratify_labels)}) does not match dataset length ({len(dataset)})'
+			)
+		labels_seq = stratify_labels
+	else:
+		_, raw_labels = dataset.getRawData()
+		if raw_labels is None:
+			raise ValueError('stratified_data_split requires a labeled dataset')
+		if len(raw_labels) > 0 and isinstance(raw_labels[0], dict):
+			raise ValueError('Multi-task dataset requires stratify_labels to be specified for stratified_data_split')
+		labels_seq = raw_labels
 
-	for label, items in label_dict.items():
-		if len(items) < 2:
+	label_to_indices: dict[object, list[int]] = {}
+	for idx, label in enumerate(labels_seq):
+		label_to_indices.setdefault(label, []).append(idx)
+
+	train_indices: list[int] = []
+	val_indices: list[int] = []
+
+	for label, indices in label_to_indices.items():
+		if len(indices) < 2:
 			raise ValueError(f'Class {label} has fewer than 2 samples and cannot be stratified')
-		idx = rng.permutation(len(items))
-		val_size = max(1, int(round(len(items) * val_ratio)))
-		if val_size >= len(items):
-			val_size = len(items) - 1
-		train_size = len(items) - val_size
-		train_pairs.extend((items[i], label) for i in idx[:train_size])
-		val_pairs.extend((items[i], label) for i in idx[train_size:])
+		perm = rng.permutation(len(indices))
+		val_size = max(1, int(round(len(indices) * val_ratio)))
+		if val_size >= len(indices):
+			val_size = len(indices) - 1
+		train_size = len(indices) - val_size
+		train_indices.extend(indices[i] for i in perm[:train_size])
+		val_indices.extend(indices[i] for i in perm[train_size:])
 
 	if shuffle:
-		train_idx = rng.permutation(len(train_pairs)) if train_pairs else []
-		val_idx = rng.permutation(len(val_pairs)) if val_pairs else []
-		train_pairs = [train_pairs[i] for i in train_idx]
-		val_pairs = [val_pairs[i] for i in val_idx]
-
-	train_data = [item for item, _ in train_pairs]
-	train_labels = [label for _, label in train_pairs]
-	val_data = [item for item, _ in val_pairs]
-	val_labels = [label for _, label in val_pairs]
+		train_perm = rng.permutation(len(train_indices)) if train_indices else []
+		val_perm = rng.permutation(len(val_indices)) if val_indices else []
+		train_indices = [train_indices[i] for i in train_perm]
+		val_indices = [val_indices[i] for i in val_perm]
 
 	return (
-		dataset_type(train_data, train_labels, dataset.transform),
-		dataset_type(val_data, val_labels, dataset.transform),
+		dataset.subset(train_indices),
+		dataset.subset(val_indices),
 	)
 
 
@@ -135,7 +166,7 @@ def minimum_class_proportional_split[T: IndexDataset](
 	dataset_type = type(dataset)
 	rng = _get_rng(seed)
 
-	label_dict = split_by_label(dataset)
+	label_dict = group_by_label(dataset)
 
 	train_data = []
 	train_labels = []
@@ -188,7 +219,7 @@ def balanced_k_fold[T: IndexDataset](
 
 	dataset_type = type(dataset)
 
-	label_dict = split_by_label(dataset)
+	label_dict = group_by_label(dataset)
 
 	for _, i in label_dict.items():
 		if len(i) < k:
@@ -230,7 +261,7 @@ def k_fold[T: IndexDataset](
 
 def trunc_max_class[T: IndexDataset](dataset: T) -> T:
 	dataset_type = type(dataset)
-	label_dict = split_by_label(dataset)
+	label_dict = group_by_label(dataset)
 	minimum_size = min(len(i) for _, i in label_dict.items())
 	rng = _get_rng(None)
 

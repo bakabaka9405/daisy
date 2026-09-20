@@ -12,12 +12,21 @@ created_at = "2026-01-18"
 commit = "auto"  # 运行时自动记录 git commit hash
 
 [dataset]
+type = "single"
+
+[dataset.source]
 type = "sheet"  # "sheet" 或 "folder"
 root = "C:/Resources/Datasets/FFHQ数据集标注"
-sheet = "C:/Resources/Datasets/FFHQ数据集标注.xlsx"
-column = 1
-label_offset = -1
+path = "C:/Resources/Datasets/FFHQ数据集标注.xlsx"
 have_header = true
+
+[dataset.labels]
+mode = "single_label"
+
+[dataset.labels.target]
+column = 1
+num_classes = 3
+offset = -1
 
 [dataset.split]
 method = "ratio"  # "ratio" 或 "sheet"
@@ -26,7 +35,6 @@ val_ratio = 0.1
 [model]
 name = "resnet34"
 pretrained = true
-num_classes = 3
 # checkpoint = "path/to/checkpoint.pth"  # 可选：加载预训练权重
 
 [training]

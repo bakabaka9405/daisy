@@ -81,7 +81,13 @@ save_path = "outputs/{task_id}"
 - 输出模型模式：
   - `classification` 采用 `BaseOutputConfig`，包含 `save_path`、`keep_count`、`save_best` 与 `log`；
   - `mae_pretrain` 采用 `LogOutputConfig`，包含 `save_path` 与 `log`；
-- 预训练数据集模式：`MAEDatasetConfig` 面向目录存储结构，直接指定 `root` 与 `extensions`。
+- 数据集配置通过判别字段选择具体结构：
+  - `dataset.type = 'single'`：在 `dataset.source` 配置来源，在 `dataset.split` 配置 `none`、`ratio` 或 `column` 划分；
+  - `dataset.type = 'sources'`：在 `dataset.sources.train/val/test` 分别配置来源，其中 `train` 必填；
+  - 来源以 `type = 'folder'` 或 `'sheet'` 区分；表格来源的 `path` 必填，`root` 为单个目录；
+  - `dataset.labels.mode = 'self_supervised'` 不配置标签；`'single_label'` 使用 `dataset.labels.target`；`'multi_task'` 使用 `dataset.labels.targets.<任务名>`；
+  - `classification` 要求单标签，`mae_pretrain` 要求无标签，后者默认不划分数据；
+  - `sample_ratio` 仅作用于训练集，采样 seed 优先级为 `sample_seed`、比例划分的 `split.seed`、调用方 seed。各划分的文件互斥检查在采样前执行。
 
 ### 4.2 配置序列化与示例生成
 

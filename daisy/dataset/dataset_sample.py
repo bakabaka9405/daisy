@@ -6,6 +6,16 @@ def _get_rng(seed: int | None = None):
 	return numpy.random.default_rng(seed)
 
 
+def random_subsample[T: IndexDataset](dataset: T, ratio: float, seed: int | None = None) -> T:
+	"""按比例随机抽取数据集子集"""
+	if ratio >= 1.0 or len(dataset) == 0:
+		return dataset
+	k = max(1, round(len(dataset) * ratio))
+	rng = _get_rng(seed)
+	selected = sorted(rng.choice(len(dataset), size=k, replace=False).tolist())
+	return dataset.subset(selected)
+
+
 def balanced_sample[T: IndexDataset](
 	dataset: T,
 	expected_size: int,

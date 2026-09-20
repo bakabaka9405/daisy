@@ -1,13 +1,13 @@
 """分类任务配置"""
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 import tyro.conf
 
 from ...base import BaseConfig, BaseOutputConfig, BaseTaskConfig
-from ...shared import DatasetConfig
+from ...shared import DatasetConfig, SingleLabelConfig, SingleSourceDatasetConfig
 
 
 class ModelConfig(BaseConfig):
@@ -15,7 +15,6 @@ class ModelConfig(BaseConfig):
 
 	name: str = 'resnet34'
 	pretrained: bool = True
-	num_classes: int = 2
 	# 可选：加载预训练权重
 	checkpoint: Path | None = None
 
@@ -54,6 +53,12 @@ class ClassificationConfig(BaseTaskConfig):
 
 	task_type: Annotated[Literal['classification'], tyro.conf.Suppress] = 'classification'  # type: ignore[assignment]
 	output: BaseOutputConfig = Field(default_factory=BaseOutputConfig)
-	dataset: DatasetConfig = Field(default_factory=DatasetConfig)
+	dataset: DatasetConfig = Field(default_factory=SingleSourceDatasetConfig)
 	model: ModelConfig = Field(default_factory=ModelConfig)
 	training: TrainingConfig = Field(default_factory=TrainingConfig)
+
+	@model_validator(mode='after')
+	def _validate_classification_dataset(self) -> Self:
+		if not isinstance(self.dataset.labels, SingleLabelConfig):
+			raise ValueError("Classification task requires dataset.labels with mode='single_label'")
+		return self

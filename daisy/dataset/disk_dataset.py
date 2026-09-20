@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
 from typing import Literal
@@ -63,8 +63,38 @@ class DiskDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 		sub_labels = None if self.labels is None else [self.labels[i] for i in indices]
 		return DiskDataset(sub_file_paths, sub_labels, self.transform, backend=self.backend)
 
+	@classmethod
+	def concat(cls, datasets: Sequence['DiskDataset[ImageT, LabelT]']) -> 'DiskDataset[ImageT, LabelT]':
+		"""拼接多个 DiskDataset 实例为一个新的 DiskDataset"""
+		if not datasets:
+			raise ValueError('Cannot concat empty dataset sequence')
+		if len(datasets) == 1:
+			return datasets[0]
 
-def load_files_from_folder(root: Path | str, extensions: tuple[str, ...] | None = None) -> list[Path]:
+		first = datasets[0]
+		has_labels = first.labels is not None
+		all_paths: list[Path] = []
+		all_labels: list[LabelT] = []
+
+		for ds in datasets:
+			if ds.backend != first.backend:
+				raise ValueError(f'Cannot concat datasets with different backends: {ds.backend} != {first.backend}')
+			if (ds.labels is not None) != has_labels:
+				raise ValueError('Cannot concat labeled datasets with unlabeled datasets')
+			all_paths.extend(ds.file_paths)
+			if has_labels:
+				assert ds.labels is not None
+				all_labels.extend(ds.labels)
+
+		return cls(
+			all_paths,
+			all_labels if has_labels else None,
+			first.transform,
+			backend=first.backend,
+		)
+
+
+def load_files_from_folder(root: Path | str, extensions: Sequence[str] | tuple[str, ...] | None = None) -> list[Path]:
 	"""从文件夹递归加载所有图像文件
 
 	Args:

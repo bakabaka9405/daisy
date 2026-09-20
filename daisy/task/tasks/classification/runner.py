@@ -8,29 +8,28 @@ import torch
 
 from daisy.classification import prepare_classification_training
 from daisy.method.classification import ClassificationMethod
+from daisy.task.data import build_datasets
 from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, EpochPrint, Trainer
-from ...data import build_train_val_selection
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
-from ...shared import get_classification_transform
+from ...shared import SingleLabelConfig, get_classification_transform
 from .config import ClassificationConfig
 
 
 def run(config: ClassificationConfig, device: torch.device) -> Path:
 	"""执行分类训练任务"""
+	# 初始化运行环境
 	training_cfg = config.training
 	run_context = prepare_task_run(config, device, seed=training_cfg.seed)
 	output_path = run_context.output_path
 
-	# 加载数据集
+	# 加载数据集并校验划分
 	print('\nLoading dataset...')
 	dataset_cfg = config.dataset
-	split_selection = build_train_val_selection(
-		dataset_cfg,
-		default_seed=training_cfg.seed,
-		context='classification splits',
-	)
-	print(f'Total samples: {split_selection.source_count}')
-	train_dataset, val_dataset = split_selection.to_datasets()
+	datasets = build_datasets(dataset_cfg, seed=training_cfg.seed)
+	if 'train' not in datasets or 'val' not in datasets:
+		raise ValueError("Classification requires 'train' and 'val' dataset splits")
+	train_dataset = datasets['train']
+	val_dataset = datasets['val']
 	save_run_snapshot(
 		output_path,
 		config,
@@ -40,13 +39,18 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 	print(f'Train samples: {len(train_dataset)}')
 	print(f'Val samples: {len(val_dataset)}')
 
+	# 从目标配置中提取分类类别数作为单一来源
+	if not isinstance(dataset_cfg.labels, SingleLabelConfig):
+		raise ValueError("Classification task requires dataset.labels with mode='single_label'")
+	num_classes = dataset_cfg.labels.target.num_classes
+
 	# 创建模型
 	print('\nCreating model...')
 	model_cfg = config.model
 	model = create_model(
 		model_cfg.name,
 		pretrained=model_cfg.pretrained,
-		num_classes=model_cfg.num_classes,
+		num_classes=num_classes,
 	)
 
 	# 加载预训练权重
@@ -66,7 +70,7 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 	# 实例化分类方法并作为核心插件装配训练器
 	method = ClassificationMethod(
 		model,
-		num_classes=model_cfg.num_classes,
+		num_classes=num_classes,
 		lr=training_cfg.lr,
 		weight_decay=training_cfg.weight_decay,
 		smoothing=training_cfg.smoothing,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import override
 
 import torch
@@ -42,10 +42,14 @@ class MultiHeadClassificationMethod(Method[MultiHeadModel]):
 			raise TypeError(f'Expected MultiHeadModel, got {type(backbone).__name__}')
 		return backbone
 
-	def process(self, batch: tuple[Tensor, Sequence[Tensor]]) -> torch.Tensor:
-		"""执行单批计算并按任务头平均损失。"""
+	def process(self, batch: tuple[Tensor, dict[str, Tensor]]) -> torch.Tensor:
+		"""执行单批计算并按任务头名称计算平均损失。"""
 		images, targets = batch
-		logits_list = self.model(images)
-		losses = [self.criterion(logits, target) for logits, target in zip(logits_list, targets, strict=True)]
+		logits_dict = self.model(images)
+		if targets.keys() != logits_dict.keys():
+			raise ValueError(
+				f'Target task keys {set(targets.keys())} do not match model output task keys {set(logits_dict.keys())}'
+			)
 
+		losses = [self.criterion(logits_dict[task_name], targets[task_name]) for task_name in logits_dict]
 		return torch.stack(losses).mean()

@@ -1,22 +1,19 @@
 """MAE 预训练任务配置"""
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 import tyro.conf
 
 from ...base import BaseConfig, BaseTaskConfig
-from ...shared import LogOutputConfig
-
-
-class MAEDatasetConfig(BaseConfig):
-	"""MAE 数据集配置"""
-
-	root: str = ''
-	extensions: list[str] = Field(default_factory=lambda: ['.jpg', '.jpeg', '.png', '.bmp', '.webp'])
-	sample_ratio: float = Field(default=1.0, gt=0.0, le=1.0)
-	sample_seed: int | None = None
+from ...shared import (
+	DatasetConfig,
+	LogOutputConfig,
+	NoSplitConfig,
+	SingleSourceDatasetConfig,
+	UnlabeledConfig,
+)
 
 
 class MAEModelConfig(BaseConfig):
@@ -60,11 +57,24 @@ class MAETrainingConfig(BaseConfig):
 	transform: MAETransformConfig = Field(default_factory=MAETransformConfig)
 
 
+def _default_mae_dataset() -> SingleSourceDatasetConfig:
+	return SingleSourceDatasetConfig(
+		labels=UnlabeledConfig(),
+		split=NoSplitConfig(),
+	)
+
+
 class MAEPretrainConfig(BaseTaskConfig):
 	"""MAE 预训练任务配置"""
 
 	task_type: Annotated[Literal['mae_pretrain'], tyro.conf.Suppress] = 'mae_pretrain'  # type: ignore[assignment]
 	output: LogOutputConfig = Field(default_factory=LogOutputConfig)
-	dataset: MAEDatasetConfig = Field(default_factory=MAEDatasetConfig)
+	dataset: DatasetConfig = Field(default_factory=_default_mae_dataset)
 	model: MAEModelConfig = Field(default_factory=MAEModelConfig)
 	training: MAETrainingConfig = Field(default_factory=MAETrainingConfig)
+
+	@model_validator(mode='after')
+	def _validate_mae_dataset(self) -> Self:
+		if not isinstance(self.dataset.labels, UnlabeledConfig):
+			raise ValueError("MAE pretrain task requires dataset.labels with mode='self_supervised'")
+		return self

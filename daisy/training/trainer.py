@@ -9,6 +9,7 @@ from daisy.typing import GenericDataLoader as DataLoader
 from daisy.util.data import Prefetcher
 
 from daisy.training.state import TrainState
+from torch.utils._pytree import tree_map
 
 
 SideEffectFn = Callable[[TrainState], None]
@@ -197,8 +198,8 @@ class Trainer:
 		return (total_loss / max(num_batches, 1)).item()
 
 	@torch.no_grad()
-	def inference(self, data_loader: DataLoader, predict_fn: Callable[[Any], torch.Tensor]) -> torch.Tensor:
-		"""按 batch 顺序拼接预测结果，返回 CPU 张量。"""
+	def inference[T](self, data_loader: DataLoader, predict_fn: Callable[[Any], T]) -> T:
+		"""按 batch 顺序拼接预测结果，返回保持 pytree 结构的 CPU 张量。"""
 		if self.model is None:
 			raise RuntimeError('inference 需要 model。')
 
@@ -208,12 +209,15 @@ class Trainer:
 		self.model.eval()
 
 		try:
-			scores: list[torch.Tensor] = []
+			batch_outputs: list[T] = []
 			for batch in loader:
 				with torch.autocast(device_type=self.device.type, enabled=self.use_amp):
 					outputs = predict_fn(batch)
-				scores.append(outputs.cpu())
+				batch_outputs.append(tree_map(lambda t: t.cpu(), outputs))
 
-			return torch.cat(scores) if scores else torch.empty(0)
+			if not batch_outputs:
+				raise ValueError('Data loader yielded no batches for inference.')
+
+			return tree_map(lambda *leaves: torch.cat(leaves, dim=0), *batch_outputs)
 		finally:
 			self.model.train(was_training)

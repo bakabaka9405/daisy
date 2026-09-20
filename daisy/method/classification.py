@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, override
+from typing import override
 
 import torch
 import torch.nn as nn
@@ -66,7 +66,7 @@ class ClassificationMethod(Method[nn.Module]):
 		"""直接采用传入的完整分类模型。"""
 		return backbone
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		if self.mixup_fn is not None:
 			images, targets = self.mixup_fn(images, targets)

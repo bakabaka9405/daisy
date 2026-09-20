@@ -122,7 +122,7 @@ class ClassificationBaseMethod(OrdinalBaseMethod[ClassificationModel]):
 class CEMethod(ClassificationBaseMethod):
 	"""标准交叉熵分类方法。"""
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -132,7 +132,7 @@ class CEMethod(ClassificationBaseMethod):
 class LabelSmoothingCEMethod(ClassificationBaseMethod):
 	"""标签平滑交叉熵分类方法。"""
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -179,7 +179,7 @@ class SORDMethod(ClassificationBaseMethod):
 		)
 		self.temperature: float = float(temperature)
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		logits = self.model.fc(feat)
@@ -189,7 +189,7 @@ class SORDMethod(ClassificationBaseMethod):
 class RPSMethod(ClassificationBaseMethod):
 	"""连续概率排位分数（Ranked Probability Score）方法。"""
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -203,7 +203,7 @@ class RPSMethod(ClassificationBaseMethod):
 class WassersteinMethod(ClassificationBaseMethod):
 	"""Wasserstein 距离有序方法。"""
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -217,7 +217,7 @@ class WassersteinMethod(ClassificationBaseMethod):
 class DistanceCEMethod(ClassificationBaseMethod):
 	"""距离加权交叉熵有序方法。"""
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -232,7 +232,7 @@ class DistanceCEMethod(ClassificationBaseMethod):
 class UnimodalMethod(ClassificationBaseMethod):
 	"""单峰正则化有序方法。"""
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -263,7 +263,7 @@ class MSERankBaseMethod(OrdinalBaseMethod[ScalarModel]):
 class MSERankNetMethod(MSERankBaseMethod):
 	"""MSE 与批次内对排序 Logistic 损失混合方法。"""
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -275,7 +275,7 @@ class MSERankNetMethod(MSERankBaseMethod):
 class MSERankHingeMethod(MSERankBaseMethod):
 	"""MSE 与批次内对排序 Hinge 损失混合方法。"""
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -296,7 +296,7 @@ class CLMMethod(OrdinalBaseMethod[CLMModel]):
 		score = self.model.fc(feat).squeeze(-1)
 		return _clm_log_probabilities(self.model, score).argmax(dim=1)
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -315,7 +315,7 @@ class CORALMethod(OrdinalBaseMethod[CORALModel]):
 	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
 		return ((self.model.fc(feat) + self.model.coral_bias) > 0).sum(dim=1).long()
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -335,7 +335,7 @@ class CORNMethod(OrdinalBaseMethod[CORNModel]):
 		cum = torch.sigmoid(self.model.fc(feat)).cumprod(dim=1)
 		return (cum > 0.5).sum(dim=1).long()
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)
@@ -358,7 +358,7 @@ class OrdinalContrastiveMethod(OrdinalBaseMethod[ContrastiveClassificationModel]
 	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
 		return self.model.fc(feat).argmax(dim=1)
 
-	def process(self, batch: Any) -> torch.Tensor:
+	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
 		targets = targets.to(feat.device)

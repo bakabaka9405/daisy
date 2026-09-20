@@ -21,7 +21,26 @@ from .base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
 # 主要接口
 from .runner import load_config, run_task
 from .serialization import build_example_config, export_example_config, save_config
-from .shared import DatasetConfig, DatasetSplitConfig, InferenceModelConfig, InferenceRuntimeConfig, LogOutputConfig
+from .shared import (
+	ColumnSplitConfig,
+	DatasetConfig,
+	DatasetTargetConfig,
+	FolderSourceConfig,
+	InferenceModelConfig,
+	InferenceRuntimeConfig,
+	LabelConfig,
+	LogOutputConfig,
+	MultiSourceDatasetConfig,
+	MultiTaskConfig,
+	NoSplitConfig,
+	RatioSplitConfig,
+	SheetSourceConfig,
+	SingleLabelConfig,
+	SingleSourceDatasetConfig,
+	SourceConfig,
+	SplitConfig,
+	UnlabeledConfig,
+)
 from .tasks import TASKS, get_task, register_task
 from .tasks.classification.config import (
 	ClassificationConfig,
@@ -47,11 +66,24 @@ __all__ = [
 	'export_example_config',
 	'save_config',
 	# 共享配置
+	'ColumnSplitConfig',
 	'DatasetConfig',
-	'DatasetSplitConfig',
+	'DatasetTargetConfig',
+	'FolderSourceConfig',
 	'InferenceModelConfig',
 	'InferenceRuntimeConfig',
+	'LabelConfig',
 	'LogOutputConfig',
+	'MultiSourceDatasetConfig',
+	'MultiTaskConfig',
+	'NoSplitConfig',
+	'RatioSplitConfig',
+	'SheetSourceConfig',
+	'SingleLabelConfig',
+	'SingleSourceDatasetConfig',
+	'SourceConfig',
+	'SplitConfig',
+	'UnlabeledConfig',
 	# 任务配置
 	'ClassificationConfig',
 	'MAEPretrainConfig',

@@ -6,7 +6,6 @@ from torch.utils.data import Dataset
 from abc import abstractmethod
 from typing import Any, Self
 
-
 class IndexDataset[ImageT, LabelT](Dataset[ImageT | tuple[ImageT, LabelT]]):
 	"""索引数据集基类：图像样本可选携带标签。"""
 

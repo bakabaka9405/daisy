@@ -2,13 +2,13 @@
 
 from collections.abc import Callable
 from pathlib import Path
-import random
 import time
 
 import torch
 from torchvision.transforms import v2 as transforms, InterpolationMode
 
-from daisy.dataset import DiskDataset, load_files_from_folder
+from daisy.dataset.disk_dataset import DiskDataset
+from daisy.task.data import build_datasets
 from daisy.method.mae import MAEPretrainMethod
 from daisy.model.mae import create_mae_model, load_timm_pretrained_encoder_weights
 from daisy.training import CosineAnnealingLR, CSVLog, EpochPrint, Timer, Trainer, TrainState
@@ -57,26 +57,14 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 	lr = training_cfg.blr * eff_batch_size / 256.0
 	print(f'Base LR: {training_cfg.blr:.2e}, Effective batch size: {eff_batch_size}, Actual LR: {lr:.2e}')
 
-	# 加载数据集
+	# 加载自监督数据集
 	print('\nLoading dataset...')
 	dataset_cfg = config.dataset
-
-	# 加载所有图像文件（支持多个文件夹，用分号分割）
-	files: list[Path] = []
-	roots = [r.strip() for r in dataset_cfg.root.split(';') if r.strip()]
-	for root in roots:
-		root_files = load_files_from_folder(
-			Path(root),
-			extensions=tuple(dataset_cfg.extensions),
-		)
-		print(f'Loaded {len(root_files)} samples from {root}')
-		files.extend(root_files)
-
-	if dataset_cfg.sample_ratio < 1.0 and files:
-		sample_seed = dataset_cfg.sample_seed if dataset_cfg.sample_seed is not None else training_cfg.seed
-		k = max(1, round(len(files) * dataset_cfg.sample_ratio))
-		files = random.Random(sample_seed).sample(files, k)
-	print(f'Total samples: {len(files)}')
+	datasets = build_datasets(dataset_cfg, seed=training_cfg.seed)
+	if 'train' not in datasets:
+		raise ValueError("MAE pretrain requires 'train' dataset split")
+	dataset = datasets['train']
+	print(f'Total samples: {len(dataset)}')
 
 	# 保存统一的运行快照信息
 	save_run_snapshot(
@@ -86,7 +74,7 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 		extra={'resolved_lr': lr},
 	)
 
-	# 获取 transform 并构建数据集（无标签，LabelT=None）
+	# 获取 transform 并应用至数据集
 	transform_cfg = training_cfg.transform
 	transform = get_mae_transform(
 		input_size=config.model.img_size,
@@ -96,12 +84,17 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 		ratio_max=transform_cfg.ratio_max,
 		hflip=transform_cfg.hflip,
 	)
-	dataset: DiskDataset[LazyNormalizedTensor, None] = DiskDataset(files, None, transform)
+	transformed_dataset = DiskDataset(
+		dataset.file_paths,
+		None,
+		transform,
+		backend=dataset.backend,
+	)
 
 	# 构建 DataLoader
 	print('Loading dataloader...')
 	loader = make_dataloader(
-		dataset,
+		transformed_dataset,
 		batch_size=training_cfg.batch_size,
 		device=device,
 		shuffle=True,

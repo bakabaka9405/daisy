@@ -6,8 +6,18 @@ title = "MAE Pretraining Example"
 description = "使用 MAE 进行自监督预训练"
 
 [dataset]
-root = "/path/to/images"  # 修改为实际数据路径
+type = "single"
+
+[dataset.source]
+type = "folder"
+root = ["/path/to/images"]  # 修改为实际数据路径
 extensions = [".jpg", ".jpeg", ".png"]
+
+[dataset.labels]
+mode = "self_supervised"
+
+[dataset.split]
+method = "none"
 
 [model]
 name = "mae_vit_base_patch16"  # 可选: mae_vit_base_patch16, mae_vit_large_patch16, mae_vit_huge_patch14
@@ -31,7 +41,6 @@ save_freq = 20
 # resume = "/path/to/checkpoint.pth"  # 可选：恢复训练的 checkpoint 路径
 
 [training.transform]
-input_size = 224
 scale_min = 0.2
 scale_max = 1.0
 hflip = true

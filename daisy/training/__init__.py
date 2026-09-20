@@ -10,8 +10,7 @@
         return F.cross_entropy(model(images), targets)
 
     def predict(batch):
-        images, _ = batch
-        return model(images)
+        return model(batch[0])
 
     trainer = Trainer(model, optimizer, process, device)
     state = trainer.fit(train_loader, epochs=50)
