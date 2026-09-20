@@ -147,47 +147,12 @@ class SingleSourceDatasetConfig(BaseDatasetConfig):
 	source: SourceConfig = Field(default_factory=FolderSourceConfig)
 	split: SplitConfig = Field(default_factory=RatioSplitConfig)
 
-	@model_validator(mode='after')
-	def _validate_single_source_dataset(self) -> Self:
-		if isinstance(self.split, RatioSplitConfig) and self.split.stratify is not None:
-			if isinstance(self.labels, UnlabeledConfig):
-				raise ValueError('Cannot stratify self_supervised dataset')
-			if isinstance(self.labels, SingleLabelConfig) and self.split.stratify != 'label':
-				raise ValueError(
-					f"Stratify target {self.split.stratify!r} not found for single_label dataset (expected 'label')"
-				)
-			if isinstance(self.labels, MultiTaskConfig) and self.split.stratify not in self.labels.targets:
-				raise ValueError(
-					f"split.stratify {self.split.stratify!r} not found in dataset targets: {list(self.labels.targets.keys())}"
-				)
-
-		if isinstance(self.split, ColumnSplitConfig) and self.split.source is None and self.source.type != 'sheet':
-			raise ValueError("Column split without split.source requires source.type='sheet'")
-
-		if self.source.type == 'folder' and not isinstance(self.labels, UnlabeledConfig):
-			if isinstance(self.labels, MultiTaskConfig) and len(self.labels.targets) > 1:
-				raise ValueError('Folder source only supports at most one target for labeled data')
-
-		return self
-
 
 class MultiSourceDatasetConfig(BaseDatasetConfig):
 	"""多来源划分数据集配置"""
 
 	type: Literal['sources'] = 'sources'
 	sources: dict[Literal['train', 'val', 'test'], SourceConfig] = Field(default_factory=dict)
-
-	@model_validator(mode='after')
-	def _validate_multi_source_dataset(self) -> Self:
-		if 'train' not in self.sources:
-			raise ValueError("MultiSourceDatasetConfig requires 'train' in sources")
-
-		for s_name, s_cfg in self.sources.items():
-			if s_cfg.type == 'folder' and not isinstance(self.labels, UnlabeledConfig):
-				if isinstance(self.labels, MultiTaskConfig) and len(self.labels.targets) > 1:
-					raise ValueError(f'Folder source in {s_name!r} only supports at most one target')
-
-		return self
 
 
 DatasetConfig = Annotated[

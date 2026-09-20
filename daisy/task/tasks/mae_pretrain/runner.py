@@ -8,7 +8,7 @@ import torch
 from torchvision.transforms import v2 as transforms, InterpolationMode
 
 from daisy.dataset.disk_dataset import DiskDataset
-from daisy.task.data import build_datasets
+from daisy.task.data import interpret, parse_unlabeled_dataset
 from daisy.method.mae import MAEPretrainMethod
 from daisy.model.mae import create_mae_model, load_timm_pretrained_encoder_weights
 from daisy.training import CosineAnnealingLR, CSVLog, EpochPrint, Timer, Trainer, TrainState
@@ -60,7 +60,8 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 	# 加载自监督数据集
 	print('\nLoading dataset...')
 	dataset_cfg = config.dataset
-	datasets = build_datasets(dataset_cfg, seed=training_cfg.seed)
+	plan = parse_unlabeled_dataset(dataset_cfg)
+	datasets = interpret(plan, seed=training_cfg.seed)
 	if 'train' not in datasets:
 		raise ValueError("MAE pretrain requires 'train' dataset split")
 	dataset = datasets['train']

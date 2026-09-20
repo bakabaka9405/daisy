@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 import pandas as pd
 
 from daisy.dataset.disk_dataset import load_files_from_folder
 
 
-class LabelSpec(Protocol):
+@dataclass(slots=True, frozen=True)
+class LabelSpec:
 	"""标签解析所需的描述约束"""
 
 	column: int | str
@@ -48,14 +50,14 @@ def get_column_series(df: pd.DataFrame, col: int | str) -> pd.Series:
 	if col in df.columns:
 		res = df[col]
 		if isinstance(res, pd.DataFrame):
-			return res.iloc[:, 0]
+			return res.iloc[:, 0]  # type: ignore
 		return res
 	if isinstance(col, int):
 		return df.iloc[:, col]
 	if isinstance(col, str) and col.isdigit() and int(col) in df.columns:
 		res = df[int(col)]
 		if isinstance(res, pd.DataFrame):
-			return res.iloc[:, 0]
+			return res.iloc[:, 0]  # type: ignore
 		return res
 	raise KeyError(f'Column {col!r} not found in sheet columns: {list(df.columns)}')
 

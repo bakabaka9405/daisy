@@ -1,9 +1,9 @@
 """MAE 预训练任务配置"""
 
 from pathlib import Path
-from typing import Annotated, Literal, Self
+from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field
 import tyro.conf
 
 from ...base import BaseConfig, BaseTaskConfig
@@ -72,9 +72,3 @@ class MAEPretrainConfig(BaseTaskConfig):
 	dataset: DatasetConfig = Field(default_factory=_default_mae_dataset)
 	model: MAEModelConfig = Field(default_factory=MAEModelConfig)
 	training: MAETrainingConfig = Field(default_factory=MAETrainingConfig)
-
-	@model_validator(mode='after')
-	def _validate_mae_dataset(self) -> Self:
-		if not isinstance(self.dataset.labels, UnlabeledConfig):
-			raise ValueError("MAE pretrain task requires dataset.labels with mode='self_supervised'")
-		return self
