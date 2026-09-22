@@ -180,6 +180,7 @@ class MaskedAutoencoderViT(nn.Module):
 		imgs = x.reshape(shape=(x.shape[0], c, grid_h * p, grid_w * p))
 		return imgs
 
+	@torch.compiler.disable
 	def random_masking(self, x: torch.Tensor, mask_ratio: float):
 		"""
 		对每个样本进行随机 masking
@@ -223,7 +224,7 @@ class MaskedAutoencoderViT(nn.Module):
 		x = x + self.pos_embed[:, 1:, :]
 
 		# masking: length -> length * mask_ratio
-		x, mask, ids_restore = self.random_masking(x, mask_ratio)
+		x, mask, ids_restore = self.random_masking(x, mask_ratio) # type: ignore
 
 		# append cls token
 		cls_token = self.cls_token + self.pos_embed[:, :1, :]

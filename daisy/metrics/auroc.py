@@ -64,7 +64,8 @@ def _compute_macro_curve(ovr_curves: dict[int, RocCurve]) -> RocCurve:
 	for curve in ovr_curves.values():
 		mean_tpr += np.interp(all_fpr, curve.fpr, curve.tpr)
 	mean_tpr /= len(ovr_curves)
-	return RocCurve(fpr=all_fpr, tpr=mean_tpr, auc=cast(np.float64, np.trapezoid(mean_tpr, all_fpr)))
+	macro_auc = cast(np.float64, np.mean([curve.auc for curve in ovr_curves.values()]))
+	return RocCurve(fpr=all_fpr, tpr=mean_tpr, auc=macro_auc)
 
 
 def _compute_ovo_curves(y_true: VectorI64, y_score: MatrixF64) -> dict[tuple[int, int], RocCurve]:

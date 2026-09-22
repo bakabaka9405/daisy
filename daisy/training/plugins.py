@@ -213,7 +213,7 @@ class EpochPrint(Plugin):
 		for key in self.watch:
 			if key in record:
 				val = record[key]
-				parts.append(f'{key}={val}')
+				parts.append(f'{key}={val:.4f}' if isinstance(val, float) else f'{key}={val}')
 		print('  '.join(parts))
 
 

@@ -67,14 +67,6 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 	dataset = datasets['train']
 	print(f'Total samples: {len(dataset)}')
 
-	# 保存统一的运行快照信息
-	save_run_snapshot(
-		output_path,
-		config,
-		run_context,
-		extra={'resolved_lr': lr},
-	)
-
 	# 获取 transform 并应用至数据集
 	transform_cfg = training_cfg.transform
 	transform = get_mae_transform(
@@ -84,6 +76,10 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 		ratio_min=transform_cfg.ratio_min,
 		ratio_max=transform_cfg.ratio_max,
 		hflip=transform_cfg.hflip,
+	)
+	save_run_snapshot(
+		output_path, config, run_context,
+		extra={'resolved_lr': lr, 'train_transform': repr(transform)},
 	)
 	transformed_dataset = DiskDataset(
 		dataset.file_paths,
@@ -119,7 +115,9 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 
 	print(f'Model: {model_cfg.name}')
 
-	model.to(device).compile(backend='inductor')
+	model = model.to(device)
+	if training_cfg.compile_backend is not None:
+		model.compile(backend=training_cfg.compile_backend)
 
 	# 构建 MAE 方法并作为核心插件装配训练器
 	method = MAEPretrainMethod(
@@ -150,7 +148,7 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 
 	if config.output.log:
 		log_file = output_path / 'logs' / f'mae_log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
-		trainer.use(CSVLog(log_path=log_file, watch=['optim/lr', 'train/loss']))
+		trainer.use(CSVLog(log_path=log_file, watch=['optim/lr', 'train/loss', 'time/epoch']))
 
 	# 注册 epoch 结束回调：完整检查点保存
 	save_freq = training_cfg.save_freq
@@ -164,6 +162,7 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 			'optimizer': optimizer.state_dict(),
 			'scaler': trainer.scaler.state_dict(),
 			'epoch': state.epoch,
+			'config': config.model_dump(mode='json'),
 		}
 		if (save_freq > 0 and epoch % save_freq == 0) or epoch == epochs:
 			torch.save(checkpoint, output_path / f'checkpoint_{epoch:04d}.pth')

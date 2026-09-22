@@ -223,7 +223,12 @@ def get_rectangle_train_transform_slight():
 	)
 
 
-def get_rectangle_train_transform(zoom_out_max: float = 4.0):
+def get_rectangle_train_transform(
+	zoom_out_max: float = 4.0,
+	*,
+	mean: Sequence[float] = (0.485, 0.456, 0.406),
+	std: Sequence[float] = (0.229, 0.224, 0.225),
+):
 	return transforms.Compose(
 		[
 			transforms.RandomZoomOut(side_range=(1.0, zoom_out_max)),
@@ -231,16 +236,20 @@ def get_rectangle_train_transform(zoom_out_max: float = 4.0):
 			transforms.RandomResizedCrop((112, 224), scale=(0.9, 1.0), ratio=(1.9, 2.1)),
 			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
 			transforms.RandomHorizontalFlip(),
-			LazyNormalization([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+			LazyNormalization(mean, std),
 		]
 	)
 
 
-def get_rectangle_val_transform():
+def get_rectangle_val_transform(
+	*,
+	mean: Sequence[float] = (0.485, 0.456, 0.406),
+	std: Sequence[float] = (0.229, 0.224, 0.225),
+):
 	return transforms.Compose(
 		[
 			transforms.Resize((112, 224)),
-			LazyNormalization([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+			LazyNormalization(mean, std),
 		]
 	)
 

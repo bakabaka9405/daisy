@@ -54,6 +54,7 @@ class MAETrainingConfig(BaseConfig):
 	num_workers: int = 4
 	save_freq: int = 20  # 保存频率
 	resume: Path | None = None  # 恢复训练的 checkpoint 路径
+	compile_backend: str | None = 'inductor'  # 编译后端，可选 'inductor'、'eager' 或 None
 	transform: MAETransformConfig = Field(default_factory=MAETransformConfig)
 
 
