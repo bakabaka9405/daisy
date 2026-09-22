@@ -24,10 +24,8 @@ from ..shared.dataset_config import (
 from .model import (
 	ColumnSplit,
 	DatasetPlan,
-	ExternalTable,
 	FolderReader,
 	LabelerTerm,
-	MainTable,
 	MultiLabels,
 	MultiSource,
 	MultiSourcePlan,
@@ -128,33 +126,26 @@ def parse_dataset_config(config: DatasetConfig) -> DatasetPlan[Any]:
 						stratify=config.split.stratify,
 					)
 				case ColumnSplitConfig():
-					if config.split.source is not None:
-						split_source = config.split.source
-						ext_table = ExternalTable(
-							path=split_source.path,
-							sheet_name=split_source.sheet_name,
-							have_header=split_source.have_header,
-							root=split_source.root,
-							image_column=split_source.image_column,
-						)
-						split = ColumnSplit(
-							column=config.split.column,
-							train=config.split.train,
-							val=config.split.val,
-							test=config.split.test,
-							table=ext_table,
-						)
-					else:
-						if not isinstance(reader, SheetReader):
-							raise ValueError("Column split without split.source requires source.type='sheet'")
-						main_table = MainTable(table=reader)
-						split = ColumnSplit(
-							column=config.split.column,
-							train=config.split.train,
-							val=config.split.val,
-							test=config.split.test,
-							table=main_table,
-						)
+					split_source = config.split.source
+					split_reader = SheetReader(
+						path=split_source.path,
+						sheet_name=split_source.sheet_name,
+						have_header=split_source.have_header,
+						root=split_source.root,
+						image_column=split_source.image_column,
+					)
+
+					partitions: list[tuple[str, str | int]] = [('train', config.split.train)]
+					if config.split.val is not None:
+						partitions.append(('val', config.split.val))
+					if config.split.test is not None:
+						partitions.append(('test', config.split.test))
+
+					split = ColumnSplit(
+						column=config.split.column,
+						partitions=tuple(partitions),
+						source=split_reader,
+					)
 				case _ as unreachable:
 					assert_never(unreachable)
 

@@ -118,11 +118,11 @@ class ColumnSplitConfig(BaseConfig):
 	"""按列划分配置"""
 
 	method: Literal['column'] = 'column'
+	source: SheetSourceConfig
 	column: int | str = 'split'
 	train: str | int = 'train'
 	val: str | int | None = 'val'
 	test: str | int | None = None
-	source: SheetSourceConfig | None = None
 
 
 SplitConfig = Annotated[

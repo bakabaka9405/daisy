@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import assert_never, cast
-import pandas as pd
 from torch import Tensor
 
 from daisy.dataset.dataset_sample import random_subsample
@@ -20,7 +19,6 @@ from daisy.feeder import (
 	UnlabeledFeeder,
 	read_sheet,
 )
-from .column_split import split_by_column
 from .model import (
 	ColumnSplit,
 	DatasetPlan,
@@ -38,6 +36,7 @@ from .model import (
 	SingleSourcePlan,
 	SplitTerm,
 )
+from .split_table import parse_column_split_indices
 
 
 def _identity_transform[T](x: T) -> T:
@@ -61,7 +60,7 @@ def _create_feeder[L](labeler: LabelerTerm[L]) -> Feeder[L]:
 def _read_source[L](
 	reader: ReaderTerm,
 	feeder: Feeder[L],
-) -> tuple[DiskDataset[Tensor, L], pd.DataFrame | None]:
+) -> DiskDataset[Tensor, L]:
 	"""读取单一数据源并构建 DiskDataset"""
 	match reader:
 		case FolderReader(roots=roots, extensions=extensions):
@@ -72,7 +71,7 @@ def _read_source[L](
 			dataset = DiskDataset.concat(datasets)
 			if not dataset.file_paths:
 				raise ValueError('Dataset source is empty')
-			return dataset, None
+			return dataset
 
 		case SheetReader(
 			path=path,
@@ -89,8 +88,7 @@ def _read_source[L](
 			files, labels = feeder.from_table(df, root, image_column)
 			if not files:
 				raise ValueError('Dataset source is empty')
-			dataset: DiskDataset[Tensor, L] = DiskDataset(files, labels, _identity_transform, backend='tensor')
-			return dataset, df
+			return DiskDataset(files, labels, _identity_transform, backend='tensor')
 
 		case _ as unreachable:
 			assert_never(unreachable)
@@ -102,7 +100,6 @@ def _split_single_dataset[L](
 	feeder: Feeder[L],
 	*,
 	caller_seed: int | None,
-	source_df: pd.DataFrame | None,
 ) -> dict[str, DiskDataset[Tensor, L]]:
 	"""对单一来源数据集执行划分代数项解释"""
 	match split:
@@ -130,12 +127,28 @@ def _split_single_dataset[L](
 				raise ValueError('Train or validation split is empty')
 			return {'train': train_ds, 'val': val_ds}
 
-		case ColumnSplit() as col_split:
-			return split_by_column(
-				dataset,
-				col_split,
-				source_df=source_df,
+		case ColumnSplit(column=column, partitions=partitions, source=split_source):
+			split_df = read_sheet(
+				split_source.path,
+				sheet_name=split_source.sheet_name,
+				have_header=split_source.have_header,
 			)
+			index_groups = parse_column_split_indices(
+				dataset.file_paths,
+				split_df,
+				root=split_source.root,
+				image_column=split_source.image_column,
+				assignment_column=column,
+				partition_values=[val for _, val in partitions],
+			)
+
+			splits: dict[str, DiskDataset[Tensor, L]] = {}
+			for (name, val), indices in zip(partitions, index_groups):
+				if not indices:
+					raise ValueError(f'Split {name!r} declared with value {val!r} is empty')
+				splits[name] = dataset.subset(indices)
+
+			return splits
 
 		case _ as unreachable:
 			assert_never(unreachable)
@@ -152,13 +165,12 @@ def interpret[L](
 	match plan:
 		case SingleSourcePlan(source=source, split=split):
 			feeder = _create_feeder(source.labeler)
-			dataset, source_df = _read_source(source.reader, feeder)
+			dataset = _read_source(source.reader, feeder)
 			splits = _split_single_dataset(
 				dataset,
 				split,
 				feeder,
 				caller_seed=seed,
-				source_df=source_df,
 			)
 
 		case MultiSourcePlan(sources=sources):
@@ -167,7 +179,7 @@ def interpret[L](
 			for name in ('train', 'val', 'test'):
 				source = getattr(sources, name)
 				if source is not None:
-					split_ds, _ = _read_source(source.reader, feeder)
+					split_ds = _read_source(source.reader, feeder)
 					splits[name] = split_ds
 
 		case _ as unreachable:

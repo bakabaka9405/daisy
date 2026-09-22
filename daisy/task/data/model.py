@@ -56,27 +56,6 @@ type ReaderTerm = FolderReader | SheetReader
 
 
 @dataclass(slots=True, frozen=True)
-class MainTable:
-	"""主数据表引用规范"""
-
-	table: SheetReader
-
-
-@dataclass(slots=True, frozen=True)
-class ExternalTable:
-	"""独立外部划分表规范"""
-
-	path: Path
-	sheet_name: int | str
-	have_header: bool
-	root: Path
-	image_column: int | str
-
-
-type TableRef = MainTable | ExternalTable
-
-
-@dataclass(slots=True, frozen=True)
 class NoSplit:
 	"""不划分规范"""
 
@@ -95,10 +74,8 @@ class ColumnSplit:
 	"""按数据表列划分规范"""
 
 	column: int | str
-	train: str | int
-	val: str | int | None
-	test: str | int | None
-	table: MainTable | ExternalTable
+	partitions: tuple[tuple[str, str | int], ...]
+	source: SheetReader
 
 
 type SplitTerm = NoSplit | RatioSplit | ColumnSplit

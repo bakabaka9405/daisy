@@ -2,16 +2,14 @@
 
 from daisy.feeder import LabelSpec
 from .builder import build_datasets
-from .column_split import split_by_column
 from .interpret import interpret
+from .split_table import parse_column_split_indices
 from .model import (
 	ColumnSplit,
 	DatasetPlan,
 	DatasetSplits,
-	ExternalTable,
 	FolderReader,
 	LabelerTerm,
-	MainTable,
 	MultiLabels,
 	MultiSource,
 	MultiSourcePlan,
@@ -37,11 +35,9 @@ __all__ = [
 	'ColumnSplit',
 	'DatasetPlan',
 	'DatasetSplits',
-	'ExternalTable',
 	'FolderReader',
 	'LabelSpec',
 	'LabelerTerm',
-	'MainTable',
 	'MultiLabels',
 	'MultiSource',
 	'MultiSourcePlan',
@@ -57,9 +53,9 @@ __all__ = [
 	'SplitTerm',
 	'build_datasets',
 	'interpret',
+	'parse_column_split_indices',
 	'parse_dataset_config',
 	'parse_single_label_dataset',
 	'parse_unlabeled_dataset',
 	'single_label_target',
-	'split_by_column',
 ]

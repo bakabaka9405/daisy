@@ -6,7 +6,6 @@ from ..util import (
 	shuffle_correlated_lists,
 )
 from collections.abc import Generator, Mapping
-from typing import Any
 
 
 def _get_rng(seed: int | None = None):
