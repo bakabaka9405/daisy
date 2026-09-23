@@ -1,9 +1,4 @@
-"""ViT token diagnostic 与 avg-pool Chefer attention visualization。
-
-官方部分使用 Chefer 的 ``R_A × target gradient`` 与无 row-normalization rollout；
-Daisy 新增 MeanPool relprop 与多 query ``uᵀ(J-I)`` readout。这是 attention
-visualization，不是 input attribution 或因果解释。
-"""
+"""ViT 的 token rollout 诊断与 avg-pool attention relevance 可视化。"""
 
 from __future__ import annotations
 
@@ -25,69 +20,38 @@ if TYPE_CHECKING:
 
 @contextmanager
 def _hook_attention_weights(model: VisionTransformer):
-	"""临时关闭 fused attention 并通过 attn_drop 的 forward hook 捕获注意力权重和梯度。
-
-	对所有 timm Attention 模块：
-	1. 设置 fused_attn = False，使 attention 走非 SDPA 路径（显式计算 attn 矩阵）
-	2. 在 attn_drop (nn.Dropout) 上注册 forward hook，捕获其输入（= softmax 后的注意力权重）
-	3. 在捕获的 attn tensor 上注册梯度 hook
-
-	Yields:
-		(all_attentions, all_gradients): 两个 list，分别存储各层的注意力权重和梯度。
-	"""
-	attn_modules: list[Attention] = []
-	for module in model.modules():
-		if isinstance(module, Attention):
-			attn_modules.append(module)
+	"""关闭 fused attention，以捕获 softmax 权重及其梯度，并在退出时恢复模型。"""
+	attn_modules = [module for module in model.modules() if isinstance(module, Attention)]
 
 	all_attentions: list[torch.Tensor] = []
 	all_gradients: list[torch.Tensor] = []
 
-	# 保存原始 fused_attn 值并关闭
-	orig_fused = {}
-	for mod in attn_modules:
-		orig_fused[id(mod)] = mod.fused_attn
-		mod.fused_attn = False  # type: ignore[misc]  # Final 仅 TorchScript 强制
-
-	# 在 attn_drop 上注册 forward hook
+	orig_fused = [(mod, mod.fused_attn) for mod in attn_modules]
 	handles = []
-	for mod in attn_modules:
 
-		def make_hook():
-			def hook_fn(_module, args, _output):
-				attn = args[0]  # attn_drop 的输入就是 softmax 后的 attention
-				all_attentions.append(attn)
-				attn.register_hook(lambda grad: all_gradients.append(grad))
-
-			return hook_fn
-
-		h = mod.attn_drop.register_forward_hook(make_hook(), with_kwargs=False)
-		handles.append(h)
+	def capture_attention(_module, args, _output):
+		attn = args[0]
+		all_attentions.append(attn)
+		attn.register_hook(lambda grad: all_gradients.append(grad))
 
 	try:
+		for mod in attn_modules:
+			mod.fused_attn = False  # type: ignore[misc]
+			handles.append(mod.attn_drop.register_forward_hook(capture_attention))
+
 		yield all_attentions, all_gradients
 	finally:
 		for h in handles:
 			h.remove()
-		for mod in attn_modules:
-			mod.fused_attn = orig_fused[id(mod)]  # type: ignore[misc]
+		for mod, fused_attn in orig_fused:
+			mod.fused_attn = fused_attn  # type: ignore[misc]
 
 
 def _compute_rollout(
 	attention_matrices: list[torch.Tensor],
 	start_layer: int = 0,
 ) -> torch.Tensor:
-	"""Attention Rollout 算法。
-
-	对每层注意力矩阵加 Identity（残差连接），行归一化，然后逐层矩阵乘法。
-
-	Args:
-		attention_matrices: 每层的注意力矩阵，shape (batch, num_tokens, num_tokens)
-		start_layer: 从哪一层开始 rollout
-
-	Returns:
-		rollout 矩阵，shape (batch, num_tokens, num_tokens)
-	"""
+	"""对带残差的 attention 逐层行归一化并累乘。"""
 	matrices = attention_matrices[start_layer:]
 	for i, matrix in enumerate(matrices):
 		eye = torch.eye(matrix.size(-1), device=matrix.device, dtype=matrix.dtype)
@@ -97,7 +61,7 @@ def _compute_rollout(
 
 	rollout = matrices[0]
 	for i in range(1, len(matrices)):
-		# 按层从后向前左乘，保持与 Transformer rollout 文献实现一致
+		# 后层左乘前层，保留沿模型前向路径的传播顺序。
 		rollout = torch.bmm(matrices[i], rollout)
 
 	return rollout
@@ -108,20 +72,9 @@ def _compute_grad_rollout(
 	gradients: list[torch.Tensor],
 	start_layer: int = 0,
 ) -> torch.Tensor:
-	"""Gradient-weighted Attention Rollout。
-
-	每层: grad * attn -> clamp(min=0) -> average over heads，然后送入 rollout。
-
-	Args:
-		attentions: 每层注意力权重，shape (batch, num_heads, num_tokens, num_tokens)
-		gradients: 每层注意力梯度（已反转为正序），shape 同上
-		start_layer: 从哪一层开始 rollout
-
-	Returns:
-		rollout 矩阵，shape (batch, num_tokens, num_tokens)
-	"""
+	"""逐层取正向梯度贡献的 head 均值并计算 rollout；梯度须按前向层序排列。"""
 	avg_matrices = []
-	for attn, grad in zip(attentions, gradients):
+	for attn, grad in zip(attentions, gradients, strict=True):
 		grad_weighted = (attn * grad).clamp(min=0).mean(dim=1)
 		avg_matrices.append(grad_weighted)
 
@@ -166,10 +119,9 @@ def generate_vit_grad_rollout_heatmap(
 	input_size: int = 224,
 	start_layer: int = 0,
 ) -> tuple[np.ndarray, np.ndarray]:
-	"""生成 token-only legacy gradient-weighted attention rollout 诊断图。
+	"""生成基于 attention 梯度的 token rollout 诊断图。
 
-	该函数使用原始 softmax attention 与普通 autograd gradient，未执行 attention
-	relprop；它不是 Chefer 论文或官方 Transformer-Explainability 的忠实实现。
+	使用 softmax attention 与 autograd gradient，不执行 Chefer attention relprop。
 
 	Args:
 		model: timm VisionTransformer 实例（需处于 eval 模式）
@@ -183,8 +135,6 @@ def generate_vit_grad_rollout_heatmap(
 			- heatmap: ndarray shape (input_size, input_size)，范围 [0, 1]
 			- overlay: ndarray shape (input_size, input_size, 3)，范围 [0, 1]
 	"""
-	if model.global_pool == 'avg':
-		raise ValueError("global_pool='avg' 必须使用 ViTAttentionRelevanceExplainer 与 generate_vit_attention_relevance_heatmap。")
 	if model.global_pool != 'token':
 		raise ValueError(f"Unsupported global_pool={model.global_pool!r}; expected 'token'.")
 
@@ -196,6 +146,8 @@ def generate_vit_grad_rollout_heatmap(
 	with torch.enable_grad(), _hook_attention_weights(model) as (all_attentions, all_gradients):
 		tokens = model.forward_features(input_tensor)
 		output = model.forward_head(tokens)
+		if not 0 <= target_class < output.shape[1]:
+			raise ValueError('target_class is outside the logits range.')
 
 		one_hot = torch.zeros_like(output)
 		one_hot[0, target_class] = 1

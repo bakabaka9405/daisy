@@ -9,12 +9,7 @@ from torch.nn import functional as F
 
 
 def safe_divide(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-	"""计算 a / b，并将除零产生的 nan/±inf 置零。
-
-	结果仅作为 relevance 反向分配的权重使用，因此分母为零的位置置零表示
-	该输出不分配 relevance。注意本实现不对极小非零分母做钳制，此时 a / b
-	是巨大的有限值而非 inf，不会被置零，会原样作为权重传播。
-	"""
+	"""将非有限分配权重置零；有限的非零分母保持原有比值。"""
 	return torch.nan_to_num(a / b, nan=0.0, posinf=0.0, neginf=0.0)
 
 

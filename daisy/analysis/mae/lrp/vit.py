@@ -129,8 +129,8 @@ def _timm_forward_capture(model: VisionTransformer, image: torch.Tensor, target_
 				handles.append(module.register_forward_pre_hook(lambda _module, inputs: head_inputs.append(inputs[0].detach())))
 
 		logits = model(image)
-		if logits.ndim != 2 or target_index >= logits.shape[1]:
-			raise ValueError('target_index 超出 logits 范围。')
+		if logits.ndim != 2 or not 0 <= target_index < logits.shape[1]:
+			raise ValueError('target_index is outside the logits range.')
 		expected_tokens = backbone.num_prefix_tokens + backbone.patch_embed.num_patches
 		if tokens is None or tuple(tokens.shape) != (image.shape[0], expected_tokens, backbone.embed_dim):
 			raise RuntimeError('前向 token 数量不匹配。')
@@ -200,8 +200,6 @@ class _TimmRelpropEngine:
 	def _head_relprop(self, cache: _TimmForwardCache, relevance: torch.Tensor) -> torch.Tensor:
 		backbone = self.model
 		linears = tuple(module for module in backbone.head.modules() if isinstance(module, nn.Linear))
-		if len(linears) != len(cache.head_inputs):
-			raise RuntimeError('head cache 与 Linear 数量不一致。')
 		for module, inputs in zip(reversed(linears), reversed(cache.head_inputs), strict=True):
 			relevance = linear_relprop(self._activation(inputs), module.weight.detach(), relevance)
 		return relevance
@@ -248,6 +246,4 @@ class _TimmRelpropEngine:
 			attention_relevance: list[torch.Tensor | None] = [None] * len(blocks)
 			for index in reversed(range(len(blocks))):
 				relevance, attention_relevance[index] = self._block_relprop(blocks[index], forward.cache.blocks[index], relevance)
-			if any(value is None for value in attention_relevance):
-				raise RuntimeError('attention relevance 不完整。')
 			return _TimmRelpropResult(tuple(cast(torch.Tensor, value) for value in attention_relevance), forward.attention_gradients)
