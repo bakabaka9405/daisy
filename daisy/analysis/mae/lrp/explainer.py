@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import cast
-
 import torch
-from timm.models.vision_transformer import Block, VisionTransformer
+from timm.models.vision_transformer import VisionTransformer
 
 from .vit import _TimmRelpropEngine
 
@@ -29,18 +26,13 @@ class ViTAttentionRelevanceExplainer:
 	def generate(self, image: torch.Tensor, target_index: int, start_layer: int = 0) -> torch.Tensor:
 		if image.ndim == 3:
 			image = image.unsqueeze(0)
-		if image.ndim != 4 or image.shape[0] != 1:
-			raise ValueError('仅支持单张 CHW 图像。')
 
 		backbone = self.model
-		layers = len(cast(Sequence[Block], backbone.blocks))
-		if not 0 <= start_layer < layers:
-			raise ValueError('start_layer 必须满足 0 <= start_layer < block 数。')
 		image = image.to(next(self.model.parameters()).device)
 		result = self._engine.run(image, target_index)
 		matrices = tuple(
 			(relevance * gradient).clamp_min(0).mean(dim=1).detach()
-			for relevance, gradient in zip(result.attention_relevance, result.attention_gradients, strict=True)
+			for relevance, gradient in zip(result.attention_relevance, result.attention_gradients)
 		)
 		raw = _rollout_patch_relevance(matrices, backbone.num_prefix_tokens, start_layer)[0].reshape(backbone.patch_embed.grid_size)
 		positive = raw.clamp_min(0)

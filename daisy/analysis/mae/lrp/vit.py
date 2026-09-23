@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Sequence
+from contextlib import ExitStack
+from dataclasses import dataclass, field
 from typing import cast
 
 import torch
-from torch import nn
-from torch.utils.hooks import RemovableHandle
 from timm.layers.attention import Attention
 from timm.layers.mlp import Mlp
 from timm.models.vision_transformer import Block, VisionTransformer
+from torch import nn
 
 from .layers import add_relprop, clone_relprop, linear_relprop, matmul_relprop, mean_pool_relprop
 
@@ -54,6 +54,107 @@ class _TimmForwardResult:
 	attention_gradients: tuple[torch.Tensor, ...]
 
 
+@dataclass(slots=True)
+class _TensorCapture:
+	value: torch.Tensor = field(init=False)
+
+	def on_input(self, _module: nn.Module, inputs: tuple[torch.Tensor, ...]) -> None:
+		self.value = inputs[0].detach()
+
+	def on_output(self, _module: nn.Module, _inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
+		self.value = output.detach()
+
+
+@dataclass(slots=True)
+class _BlockCapture:
+	x0: _TensorCapture = field(default_factory=_TensorCapture)
+	x1: _TensorCapture = field(default_factory=_TensorCapture)
+	qkv_input: _TensorCapture = field(default_factory=_TensorCapture)
+	qkv_output: _TensorCapture = field(default_factory=_TensorCapture)
+	proj_input: _TensorCapture = field(default_factory=_TensorCapture)
+	attention_output: _TensorCapture = field(default_factory=_TensorCapture)
+	fc1_input: _TensorCapture = field(default_factory=_TensorCapture)
+	fc2_input: _TensorCapture = field(default_factory=_TensorCapture)
+	mlp_output: _TensorCapture = field(default_factory=_TensorCapture)
+	attention: torch.Tensor = field(init=False)
+
+	def capture_attention(self, _module: nn.Module, _inputs: tuple[torch.Tensor, ...], output: torch.Tensor) -> None:
+		self.attention = output
+
+	def finish(self) -> _BlockCache:
+		return _BlockCache(
+			x0=self.x0.value,
+			x1=self.x1.value,
+			attention=_AttentionCache(
+				qkv_input=self.qkv_input.value,
+				qkv_output=self.qkv_output.value,
+				attention=self.attention.detach(),
+				proj_input=self.proj_input.value,
+				output=self.attention_output.value,
+			),
+			mlp=_MlpCache(
+				fc1_input=self.fc1_input.value,
+				fc2_input=self.fc2_input.value,
+				output=self.mlp_output.value,
+			),
+		)
+
+
+def _set_fused_attention(attention: Attention, enabled: bool) -> None:
+	"""集中修改 timm Attention 实例的 Final 属性 fused_attn。"""
+	setattr(attention, 'fused_attn', enabled)
+
+
+def _register_pre_hook(
+	stack: ExitStack,
+	module: nn.Module,
+	hook: Callable[[nn.Module, tuple[torch.Tensor, ...]], None],
+) -> None:
+	handle = module.register_forward_pre_hook(hook)
+	stack.callback(handle.remove)
+
+
+def _register_hook(
+	stack: ExitStack,
+	module: nn.Module,
+	hook: Callable[[nn.Module, tuple[torch.Tensor, ...], torch.Tensor], None],
+) -> None:
+	handle = module.register_forward_hook(hook)
+	stack.callback(handle.remove)
+
+
+def _register_block_capture(
+	stack: ExitStack,
+	block: Block,
+	capture: _BlockCapture,
+) -> None:
+	attention = cast(Attention, block.attn)
+	mlp = cast(Mlp, block.mlp)
+
+	stack.callback(_set_fused_attention, attention, attention.fused_attn)
+	_set_fused_attention(attention, False)
+
+	pre_hook_bindings = (
+		(block, capture.x0.on_input),
+		(block.norm2, capture.x1.on_input),
+		(attention.qkv, capture.qkv_input.on_input),
+		(attention.proj, capture.proj_input.on_input),
+		(mlp.fc1, capture.fc1_input.on_input),
+		(mlp.fc2, capture.fc2_input.on_input),
+	)
+	for module, hook in pre_hook_bindings:
+		_register_pre_hook(stack, module, hook)
+
+	post_hook_bindings = (
+		(attention.qkv, capture.qkv_output.on_output),
+		(attention.attn_drop, capture.capture_attention),
+		(attention, capture.attention_output.on_output),
+		(mlp, capture.mlp_output.on_output),
+	)
+	for module, hook in post_hook_bindings:
+		_register_hook(stack, module, hook)
+
+
 def _timm_forward_capture(model: VisionTransformer, image: torch.Tensor, target_index: int) -> _TimmForwardResult:
 	"""捕获兼容 fixed-size avg-pool timm VisionTransformer 的前向量。
 
@@ -62,125 +163,37 @@ def _timm_forward_capture(model: VisionTransformer, image: torch.Tensor, target_
 	LayerScale、q/k normalization、attention pooling 和其他改变该数据流的结构未实现。
 	head 必须可由其 Linear 层逆序传播，中间仅允许不改变 relevance 路径的 GELU 或 Dropout。
 	"""
-	backbone = model
-	blocks = cast(Sequence[Block], backbone.blocks)
-	attention_modules = tuple(cast(Attention, block.attn) for block in blocks)
-	mlps = tuple(cast(Mlp, block.mlp) for block in blocks)
-	norm2s = tuple(cast(nn.LayerNorm, block.norm2) for block in blocks)
-	handles: list[RemovableHandle] = []
-	fused_backup: list[tuple[Attention, bool]] = []
-	block_inputs: list[torch.Tensor | None] = [None] * len(blocks)
-	norm2_inputs: list[torch.Tensor | None] = [None] * len(blocks)
-	qkv_inputs: list[torch.Tensor | None] = [None] * len(blocks)
-	qkv_outputs: list[torch.Tensor | None] = [None] * len(blocks)
-	attentions: list[torch.Tensor | None] = [None] * len(blocks)
-	proj_inputs: list[torch.Tensor | None] = [None] * len(blocks)
-	attention_outputs: list[torch.Tensor | None] = [None] * len(blocks)
-	fc1_inputs: list[torch.Tensor | None] = [None] * len(blocks)
-	fc2_inputs: list[torch.Tensor | None] = [None] * len(blocks)
-	mlp_outputs: list[torch.Tensor | None] = [None] * len(blocks)
-	tokens: torch.Tensor | None = None
-	head_inputs: list[torch.Tensor] = []
-	expected_head_inputs = sum(isinstance(module, nn.Linear) for module in backbone.head.modules())
+	blocks = cast(Sequence[Block], model.blocks)
 
-	try:
-		for attention in attention_modules:
-			fused_backup.append((attention, attention.fused_attn))
-			attention.fused_attn = False  # type: ignore[misc]
+	with ExitStack() as stack:
+		block_captures: list[_BlockCapture] = []
+		for block in blocks:
+			capture = _BlockCapture()
+			_register_block_capture(stack, block, capture)
+			block_captures.append(capture)
 
-		for index, (block, norm2, attention, mlp) in enumerate(zip(blocks, norm2s, attention_modules, mlps, strict=True)):
-			handles.extend(
-				(
-					block.register_forward_pre_hook(lambda _module, inputs, *, index=index: block_inputs.__setitem__(index, inputs[0].detach())),
-					norm2.register_forward_pre_hook(lambda _module, inputs, *, index=index: norm2_inputs.__setitem__(index, inputs[0].detach())),
-					attention.qkv.register_forward_pre_hook(
-						lambda _module, inputs, *, index=index: qkv_inputs.__setitem__(index, inputs[0].detach())
-					),
-					attention.qkv.register_forward_hook(
-						lambda _module, _inputs, output, *, index=index: qkv_outputs.__setitem__(index, output.detach())
-					),
-					attention.proj.register_forward_pre_hook(
-						lambda _module, inputs, *, index=index: proj_inputs.__setitem__(index, inputs[0].detach())
-					),
-					attention.register_forward_hook(
-						lambda _module, _inputs, output, *, index=index: attention_outputs.__setitem__(index, output.detach())
-					),
-					mlp.fc1.register_forward_pre_hook(lambda _module, inputs, *, index=index: fc1_inputs.__setitem__(index, inputs[0].detach())),
-					mlp.fc2.register_forward_pre_hook(lambda _module, inputs, *, index=index: fc2_inputs.__setitem__(index, inputs[0].detach())),
-					mlp.register_forward_hook(lambda _module, _inputs, output, *, index=index: mlp_outputs.__setitem__(index, output.detach())),
-				)
-			)
+		token_capture = _TensorCapture()
+		_register_hook(stack, model.norm, token_capture.on_output)
 
-			def capture_attention(_module, _inputs, output: torch.Tensor, *, index: int = index) -> torch.Tensor:
-				leaf = output.detach().requires_grad_(True)
-				attentions[index] = leaf
-				return leaf
-
-			handles.append(attention.attn_drop.register_forward_hook(capture_attention))
-
-		def capture_tokens(_module, _inputs, output: torch.Tensor) -> None:
-			nonlocal tokens
-			tokens = output.detach()
-
-		handles.append(backbone.norm.register_forward_hook(capture_tokens))
-
-		for module in backbone.head.modules():
+		head_captures: list[_TensorCapture] = []
+		for module in model.head.modules():
 			if isinstance(module, nn.Linear):
-				handles.append(module.register_forward_pre_hook(lambda _module, inputs: head_inputs.append(inputs[0].detach())))
+				capture = _TensorCapture()
+				_register_pre_hook(stack, module, capture.on_input)
+				head_captures.append(capture)
 
-		logits = model(image)
-		if logits.ndim != 2 or not 0 <= target_index < logits.shape[1]:
-			raise ValueError('target_index is outside the logits range.')
-		expected_tokens = backbone.num_prefix_tokens + backbone.patch_embed.num_patches
-		if tokens is None or tuple(tokens.shape) != (image.shape[0], expected_tokens, backbone.embed_dim):
-			raise RuntimeError('前向 token 数量不匹配。')
-		if any(value is None for value in attentions):
-			raise RuntimeError('缺少 attention leaf。')
-		attention_leaves = tuple(cast(torch.Tensor, value) for value in attentions)
-		gradients = torch.autograd.grad(logits[0, target_index], attention_leaves)
-		all_cache_values = (
-			*block_inputs,
-			*norm2_inputs,
-			*qkv_inputs,
-			*qkv_outputs,
-			*proj_inputs,
-			*attention_outputs,
-			*fc1_inputs,
-			*fc2_inputs,
-			*mlp_outputs,
-			tokens,
-		)
-		if any(value is None for value in all_cache_values):
-			raise RuntimeError('前向 cache 不完整。')
-		if len(head_inputs) != expected_head_inputs:
-			raise RuntimeError('head 前向 cache 不完整。')
+		# 以独立可求导输入作为图根节点，确保模型参数完全冻结时仍保留中间计算图
+		input_image = image.detach().requires_grad_(True)
+		logits = model(input_image)
+		attentions = tuple(capture.attention for capture in block_captures)
+		gradients = torch.autograd.grad(logits[0, target_index], attentions)
+
 		cache = _TimmForwardCache(
-			blocks=tuple(
-				_BlockCache(
-					x0=cast(torch.Tensor, block_inputs[index]),
-					x1=cast(torch.Tensor, norm2_inputs[index]),
-					attention=_AttentionCache(
-						cast(torch.Tensor, qkv_inputs[index]),
-						cast(torch.Tensor, qkv_outputs[index]),
-						attention_leaves[index],
-						cast(torch.Tensor, proj_inputs[index]),
-						cast(torch.Tensor, attention_outputs[index]),
-					),
-					mlp=_MlpCache(
-						cast(torch.Tensor, fc1_inputs[index]), cast(torch.Tensor, fc2_inputs[index]), cast(torch.Tensor, mlp_outputs[index])
-					),
-				)
-				for index in range(len(blocks))
-			),
-			tokens=cast(torch.Tensor, tokens),
-			head_inputs=tuple(head_inputs),
+			blocks=tuple(capture.finish() for capture in block_captures),
+			tokens=token_capture.value,
+			head_inputs=tuple(capture.value for capture in head_captures),
 		)
 		return _TimmForwardResult(logits.detach(), cache, tuple(gradient.detach() for gradient in gradients))
-	finally:
-		for handle in reversed(handles):
-			handle.remove()
-		for attention, fused_attn in fused_backup:
-			attention.fused_attn = fused_attn  # type: ignore[misc]
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,26 +206,24 @@ class _TimmRelpropEngine:
 	def __init__(self, model: VisionTransformer) -> None:
 		self.model = model
 
-	@staticmethod
-	def _activation(value: torch.Tensor) -> torch.Tensor:
-		return value.detach().requires_grad_(True)
-
 	def _head_relprop(self, cache: _TimmForwardCache, relevance: torch.Tensor) -> torch.Tensor:
 		backbone = self.model
 		linears = tuple(module for module in backbone.head.modules() if isinstance(module, nn.Linear))
-		for module, inputs in zip(reversed(linears), reversed(cache.head_inputs), strict=True):
-			relevance = linear_relprop(self._activation(inputs), module.weight.detach(), relevance)
+		for module, inputs in zip(reversed(linears), reversed(cache.head_inputs)):
+			relevance = linear_relprop(inputs, module.weight.detach(), relevance)
 		return relevance
 
 	def _attention_relprop(self, block: Block, cache: _AttentionCache, relevance: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 		attention_module = cast(Attention, block.attn)
-		relevance = linear_relprop(self._activation(cache.proj_input), attention_module.proj.weight.detach(), relevance)
+		relevance = linear_relprop(cache.proj_input, attention_module.proj.weight.detach(), relevance)
 		batch, tokens, _ = relevance.shape
 		relevance = relevance.reshape(batch, tokens, attention_module.num_heads, attention_module.head_dim).transpose(1, 2)
-		qkv = cache.qkv_output.detach().reshape(batch, tokens, 3, attention_module.num_heads, attention_module.head_dim).permute(2, 0, 3, 1, 4)
-		query, key, value = (self._activation(item) for item in qkv.unbind(0))
-		attention, relevance_value = matmul_relprop(self._activation(cache.attention), value, relevance)
+
+		qkv = cache.qkv_output.reshape(batch, tokens, 3, attention_module.num_heads, attention_module.head_dim).permute(2, 0, 3, 1, 4)
+		query, key, value = qkv.unbind(0)
+		attention, relevance_value = matmul_relprop(cache.attention, value, relevance)
 		attention, relevance_value = attention / 2, relevance_value / 2
+
 		relevance_query, relevance_key = matmul_relprop(query, key.transpose(-2, -1), attention)
 		relevance_qkv = torch.cat(
 			(
@@ -222,28 +233,34 @@ class _TimmRelpropEngine:
 			),
 			dim=-1,
 		)
-		return linear_relprop(self._activation(cache.qkv_input), attention_module.qkv.weight.detach(), relevance_qkv), attention.detach()
+
+		return linear_relprop(cache.qkv_input, attention_module.qkv.weight.detach(), relevance_qkv), attention
 
 	def _block_relprop(self, block: Block, cache: _BlockCache, relevance: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 		mlp = cast(Mlp, block.mlp)
-		left, right = add_relprop((self._activation(cache.x1), self._activation(cache.mlp.output)), relevance)
-		right = linear_relprop(self._activation(cache.mlp.fc2_input), mlp.fc2.weight.detach(), right)
-		right = linear_relprop(self._activation(cache.mlp.fc1_input), mlp.fc1.weight.detach(), right)
-		relevance = clone_relprop(self._activation(cache.x1), (left, right))
-		left, right = add_relprop((self._activation(cache.x0), self._activation(cache.attention.output)), relevance)
+		left, right = add_relprop((cache.x1, cache.mlp.output), relevance)
+		right = linear_relprop(cache.mlp.fc2_input, mlp.fc2.weight.detach(), right)
+		right = linear_relprop(cache.mlp.fc1_input, mlp.fc1.weight.detach(), right)
+		relevance = clone_relprop(cache.x1, (left, right))
+
+		left, right = add_relprop((cache.x0, cache.attention.output), relevance)
 		right, attention = self._attention_relprop(block, cache.attention, right)
-		return clone_relprop(self._activation(cache.x0), (left, right)), attention
+		return clone_relprop(cache.x0, (left, right)), attention
 
 	def run(self, image: torch.Tensor, target_index: int) -> _TimmRelpropResult:
 		with torch.enable_grad():
 			forward = _timm_forward_capture(self.model, image, target_index)
+
+		with torch.no_grad():
 			seed = torch.zeros_like(forward.logits)
 			seed[0, target_index] = 1
-			relevance = mean_pool_relprop(
-				self._activation(forward.cache.tokens), self._head_relprop(forward.cache, seed), self.model.num_prefix_tokens
-			)
+
+			relevance = mean_pool_relprop(forward.cache.tokens, self._head_relprop(forward.cache, seed), self.model.num_prefix_tokens)
+
 			blocks = cast(Sequence[Block], self.model.blocks)
-			attention_relevance: list[torch.Tensor | None] = [None] * len(blocks)
-			for index in reversed(range(len(blocks))):
-				relevance, attention_relevance[index] = self._block_relprop(blocks[index], forward.cache.blocks[index], relevance)
-			return _TimmRelpropResult(tuple(cast(torch.Tensor, value) for value in attention_relevance), forward.attention_gradients)
+			attention_relevances: list[torch.Tensor] = []
+			for block, block_cache in zip(reversed(blocks), reversed(forward.cache.blocks)):
+				relevance, block_attention_relevance = self._block_relprop(block, block_cache, relevance)
+				attention_relevances.append(block_attention_relevance)
+
+			return _TimmRelpropResult(tuple(reversed(attention_relevances)), forward.attention_gradients)
