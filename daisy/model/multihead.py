@@ -38,9 +38,13 @@ class MultiHeadModel(nn.Module):
 		self.num_classes: dict[str, int] = tasks_dict
 		# 保留 ModuleList 结构，以确保已有的 heads.0, heads.1 ... 检查点权重键名严格兼容
 		self.heads: nn.ModuleList = nn.ModuleList([nn.Linear(feature_dim, self.num_classes[name]) for name in self.num_classes])
+		self.head_norms: nn.ModuleList = nn.ModuleList([nn.LayerNorm(feature_dim) for _ in self.num_classes])
 
 	@override
 	def forward(self, images: torch.Tensor) -> dict[str, torch.Tensor]:
 		"""返回每个任务头的 logits 字典，键为任务名称。"""
 		features = self.backbone(images)
-		return {name: head(features) for name, head in zip(self.num_classes.keys(), self.heads, strict=True)}
+		return {
+			name: head(norm(features))
+			for name, norm, head in zip(self.num_classes, self.head_norms, self.heads, strict=True)
+		}
