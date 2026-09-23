@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, assert_never, cast
 
-from daisy.feeder import LabelSpec
+from daisy.feeder import ColumnLabelSpec
 from ..shared.dataset_config import (
 	ColumnSplitConfig,
 	DatasetConfig,
@@ -42,9 +42,9 @@ from .model import (
 )
 
 
-def _parse_target_spec(target_cfg: DatasetTargetConfig) -> LabelSpec:
+def _parse_target_spec(target_cfg: DatasetTargetConfig) -> ColumnLabelSpec:
 	"""解析目标标签参数并复制类别映射字典"""
-	return LabelSpec(
+	return ColumnLabelSpec(
 		column=target_cfg.column,
 		num_classes=target_cfg.num_classes,
 		offset=target_cfg.offset,
@@ -238,7 +238,7 @@ def parse_unlabeled_dataset(config: DatasetConfig) -> DatasetPlan[None]:
 	return cast(DatasetPlan[None], plan)
 
 
-def single_label_target(plan: DatasetPlan[int]) -> LabelSpec:
+def single_label_target(plan: DatasetPlan[int]) -> ColumnLabelSpec:
 	"""从单标签数据计划中提取首个数据源的目标标签参数"""
 	match plan:
 		case SingleSourcePlan():

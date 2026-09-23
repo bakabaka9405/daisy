@@ -8,7 +8,7 @@ from typing import Any
 from torch import Tensor
 
 from daisy.dataset.disk_dataset import DiskDataset
-from daisy.feeder import LabelSpec
+from daisy.feeder import ColumnLabelSpec
 
 
 @dataclass(slots=True, frozen=True)
@@ -20,14 +20,14 @@ class NoLabels:
 class SingleLabels:
 	"""单标签分类规范"""
 
-	target: LabelSpec
+	target: ColumnLabelSpec
 
 
 @dataclass(slots=True, frozen=True)
 class MultiLabels:
 	"""多任务标签规范"""
 
-	targets: tuple[tuple[str, LabelSpec], ...]
+	targets: tuple[tuple[str, ColumnLabelSpec], ...]
 
 
 type LabelerTerm[L = Any] = NoLabels | SingleLabels | MultiLabels

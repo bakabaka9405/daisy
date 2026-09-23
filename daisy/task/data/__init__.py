@@ -1,6 +1,6 @@
 """Task 数据共享模块"""
 
-from daisy.feeder import LabelSpec
+from daisy.feeder import ColumnLabelSpec
 from .builder import build_datasets
 from .interpret import interpret
 from .split_table import parse_column_split_indices
@@ -36,7 +36,7 @@ __all__ = [
 	'DatasetPlan',
 	'DatasetSplits',
 	'FolderReader',
-	'LabelSpec',
+	'ColumnLabelSpec',
 	'LabelerTerm',
 	'MultiLabels',
 	'MultiSource',

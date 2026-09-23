@@ -1,15 +1,15 @@
 """数据供给与样本加载模块"""
 
 from .feeder import (
-	Feeder,
-	MultiTaskFeeder,
-	SingleLabelFeeder,
-	UnlabeledFeeder,
+	Samples,
 	merge_samples,
+	parse_multitask_table,
+	parse_single_label_table,
+	parse_table_paths,
 	read_multitask_labels,
 )
 from .primitives import (
-	LabelSpec,
+	ColumnLabelSpec,
 	get_column_series,
 	load_samples_from_folder,
 	load_samples_from_sheet,
@@ -19,15 +19,15 @@ from .primitives import (
 )
 
 __all__ = [
-	'Feeder',
-	'LabelSpec',
-	'MultiTaskFeeder',
-	'SingleLabelFeeder',
-	'UnlabeledFeeder',
+	'ColumnLabelSpec',
+	'Samples',
 	'get_column_series',
 	'load_samples_from_folder',
 	'load_samples_from_sheet',
 	'merge_samples',
+	'parse_multitask_table',
+	'parse_single_label_table',
+	'parse_table_paths',
 	'parse_target_labels',
 	'read_multitask_labels',
 	'read_sheet',

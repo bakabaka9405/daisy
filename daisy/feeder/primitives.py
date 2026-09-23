@@ -12,7 +12,7 @@ from daisy.dataset.disk_dataset import load_files_from_folder
 
 
 @dataclass(slots=True, frozen=True)
-class LabelSpec:
+class ColumnLabelSpec:
 	"""标签解析所需的描述约束"""
 
 	column: int | str
@@ -126,9 +126,7 @@ def load_samples_from_folder(
 
 	if num_classes is not None:
 		if class_dict is None and len(resolved_class_dict) > num_classes:
-			raise ValueError(
-				f'Discovered {len(resolved_class_dict)} classes in folder, exceeding num_classes={num_classes}'
-			)
+			raise ValueError(f'Discovered {len(resolved_class_dict)} classes in folder, exceeding num_classes={num_classes}')
 		for lbl in labels:
 			if lbl < 0 or lbl >= num_classes:
 				raise ValueError(f'Label {lbl} out of range [0, {num_classes - 1}]')
@@ -138,7 +136,7 @@ def load_samples_from_folder(
 
 def parse_target_labels(
 	series: pd.Series,
-	spec: LabelSpec,
+	spec: ColumnLabelSpec,
 	name: str,
 ) -> list[int]:
 	"""解析并校验标签列，利用 Pandas 类型系统保证整型约束及类别范围"""
@@ -161,9 +159,7 @@ def parse_target_labels(
 			labels = numeric.astype('Int64')
 		except TypeError as err:
 			bad = series.loc[numeric != numeric.astype('int64')].iloc[0]
-			raise ValueError(
-				f'Label {bad!r} for target {name!r} is fractional; non-integral labels are not allowed'
-			) from err
+			raise ValueError(f'Label {bad!r} for target {name!r} is fractional; non-integral labels are not allowed') from err
 
 		labels = labels + spec.offset
 
@@ -176,7 +172,7 @@ def parse_target_labels(
 
 def read_single_label(
 	df: pd.DataFrame,
-	spec: LabelSpec,
+	spec: ColumnLabelSpec,
 	target_name: str = 'label',
 ) -> list[int]:
 	"""从数据表中提取并解析单任务标签"""

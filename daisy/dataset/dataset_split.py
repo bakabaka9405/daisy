@@ -6,6 +6,7 @@ from ..util import (
 	shuffle_correlated_lists,
 )
 from collections.abc import Generator, Mapping
+from pathlib import Path
 
 
 def _get_rng(seed: int | None = None):
@@ -14,19 +15,12 @@ def _get_rng(seed: int | None = None):
 
 def assert_disjoint_file_splits[ImageT, LabelT](splits: Mapping[str, DiskDataset[ImageT, LabelT]]) -> None:
 	"""集中检查各 split 间文件路径互斥性"""
-	split_names = list(splits.keys())
-	paths_by_split: dict[str, set[str]] = {
-		name: {p.resolve().as_posix() for p in splits[name].file_paths} for name in split_names
-	}
-	for i in range(len(split_names)):
-		for j in range(i + 1, len(split_names)):
-			name_a, name_b = split_names[i], split_names[j]
-			overlap = paths_by_split[name_a] & paths_by_split[name_b]
-			if overlap:
-				raise ValueError(
-					f'Split path overlap detected between {name_a!r} and {name_b!r}: '
-					f'{len(overlap)} samples, e.g. {sorted(overlap)[:5]}'
-				)
+	seen: set[Path] = set()
+	for split in splits.values():
+		paths = {path.resolve() for path in split.file_paths}
+		if not seen.isdisjoint(paths):
+			raise ValueError('Split path overlap detected')
+		seen.update(paths)
 
 
 def group_by_label[ImageT, LabelT](dataset: IndexDataset[ImageT, LabelT]) -> dict[LabelT, list]:
