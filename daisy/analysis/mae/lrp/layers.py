@@ -5,12 +5,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 import torch
+from torch import nn
 from torch.nn import functional as F
 
 
-def safe_divide(a: torch.Tensor, b: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
-	sign = torch.where(b >= 0, 1.0, -1.0)
-	return a / (b + eps * sign) * (b != 0)
+def safe_divide(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+	"""将非有限分配权重置零；有限的非零分母保持原有比值。"""
+	return torch.nan_to_num(a / b, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def linear_relprop(x: torch.Tensor, weight: torch.Tensor, relevance: torch.Tensor) -> torch.Tensor:
@@ -21,6 +22,17 @@ def linear_relprop(x: torch.Tensor, weight: torch.Tensor, relevance: torch.Tenso
 	second = F.linear(negative_input, negative_weight)
 	scale = safe_divide(relevance, first + second)
 	return positive_input * (scale @ positive_weight) + negative_input * (scale @ negative_weight)
+
+
+def layer_norm_relprop(x: torch.Tensor, norm: nn.LayerNorm, relevance: torch.Tensor) -> torch.Tensor:
+	"""固定标准差，沿 LayerNorm 的中心化与仿射变换传播 relevance。"""
+	axes = tuple(range(-len(norm.normalized_shape), 0))
+	mean = x.mean(dim=axes, keepdim=True)
+	std = torch.sqrt(torch.mean((x - mean) ** 2, dim=axes, keepdim=True) + norm.eps)
+	y = F.layer_norm(x, norm.normalized_shape, norm.weight, norm.bias, norm.eps)
+	scale = safe_divide(relevance, y)
+	h = scale * norm.weight if norm.weight is not None else scale
+	return (x / std) * (h - h.mean(dim=axes, keepdim=True))
 
 
 def add_relprop(inputs: tuple[torch.Tensor, torch.Tensor], relevance: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

@@ -13,7 +13,7 @@ from timm.layers.mlp import Mlp
 from timm.models.vision_transformer import Block, VisionTransformer
 from torch import nn
 
-from .layers import add_relprop, clone_relprop, linear_relprop, matmul_relprop, mean_pool_relprop
+from .layers import add_relprop, clone_relprop, layer_norm_relprop, linear_relprop, matmul_relprop, mean_pool_relprop
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +44,7 @@ class _BlockCache:
 class _TimmForwardCache:
 	blocks: tuple[_BlockCache, ...]
 	tokens: torch.Tensor
-	head_inputs: tuple[torch.Tensor, ...]
+	readout_inputs: tuple[torch.Tensor, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,13 +155,17 @@ def _register_block_capture(
 		_register_hook(stack, module, hook)
 
 
+def _readout_modules(model: VisionTransformer) -> tuple[nn.Linear | nn.LayerNorm, ...]:
+	return tuple(module for module in (model.fc_norm, *model.head.modules()) if isinstance(module, (nn.Linear, nn.LayerNorm)))
+
+
 def _timm_forward_capture(model: VisionTransformer, image: torch.Tensor, target_index: int) -> _TimmForwardResult:
 	"""捕获兼容 fixed-size avg-pool timm VisionTransformer 的前向量。
 
-	调用者须提供沿标准 blocks、avg pool、head 数据流执行的模型；attention 与 MLP 须提供 qkv、proj、fc1、fc2 及 dropout 节点。
+	调用者须提供沿标准 blocks、avg pool 及 readout (fc_norm / head) 数据流执行的模型；attention 与 MLP 须提供 qkv、proj、fc1、fc2 及 dropout 节点。
 	解释时模型应处于 eval、float32 且关闭 gradient checkpointing；输入为位于模型设备上的单张固定尺寸 float32 图像。
 	LayerScale、q/k normalization、attention pooling 和其他改变该数据流的结构未实现。
-	head 必须可由其 Linear 层逆序传播，中间仅允许不改变 relevance 路径的 GELU 或 Dropout。
+	readout 必须可由其 Linear 与 LayerNorm 层逆序传播，中间仅允许不改变 relevance 路径的 GELU 或 Dropout。
 	"""
 	blocks = cast(Sequence[Block], model.blocks)
 
@@ -175,12 +179,11 @@ def _timm_forward_capture(model: VisionTransformer, image: torch.Tensor, target_
 		token_capture = _TensorCapture()
 		_register_hook(stack, model.norm, token_capture.on_output)
 
-		head_captures: list[_TensorCapture] = []
-		for module in model.head.modules():
-			if isinstance(module, nn.Linear):
-				capture = _TensorCapture()
-				_register_pre_hook(stack, module, capture.on_input)
-				head_captures.append(capture)
+		readout_captures: list[_TensorCapture] = []
+		for module in _readout_modules(model):
+			capture = _TensorCapture()
+			_register_pre_hook(stack, module, capture.on_input)
+			readout_captures.append(capture)
 
 		# 以独立可求导输入作为图根节点，确保模型参数完全冻结时仍保留中间计算图
 		input_image = image.detach().requires_grad_(True)
@@ -191,7 +194,7 @@ def _timm_forward_capture(model: VisionTransformer, image: torch.Tensor, target_
 		cache = _TimmForwardCache(
 			blocks=tuple(capture.finish() for capture in block_captures),
 			tokens=token_capture.value,
-			head_inputs=tuple(capture.value for capture in head_captures),
+			readout_inputs=tuple(capture.value for capture in readout_captures),
 		)
 		return _TimmForwardResult(logits.detach(), cache, tuple(gradient.detach() for gradient in gradients))
 
@@ -206,11 +209,13 @@ class _TimmRelpropEngine:
 	def __init__(self, model: VisionTransformer) -> None:
 		self.model = model
 
-	def _head_relprop(self, cache: _TimmForwardCache, relevance: torch.Tensor) -> torch.Tensor:
-		backbone = self.model
-		linears = tuple(module for module in backbone.head.modules() if isinstance(module, nn.Linear))
-		for module, inputs in zip(reversed(linears), reversed(cache.head_inputs)):
-			relevance = linear_relprop(inputs, module.weight.detach(), relevance)
+	def _readout_relprop(self, cache: _TimmForwardCache, relevance: torch.Tensor) -> torch.Tensor:
+		modules = _readout_modules(self.model)
+		for module, inputs in zip(reversed(modules), reversed(cache.readout_inputs)):
+			if isinstance(module, nn.Linear):
+				relevance = linear_relprop(inputs, module.weight.detach(), relevance)
+			else:
+				relevance = layer_norm_relprop(inputs, module, relevance)
 		return relevance
 
 	def _attention_relprop(self, block: Block, cache: _AttentionCache, relevance: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -255,7 +260,7 @@ class _TimmRelpropEngine:
 			seed = torch.zeros_like(forward.logits)
 			seed[0, target_index] = 1
 
-			relevance = mean_pool_relprop(forward.cache.tokens, self._head_relprop(forward.cache, seed), self.model.num_prefix_tokens)
+			relevance = mean_pool_relprop(forward.cache.tokens, self._readout_relprop(forward.cache, seed), self.model.num_prefix_tokens)
 
 			blocks = cast(Sequence[Block], self.model.blocks)
 			attention_relevances: list[torch.Tensor] = []

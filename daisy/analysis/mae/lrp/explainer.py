@@ -9,13 +9,11 @@ from .vit import _TimmRelpropEngine
 
 
 def _rollout_patch_relevance(matrices: tuple[torch.Tensor, ...], prefix_tokens: int, start_layer: int) -> torch.Tensor:
-	"""累乘带残差的逐层 relevance，去除恒等路径，再汇总所有参与平均池化的 patch query。"""
-	tokens = matrices[0].shape[-1]
-	identity = torch.eye(tokens, device=matrices[0].device, dtype=matrices[0].dtype).unsqueeze(0)
-	joint = identity
+	"""累乘带残差的逐层 relevance，利用 S = J - I 递推去除恒等路径，汇总 patch query。"""
+	s = torch.zeros_like(matrices[0])
 	for matrix in matrices[start_layer:]:
-		joint = (identity + matrix) @ joint
-	return (joint - identity)[:, prefix_tokens:, prefix_tokens:].sum(dim=1)
+		s = s + matrix + matrix @ s
+	return s[:, prefix_tokens:, prefix_tokens:].sum(dim=1)
 
 
 class ViTAttentionRelevanceExplainer:
