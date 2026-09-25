@@ -14,6 +14,7 @@ type MatrixF32 = np.ndarray[tuple[int, int], np.dtype[np.float32]]
 type MatrixF64 = np.ndarray[tuple[int, int], np.dtype[np.float64]]
 
 type ImageU8 = np.ndarray[tuple[int, int, int], np.dtype[np.uint8]]
+type ImageF32 = np.ndarray[tuple[int, int, int], np.dtype[np.float32]]
 
 type NDArrayF64 = NDArray[np.float64]
 

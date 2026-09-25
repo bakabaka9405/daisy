@@ -5,12 +5,11 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
-import cv2
 import numpy as np
 import torch
-import torch.nn.functional as F
 from timm.layers.attention import Attention
 
+from daisy.analysis.util import show_cam_on_image
 from daisy.typing import MatrixF32
 from .lrp import ViTAttentionRelevanceExplainer
 
@@ -81,44 +80,13 @@ def _compute_grad_rollout(
 	return _compute_rollout(avg_matrices, start_layer)
 
 
-def show_cam_on_image(
-	image: torch.Tensor,
-	heatmap: MatrixF32,
-	input_size: int | tuple[int, int] = 224,
-) -> np.ndarray:
-	"""将热力图叠加到原始图像上。
-
-	Args:
-		image: 输入图像 tensor，shape (3, H, W)
-		heatmap: 热力图 ndarray，shape (H, W)，范围 [0, 1]
-		input_size: 输出尺寸，整数或 (height, width) 元组
-
-	Returns:
-		叠加后的图像 ndarray，shape (H, W, 3)，范围 [0, 1]
-	"""
-	height, width = (input_size, input_size) if isinstance(input_size, int) else input_size
-	img = image.detach().cpu().numpy().transpose(1, 2, 0)  # (H, W, 3)
-	img = np.float32(img)
-	img = (img - img.min()) / (img.max() - img.min() + 1e-8)
-	img = cv2.resize(img, (width, height))
-
-	heatmap_uint8 = (255 * heatmap).astype(np.uint8)
-	colormap = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
-	colormap = cv2.cvtColor(colormap, cv2.COLOR_BGR2RGB)
-	colormap = np.float32(colormap) / 255
-
-	overlay = 0.5 * colormap + 0.5 * img
-	overlay = overlay / overlay.max()
-	return overlay
-
-
 def generate_vit_grad_rollout_heatmap(
 	model: VisionTransformer,
 	image: torch.Tensor,
 	target_class: int,
 	input_size: int = 224,
 	start_layer: int = 0,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[MatrixF32, np.ndarray]:
 	"""生成基于 attention 梯度的 token rollout 诊断图。
 
 	使用 softmax attention 与 autograd gradient，不执行 Chefer attention relprop。
@@ -159,15 +127,9 @@ def generate_vit_grad_rollout_heatmap(
 		mask = rollout[0, 0, num_prefix:]
 
 	grid_size = model.patch_embed.grid_size
-	mask = mask.reshape(1, 1, grid_size[0], grid_size[1])
-	mask = F.interpolate(mask, size=(input_size, input_size), mode='bilinear', align_corners=False)
-	mask = mask.squeeze()
-	mask = (mask - mask.min()) / (mask.max() - mask.min() + 1e-8)
-	heatmap = mask.detach().cpu().numpy()
-
-	overlay = show_cam_on_image(image, heatmap, input_size)
-
-	return heatmap, overlay
+	mask = mask.reshape(grid_size[0], grid_size[1])
+	mask = mask - mask.min()
+	return show_cam_on_image(image, mask, input_size)
 
 
 def generate_vit_attention_relevance_heatmap(
@@ -177,15 +139,7 @@ def generate_vit_attention_relevance_heatmap(
 	start_layer: int = 0,
 	input_size: int | tuple[int, int] = 224,
 ) -> tuple[MatrixF32, np.ndarray]:
-	"""仅以 bilinear 将 normalized attention relevance 对齐到显示尺寸。"""
-	target_size = (input_size, input_size) if isinstance(input_size, int) else input_size
+	"""生成注意力相关性热力图与叠加图像。"""
 	mask = explainer.generate(image, target_class, start_layer)
-	if mask.shape != target_size:
-		mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=target_size, mode='bilinear', align_corners=False).squeeze()
-	maximum = mask.max()
-	mask = mask / maximum if maximum.item() > 0 else torch.zeros_like(mask)
-
-	heatmap: MatrixF32 = mask.detach().cpu().numpy().astype(np.float32, copy=False)
 	display_image = image[0] if image.ndim == 4 else image
-	overlay = show_cam_on_image(display_image, heatmap, input_size)
-	return heatmap, overlay
+	return show_cam_on_image(display_image, mask, input_size)
