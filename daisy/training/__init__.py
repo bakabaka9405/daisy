@@ -29,6 +29,7 @@ from daisy.training.plugins import (
     EpochPrint,
     Eval,
     Plugin,
+    RichEpochPrint,
     Timer,
 )
 from daisy.training.state import TrainState
@@ -44,6 +45,7 @@ __all__ = [
     'EarlyStop',
     'Checkpoint',
     'EpochPrint',
+    'RichEpochPrint',
     'BatchPrint',
     'CSVLog',
     'Timer',

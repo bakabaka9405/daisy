@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import torch
@@ -14,6 +15,8 @@ from torch.utils._pytree import tree_map
 
 SideEffectFn = Callable[[TrainState], None]
 ProcessFn = Callable[[Any], torch.Tensor]
+FitFn = Callable[[], TrainState]
+FitWrapper = Callable[[FitFn], TrainState]
 
 
 class Trainer:
@@ -53,6 +56,7 @@ class Trainer:
 		self._on_epoch_end: list[SideEffectFn] = []
 		self._on_batch_start: list[SideEffectFn] = []
 		self._on_batch_end: list[SideEffectFn] = []
+		self._around_fit: list[FitWrapper] = []
 
 	@property
 	def process_fn(self) -> ProcessFn | None:
@@ -93,6 +97,11 @@ class Trainer:
 		self._on_batch_end.append(fn)
 		return self
 
+	def around_fit(self, fn: FitWrapper) -> Trainer:
+		"""包裹整个训练过程：``fn(run)`` 必须调用 ``run()`` 并返回其结果。先注册者位于最外层。"""
+		self._around_fit.append(fn)
+		return self
+
 	def use(self, *plugins: Any) -> Trainer:
 		"""注册 Plugin。"""
 		for plugin in plugins:
@@ -107,6 +116,17 @@ class Trainer:
 			raise RuntimeError('fit 需要 optimizer。')
 		if self.process_fn is None:
 			raise RuntimeError('fit 需要 process_fn。')
+
+		run: FitFn = partial(self._fit, train_loader, epochs, start_epoch)
+		for wrapper in reversed(self._around_fit):
+			run = partial(wrapper, run)
+		return run()
+
+	def _fit(self, train_loader: DataLoader, epochs: int, start_epoch: int) -> TrainState:
+		if self.model is None:
+			raise RuntimeError('Model is required for _fit.')
+		if self.optimizer is None:
+			raise RuntimeError('Optimizer is required for _fit.')
 
 		optimizer = self.optimizer
 		self.model.to(self.device)

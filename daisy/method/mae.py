@@ -10,6 +10,8 @@ from torch.optim import AdamW, Optimizer
 
 from daisy.method.base import Method
 from daisy.model.mae import MaskedAutoencoderViT
+from daisy.training.state import TrainState
+from daisy.training.trainer import Trainer
 
 
 class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
@@ -24,14 +26,44 @@ class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
 		weight_decay: float = 0.05,
 		mask_ratio: float = 0.75,
 		norm_pix_loss: bool = False,
+		freeze_encoder_epochs: int = 0,
 	) -> None:
 		self.mask_ratio = mask_ratio
 		self.norm_pix_loss = norm_pix_loss
+		self.freeze_encoder_epochs = freeze_encoder_epochs
 		super().__init__(
 			model,
 			lr=lr,
 			weight_decay=weight_decay,
 		)
+
+	@override
+	def register(self, trainer: Trainer) -> None:
+		"""向 Trainer 安装模型、默认优化器与训练步，并根据配置注册编码器冻结策略。"""
+		super().register(trainer)
+
+		if self.freeze_encoder_epochs <= 0:
+			return
+
+		# 筛选并锁定注册时具备梯度的编码器参数，保留调用方预先冻结的参数
+		encoder_prefixes = ('patch_embed.', 'blocks.', 'norm.')
+		managed_params = tuple(
+			p for name, p in self.model.named_parameters()
+			if (name == 'cls_token' or name.startswith(encoder_prefixes)) and p.requires_grad
+		)
+
+		def on_epoch_start(state: TrainState) -> None:
+			# 阶段判定：基于 TrainState 绝对轮次决定编码器状态
+			should_freeze = state.epoch < self.freeze_encoder_epochs
+			requires_grad = not should_freeze
+
+			# 状态更新：配置梯度需求并在冻结阶段清除残余梯度
+			for param in managed_params:
+				param.requires_grad = requires_grad
+				if should_freeze:
+					param.grad = None
+
+		trainer.on_epoch_start(on_epoch_start)
 
 	@override
 	def build_model(self, backbone: nn.Module) -> MaskedAutoencoderViT:

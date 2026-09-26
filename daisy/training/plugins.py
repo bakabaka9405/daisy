@@ -7,13 +7,17 @@ from __future__ import annotations
 
 import csv
 import math
+import sys
 import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
 import torch
+from rich.console import Console
+from rich.table import Table
 
+from daisy.training._tui import EpochRecorded, Progress, TrainMonitorApp, format_value
 from daisy.training.state import TrainState
 
 if TYPE_CHECKING:
@@ -215,6 +219,92 @@ class EpochPrint(Plugin):
 				val = record[key]
 				parts.append(f'{key}={val:.4f}' if isinstance(val, float) else f'{key}={val}')
 		print('  '.join(parts))
+
+
+class RichEpochPrint(Plugin):
+	"""Textual 全屏训练监控：上方为逐 epoch 指标表，下方接管训练期间的 print，二者均可滚动回看。
+
+	界面占用主线程，训练在工作线程中执行。训练结束后按 q 退出，随后将输出与指标表回放到终端；
+	训练中连按两次 q 中止训练（抛出 ``KeyboardInterrupt``）。
+	"""
+
+	PROGRESS_INTERVAL = 0.2
+
+	def __init__(self, watch: Iterable[str], max_log_lines: int = 10000):
+		self.watch: tuple[str, ...] = tuple(watch)
+		self.max_log_lines = max_log_lines
+		self.history: list[dict[str, Any]] = []
+
+		self._app: TrainMonitorApp | None = None
+		self._last_progress: float = 0.0
+
+	def register(self, trainer: Trainer) -> None:
+		trainer.around_fit(self._wrap)
+		trainer.on_epoch_start(self._on_epoch_start)
+		trainer.on_batch_end(self._on_batch_end)
+		trainer.on_epoch_end(self._on_epoch_end)
+
+	@property
+	def _columns(self) -> tuple[str, ...]:
+		return ('epoch', *self.watch)
+
+	def _require_app(self) -> TrainMonitorApp:
+		if self._app is None:
+			raise RuntimeError('RichEpochPrint 回调只能在 fit 期间触发。')
+		if self._app.abort.is_set():
+			raise KeyboardInterrupt('用户在界面中中止训练。')
+		return self._app
+
+	def _wrap(self, run: Callable[[], TrainState]) -> TrainState:
+		self.history = []
+		app = TrainMonitorApp(run, self._columns, self.max_log_lines)
+		self._app = app
+		app.run()
+		# 用户中止或界面崩溃时训练线程仍在运行，需等待其在下一个回调处终止
+		if app.worker.is_alive():
+			app.abort.set()
+			app.worker.join()
+		self._app = None
+
+		self._replay(app)
+		if app.return_code:
+			raise RuntimeError(f'RichEpochPrint 界面异常退出（return_code={app.return_code}）。') from app.error
+		if app.error is not None:
+			raise app.error
+		if app.result is None:
+			raise RuntimeError('RichEpochPrint 界面退出时训练未执行。')
+		return app.result
+
+	def _replay(self, app: TrainMonitorApp) -> None:
+		for line, stderr in app.print_history:
+			print(line, file=sys.stderr if stderr else sys.stdout)
+
+		table = Table(title='Training metrics')
+		for column in self._columns:
+			table.add_column(column, justify='right')
+		for row in self.history:
+			table.add_row(*(format_value(row[column]) for column in self._columns))
+		Console().print(table)
+
+	def _on_epoch_start(self, state: TrainState) -> None:
+		self._require_app().post_from_worker(Progress(f'Epoch {state.epoch + 1}/{state.total_epochs}'))
+
+	def _on_batch_end(self, state: TrainState) -> None:
+		app = self._require_app()
+		now = time.monotonic()
+		idx = state.batch_idx + 1
+		if now - self._last_progress >= self.PROGRESS_INTERVAL or idx == state.total_batches:
+			self._last_progress = now
+			app.post_from_worker(Progress(f'Epoch {state.epoch + 1}/{state.total_epochs} · batch {idx}/{state.total_batches}'))
+
+	def _on_epoch_end(self, state: TrainState) -> None:
+		app = self._require_app()
+		row: dict[str, Any] = {
+			'epoch': state.epoch + 1,
+			**{key: state.record.get(key) for key in self.watch},
+		}
+		self.history.append(row)
+		app.post_from_worker(EpochRecorded([format_value(row[column]) for column in self._columns]))
 
 
 class BatchPrint(Plugin):

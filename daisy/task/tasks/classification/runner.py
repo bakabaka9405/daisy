@@ -9,7 +9,7 @@ import torch
 from daisy.classification import prepare_classification_training
 from daisy.method.classification import ClassificationMethod
 from daisy.task.data import interpret, parse_single_label_dataset, single_label_target
-from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, EpochPrint, Trainer
+from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, RichEpochPrint, Trainer
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from ...shared import get_classification_transform
 from .config import ClassificationConfig
@@ -138,7 +138,7 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 		log_path = output_path / 'logs' / f'log_{time.strftime("%Y%m%d_%H%M%S")}.csv'
 		trainer.use(CSVLog(log_path=log_path, watch=eval_keys))
 
-	trainer.use(EpochPrint(watch=eval_keys))
+	trainer.use(RichEpochPrint(watch=eval_keys))
 
 	if training_cfg.early_stop:
 		trainer.use(

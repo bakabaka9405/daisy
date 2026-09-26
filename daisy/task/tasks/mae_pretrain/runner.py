@@ -11,7 +11,7 @@ from daisy.dataset.disk_dataset import DiskDataset
 from daisy.task.data import interpret, parse_unlabeled_dataset
 from daisy.method.mae import MAEPretrainMethod
 from daisy.model.mae import create_mae_model, load_timm_pretrained_encoder_weights
-from daisy.training import CosineAnnealingLR, CSVLog, EpochPrint, Timer, Trainer, TrainState
+from daisy.training import CosineAnnealingLR, CSVLog, RichEpochPrint, Timer, Trainer, TrainState
 from daisy.util import make_dataloader
 from daisy.util.transform import LazyNormalization, LazyNormalizedTensor
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
@@ -126,6 +126,7 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 		weight_decay=training_cfg.weight_decay,
 		mask_ratio=training_cfg.mask_ratio,
 		norm_pix_loss=training_cfg.norm_pix_loss,
+		freeze_encoder_epochs=training_cfg.freeze_encoder_epochs,
 	)
 	trainer = Trainer(
 		device=device,
@@ -144,7 +145,7 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 	)
 
 	# 准备日志输出与记录插件
-	trainer.use(EpochPrint(watch=['optim/lr', 'train/loss', 'time/epoch']))
+	trainer.use(RichEpochPrint(watch=['optim/lr', 'train/loss', 'time/epoch']))
 
 	if config.output.log:
 		log_file = output_path / 'logs' / f'mae_log_{time.strftime("%Y%m%d_%H%M%S")}.csv'

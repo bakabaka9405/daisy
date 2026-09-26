@@ -45,6 +45,7 @@ class MAETrainingConfig(BaseConfig):
 	blr: float = 1.5e-4  # 基础学习率
 	weight_decay: float = 0.05
 	warmup_epochs: int = 40
+	freeze_encoder_epochs: int = Field(default=0, ge=0)
 	mask_ratio: float = Field(default=0.75, gt=0.0, lt=1.0)
 	norm_pix_loss: bool = False
 	accum_iter: int = 1
