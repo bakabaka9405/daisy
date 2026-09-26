@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import math
+import os
 import sys
 import time
 from collections.abc import Iterable
@@ -226,6 +227,7 @@ class RichEpochPrint(Plugin):
 
 	界面占用主线程，训练在工作线程中执行。训练结束后按 q 退出，随后将输出与指标表回放到终端；
 	训练中连按两次 q 中止训练（抛出 ``KeyboardInterrupt``）。
+	非交互终端或 TERM=dumb 时自动使用 EpochPrint。
 	"""
 
 	PROGRESS_INTERVAL = 0.2
@@ -239,6 +241,11 @@ class RichEpochPrint(Plugin):
 		self._last_progress: float = 0.0
 
 	def register(self, trainer: Trainer) -> None:
+		if not (sys.stdin.isatty() and sys.stdout.isatty()) or os.environ.get('TERM') == 'dumb':
+			print('RichEpochPrint: non-interactive terminal detected; using EpochPrint.')
+			EpochPrint(self.watch).register(trainer)
+			return
+
 		trainer.around_fit(self._wrap)
 		trainer.on_epoch_start(self._on_epoch_start)
 		trainer.on_batch_end(self._on_batch_end)
