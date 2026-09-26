@@ -107,11 +107,20 @@ def run(config: MAEPretrainConfig, device: torch.device) -> Path:
 		model_cfg.name,
 		img_size=model_cfg.img_size,
 	)
-	if model_cfg.timm_pretrained and training_cfg.resume is None:
+	if training_cfg.resume is not None:
+		if model_cfg.pretrained is not None:
+			print('Skipping pretrained checkpoint because resume is configured')
+		if model_cfg.timm_pretrained is not None:
+			print('Skipping timm pretrained encoder because resume is configured')
+	elif model_cfg.pretrained is not None:
+		print(f'Loading pretrained checkpoint: {model_cfg.pretrained}')
+		checkpoint_model = torch.load(model_cfg.pretrained, map_location='cpu', weights_only=True)['model']
+		checkpoint_model['pos_embed'] = model.pos_embed
+		checkpoint_model['decoder_pos_embed'] = model.decoder_pos_embed
+		model.load_state_dict(checkpoint_model, strict=True)
+	elif model_cfg.timm_pretrained is not None:
 		print(f'Loading timm pretrained encoder: {model_cfg.timm_pretrained}')
 		load_timm_pretrained_encoder_weights(model, model_cfg.timm_pretrained)
-	elif model_cfg.timm_pretrained:
-		print('Skipping timm pretrained encoder because resume is configured')
 
 	print(f'Model: {model_cfg.name}')
 

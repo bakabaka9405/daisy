@@ -21,6 +21,7 @@ class MAEModelConfig(BaseConfig):
 
 	name: str = 'mae_vit_base_patch16'
 	img_size: int | tuple[int, int] = 224  # 图像尺寸，支持整数或 (H, W) 元组
+	pretrained: Path | None = None  # 本地完整预训练检查点路径
 	timm_pretrained: str | None = None
 
 
