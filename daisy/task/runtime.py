@@ -30,14 +30,11 @@ class TaskRunContext:
 	seed: int | None = None
 
 
-def resolve_output_path(save_path_template: str, task_id: str) -> Path:
+def resolve_output_path(save_path_template: str, config: BaseTaskConfig) -> Path:
 	"""解析并创建输出目录"""
-	output_path = Path(
-		save_path_template.format(
-			task_id=task_id,
-			date=datetime.now().strftime('%Y%m%d'),
-		)
-	)
+	values: dict[str, Any] = dict(config)
+	values['date'] = datetime.now().strftime('%Y%m%d')
+	output_path = Path(save_path_template.format(**values))
 	output_path.mkdir(parents=True, exist_ok=True)
 	return output_path
 
@@ -69,7 +66,7 @@ def prepare_task_run(
 		config.meta.commit = daisy.util.get_git_commit()
 	print(f'Git commit: {config.meta.commit}')
 
-	output_path = resolve_output_path(cast(Any, config).output.save_path, config.task_id)
+	output_path = resolve_output_path(cast(Any, config).output.save_path, config)
 	print(f'Output path: {output_path}')
 	return TaskRunContext(
 		output_path=output_path,
