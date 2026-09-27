@@ -50,6 +50,10 @@ class Method[M: nn.Module](ABC, Plugin):
 		if process_fn is not None:
 			trainer.set_process_fn(process_fn)
 
-	def predict_step(self, X: Tensor) -> torch.Tensor:
-		"""执行单批推理，返回预测张量。"""
+	def inference_step(self, X: Tensor) -> Tensor | dict[str, Tensor]:
+		"""执行单批推理，返回原始未解码的模型输出（例如 logits）。"""
+		raise NotImplementedError('Inference is not supported by this method.')
+
+	def predict_step(self, X: Tensor) -> Tensor | dict[str, Tensor]:
+		"""执行单批预测，返回解码后的任务预测结果（例如类别标签），非 logits。"""
 		raise NotImplementedError('Prediction is not supported by this method.')

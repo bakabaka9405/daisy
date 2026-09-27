@@ -8,64 +8,11 @@ from __future__ import annotations
 from typing import Any
 
 import daisy
-import numpy as np
-import torch
-import torch.nn as nn
 from timm.data.loader import MultiEpochsDataLoader
 
 from daisy.dataset.index_dataset import IndexDataset
 from daisy.method.classification import ClassificationMethod
-from daisy.metrics import EvalMetrics, auroc_score, fast_calc_metrics
 from daisy.training import Eval, Trainer
-
-
-def evaluate(
-	scores: torch.Tensor,
-	targets: torch.Tensor,
-	criterion: nn.Module,
-	num_classes: int,
-	compute_metrics: bool = True,
-) -> EvalMetrics:
-	"""模型评估。
-
-	Args:
-		compute_metrics: 是否计算 precision/recall/f1 等扩展指标
-	"""
-	scores = scores.float()
-	loss = criterion(scores, targets)
-	y_pred = torch.argmax(scores, dim=1).numpy()
-	y_true = targets.numpy()
-
-	if not compute_metrics:
-		acc = float(np.mean(y_true == y_pred)) if len(y_true) > 0 else 0.0
-		return EvalMetrics(
-			loss=loss.item(),
-			acc=acc,
-		)
-
-	metrics = fast_calc_metrics(y_true, y_pred, num_classes=num_classes)
-
-	# 计算 AUROC
-	y_outputs = scores.numpy()
-	try:
-		auroc_result = auroc_score(
-			y_true.astype(np.int64, copy=False),
-			y_outputs.astype(np.float64, copy=False),
-			mode='macro',
-		)
-		auroc_val = float(auroc_result['macro'] if isinstance(auroc_result, dict) else auroc_result)
-	except Exception:
-		auroc_val = 0.0
-
-	return EvalMetrics(
-		loss=loss.item(),
-		acc=metrics.acc,
-		precision=metrics.precision,
-		recall=metrics.recall,
-		f1=metrics.f1,
-		auroc=auroc_val,
-		confusion_matrix=metrics.confusion_matrix,
-	)
 
 
 def prepare_classification_training(
@@ -117,20 +64,8 @@ def prepare_classification_training(
 		pin_memory=pin_memory,
 	)
 
-	val_criterion = nn.CrossEntropyLoss()
-
 	def eval_fn(active_trainer: Trainer) -> dict[str, float]:
-		scores, targets = active_trainer.inference(
-			val_loader,
-			lambda batch: (method.predict_step(batch[0]), batch[1]),
-		)
-		metrics = evaluate(
-			scores=scores,
-			targets=targets,
-			criterion=val_criterion,
-			num_classes=method.num_classes,
-			compute_metrics=True,
-		)
+		metrics = method.evaluate(active_trainer, val_loader)
 		return {
 			'loss': metrics.loss,
 			'acc': metrics.acc,

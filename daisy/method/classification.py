@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import override
 
+import numpy as np
 import torch
 import torch.nn as nn
 from timm.data.mixup import Mixup
@@ -11,6 +12,9 @@ from torch import Tensor
 from timm.loss.cross_entropy import LabelSmoothingCrossEntropy, SoftTargetCrossEntropy
 
 from daisy.method.base import Method
+from daisy.metrics import EvalMetrics, auroc_score, fast_calc_metrics
+from daisy.training.trainer import Trainer
+from daisy.typing import GenericDataLoader as DataLoader
 
 
 def create_criterion(mixup_enabled: bool, smoothing: float) -> nn.Module:
@@ -73,5 +77,41 @@ class ClassificationMethod(Method[nn.Module]):
 		return self.criterion(self.model(images), targets)
 
 	@override
-	def predict_step(self, X: Tensor) -> torch.Tensor:
+	def inference_step(self, X: Tensor) -> torch.Tensor:
+		"""执行单批推理，返回原始未归一化的分类 logits。"""
 		return self.model(X)
+
+	@override
+	def predict_step(self, X: Tensor) -> torch.Tensor:
+		"""执行单批预测，调用 inference_step 并返回解码后的类别索引。"""
+		return self.inference_step(X).argmax(dim=1)
+
+	def evaluate(self, trainer: Trainer, data_loader: DataLoader) -> EvalMetrics:
+		"""使用 Trainer 执行推理并计算分类评估指标。"""
+		scores, targets = trainer.inference(
+			data_loader,
+			lambda batch: (self.inference_step(batch[0]), batch[1]),
+		)
+		scores = scores.float()
+		loss = nn.functional.cross_entropy(scores, targets)
+		y_pred = torch.argmax(scores, dim=1).numpy()
+		y_true = targets.numpy()
+
+		metrics = fast_calc_metrics(y_true, y_pred, num_classes=self.num_classes)
+
+		y_outputs = scores.numpy()
+		auroc = auroc_score(
+			y_true.astype(np.int64, copy=False),
+			y_outputs.astype(np.float64, copy=False),
+			mode='macro',
+		)
+
+		return EvalMetrics(
+			loss=loss.item(),
+			acc=metrics.acc,
+			precision=metrics.precision,
+			recall=metrics.recall,
+			f1=metrics.f1,
+			auroc=auroc,
+			confusion_matrix=metrics.confusion_matrix,
+		)

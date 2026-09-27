@@ -6,12 +6,15 @@ from abc import abstractmethod
 import math
 from typing import Any, override
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from sklearn.metrics import accuracy_score, cohen_kappa_score
 from torch import Tensor
 
 from daisy.method.base import Method
+from daisy.metrics import mae_score, rmse_score
 from daisy.model.ordinal import (
 	ClassificationModel,
 	CLMModel,
@@ -21,6 +24,8 @@ from daisy.model.ordinal import (
 	BackboneModel,
 	ScalarModel,
 )
+from daisy.training.trainer import Trainer
+from daisy.typing import GenericDataLoader
 
 
 def _ranking_term(score: torch.Tensor, y: torch.Tensor, *, hinge: bool) -> torch.Tensor:
@@ -105,6 +110,21 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 	def predict_step(self, X: Tensor) -> torch.Tensor:
 		feat = self.model.forward_features(X)
 		return self.predict_from_features(feat.float())
+
+	def evaluate(self, trainer: Trainer, data_loader: GenericDataLoader) -> dict[str, float]:
+		"""使用 Trainer 执行推理并计算有序评估指标。"""
+		preds, targets = trainer.inference(
+			data_loader,
+			lambda batch: (self.predict_step(batch[0]), batch[1]),
+		)
+		pred = preds.numpy(force=True).astype(np.float64)
+		true = targets.numpy(force=True).astype(np.float64)
+		return {
+			'mae': float(mae_score(true, pred)),
+			'rmse': float(rmse_score(true, pred)),
+			'acc': float(accuracy_score(true, pred)),
+			'kappa': float(cohen_kappa_score(true, pred, weights='quadratic', labels=list(range(self.num_classes)))),
+		}
 
 
 class ClassificationBaseMethod(OrdinalBaseMethod[ClassificationModel]):
