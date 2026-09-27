@@ -7,29 +7,38 @@
 ## 2. task 系统架构
 
 - `base.py`：定义 Pydantic 配置基类 `BaseConfig`、`BaseMetaConfig`、`BaseOutputConfig` 与 `BaseTaskConfig`。`BaseTaskConfig` 继承 `BaseConfig`，由字段直接定义模型结构，统一管理 `task_type`、`meta`、`task_file` 与 `task_id`；
-- `runner.py`：提供通用任务调度函数 `load_config(path) -> BaseTaskConfig` 与 `run_task(config, device) -> Path`，解析 `task_type` 并分发至任务执行函数；
-- `tasks/__init__.py`：维护静态任务字典 `TASKS: dict[str, TaskEntry]`，将任务类型映射为 `(ConcreteConfig, run)` 元组，提供 `get_task(task_type) -> TaskEntry`；
+- `runner.py`：提供通用任务调度函数 `load_config(path) -> BaseTaskConfig` 与 `run_task(config, device) -> Path`，解析 `extends`、`imports` 与 `task_type` 并分发至任务执行函数；
+- `imports.py`：`import_files(paths)` 导入 task 文件 `imports` 字段声明的外部 Python 文件，触发其中的 task / feeder 注册；
+- `tasks/__init__.py`：维护任务字典 `TASKS: dict[str, TaskEntry]`，将任务类型映射为 `(ConcreteConfig, run)` 元组，提供 `get_task(task_type) -> TaskEntry` 与装饰器 `register_task(name)`；
+- `feed.py`：`feed(config, seed=...)` 调用 feeder 构建数据划分并执行通用检查，`assert_label_range` / `assert_multitask_label_range` 校验标签范围；
 - `runtime.py`：统一处理运行头部、输出目录、运行快照和完成信息；
 - `serialization.py`：提供 `build_example_config`、`export_example_config` 与 `save_config`，负责任务配置序列化与示例导出；
-- `shared/`：共享配置模型与 transform；
-- `data/`：共享数据加载、split 选择与协议快照逻辑；
+- `shared/`：共享配置模型（含 `FeederConfig` / `DatasetConfig`）与 transform；
 - `tasks/<task_name>/`：任务专属配置与执行逻辑。每个任务模块包含 `config.py` 与实现 `run(config: ConcreteConfig, device: torch.device) -> Path` 的 `runner.py`。
 
 ### 2.1 新增任务
+
+内置任务：
 
 1. 在 `tasks/<task_name>/` 中创建 `config.py` 与 `runner.py`：
    - `config.py` 定义继承 `BaseTaskConfig` 的具体配置类，声明字段 `task_type: Annotated[Literal['<task_name>'], tyro.conf.Suppress] = '<task_name>'`；
    - `runner.py` 实现常规函数 `run(config: ConcreteConfig, device: torch.device) -> Path` 执行任务逻辑；
 2. 在 `tasks/__init__.py` 的静态字典 `TASKS` 中显式添加任务条目 `'<task_name>': (ConcreteConfig, run_<task_name>)`；
-3. 跨任务复用的配置与数据流程分别放入 `shared/` 与 `data/`；
+3. 跨任务复用的配置放入 `shared/`；
 4. 公开对象在 `daisy/task/__init__.py` 显式导出，外部代码统一从 `daisy.task` 导入。
+
+外部任务（项目目录中的 Python 文件）：
+
+1. 配置类同上，定义在模块顶层；
+2. 执行函数使用 `@register_task('<task_name>')` 装饰，配置类由首参注解推导，且须与配置类 `task_type` 默认值一致；
+3. task 文件通过顶层 `imports` 字段导入该文件，统一以 `python -m daisy run <task.toml>` 运行，外部文件不再提供命令行入口。
 
 ### 2.2 运行生命周期
 
 runner 复用 `runtime.py`：
 
 - `prepare_task_run()`：统一 seed、banner、commit 与输出目录；
-- `save_run_snapshot()`：保存 `task_snapshot.json`，额外运行信息通过 `extra` 追加；
+- `save_run_snapshot()`：保存 `task_snapshot.json`，额外运行信息通过 `extra` 追加；存在 `imports` 时将外部文件复制到输出目录 `imports/`，并在 `runtime.imports` 记录各文件 sha256；
 - `print_task_completed()`：统一任务完成输出。
 
 ## 3. CLI 参数与执行机制
@@ -38,7 +47,7 @@ CLI 使用 tyro 绑定 Pydantic 配置模型。`--` 前为命令选项，后为�
 
 执行流程包含以下阶段：
 
-1. `load_config(path)` 使用 `tomllib` 读取 TOML 文件。文件须显式声明 `task_type` 字段：
+1. `load_config(path)` 使用 `tomllib` 读取 TOML 文件，沿 `extends` 链合并配置，并按父级在前、去重的顺序收集各层 `imports`（相对声明它的文件解析）后调用 `import_files` 导入。导入以文件名为顶层模块名，文件所在目录加入 `sys.path`；同名不同路径的文件视为冲突并报错。文件须显式声明 `task_type` 字段：
    - 缺失 `task_type` 时，抛出 `ValueError("Missing 'task_type' in task file: <path>. Please specify a task type.")`；
    - `task_type` 为空或非字符串类型时，抛出 `ValueError("Invalid 'task_type' in task file: <path>. Expected non-empty string.")`；
    - `task_type` 未在 `TASKS` 中注册时，由 `get_task` 抛出 `ValueError("Unknown task type: '<task_type>'. Available types: [...]")`；
@@ -81,18 +90,38 @@ save_path = "outputs/{task_id}"
 - 输出模型模式：
   - `classification` 采用 `BaseOutputConfig`，包含 `save_path`、`keep_count`、`save_best` 与 `log`；
   - `mae_pretrain` 采用 `LogOutputConfig`，包含 `save_path` 与 `log`；
-- 数据集配置通过判别字段选择具体结构：
-  - `dataset.type = 'single'`：在 `dataset.source` 配置来源，在 `dataset.split` 配置 `none`、`ratio` 或 `column` 划分；
-  - `dataset.type = 'sources'`：在 `dataset.sources.train/val/test` 分别配置来源，其中 `train` 必填；
-  - 来源以 `type = 'folder'` 或 `'sheet'` 区分；表格来源的 `path` 必填，`root` 为单个目录；
-  - `dataset.labels.mode = 'self_supervised'` 不配置标签；`'single_label'` 使用 `dataset.labels.target`；`'multi_task'` 使用 `dataset.labels.targets.<任务名>`；
-  - `classification` 要求单标签，`mae_pretrain` 要求无标签，后者默认不划分数据；
-  - `sample_ratio` 仅作用于训练集，采样 seed 优先级为 `sample_seed`、比例划分的 `split.seed`、调用方 seed。各划分的文件互斥检查在采样前执行。
+- 数据集配置 `[dataset]` 只包含 `feeder`（已注册的 feeder 标识符）与 `[dataset.params]`（由该 feeder 的参数模型校验），详见 4.2；
+  - `dataset` 标注 `tyro.conf.Suppress`，数据协议只由 task 文件决定，不接受 CLI 覆盖；
+  - `classification` 在 `model.num_classes` 声明类别数，`mae_pretrain` 默认使用内置 `image_folder`。
 
-### 4.2 配置序列化与示例生成
+### 4.2 feeder 规范
 
-- 示例构建：`build_example_config(task_type)` 通过 `get_task(task_type)` 获取具体的配置类，直接实例化配置对象填充默认值，设置 `meta` 预设字段；
-- 配置持久化：`save_config(config, path)` 通过 `config.model_dump(exclude={'task_file', 'task_id'}, exclude_none=True)` 导出字典，使用 `tomli_w.dump` 写入 TOML 文件；`export_example_config(task_type, path)` 负责输出路径处理与文件写入。
+feeder 负责数据的定位、组装与划分，框架不介入数据布局。
+
+- 签名：`(params: P, *, seed: int | None) -> dict[str, DiskDataset]`，使用 `daisy.feeder.register_feeder('<id>')` 注册；`P` 为模块顶层定义、`model_config = ConfigDict(extra='forbid')` 的 pydantic 模型，由首参注解推导；
+- 返回的划分名由 feeder 决定，task 执行器自行检查所需划分（如 `train`、`val`）；`seed` 为 task 的训练 seed，feeder 可自行声明独立的划分 seed 参数；
+- `feed()` 统一执行与布局无关的检查：返回非空字典、各划分为非空 `DiskDataset`、各划分文件路径互斥；标签语义（类别数、多任务头）由 task 配置声明，执行器校验 feeder 产出的标签范围；
+- 数据划分、采样等可能造成泄露的逻辑全部在外部 feeder 中显式编写；`daisy.feeder` 提供 `read_sheet`、`parse_multitask_table`、`parse_column_split_indices`、`make_disk_dataset` 等工具函数；
+- 内置 feeder 仅有无标签 `image_folder`（`root`、`extensions`、`sample_ratio`、`sample_seed`），返回单一 `train` 划分；
+- 示例见 `tasks/feeders/example_feeders.py` 与 `tasks/example.toml`：
+
+```toml
+task_type = "classification"
+imports = ["feeders/example_feeders.py"]
+
+[dataset]
+feeder = "example_sheet_ratio"
+
+[dataset.params]
+root = "path/to/images"
+sheet = "path/to/labels.xlsx"
+num_classes = 3
+```
+
+### 4.3 配置序列化与示例生成
+
+- 示例构建：`build_example_config(task_type)` 通过 `get_task(task_type)` 获取具体的配置类，直接实例化配置对象填充默认值，设置 `meta` 预设字段；`dataset` 为必填的任务写入占位 `feeder = '<feeder_id>'`；外部任务通过 `python -m daisy example <task_type> -i <file.py>` 先导入再导出；
+- 配置持久化：`save_config(config, path)` 通过 `config.model_dump(exclude={'task_file', 'task_id', 'imports'}, exclude_none=True)` 导出字典，使用 `tomli_w.dump` 写入 TOML 文件；`export_example_config(task_type, path)` 负责输出路径处理与文件写入。
 
 ## 5. 任务行为与产物
 

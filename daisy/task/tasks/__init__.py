@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import inspect
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 import torch
 
@@ -30,21 +31,41 @@ def get_task(task_type: str) -> TaskEntry:
 	return task
 
 
-def register_task[ConfigT: BaseTaskConfig](
-	name: str,
-	config_cls: type[ConfigT],
-	run_fn: Callable[[ConfigT, torch.device], Path],
-) -> None:
-	"""注册任务类型及其对应的配置类与执行函数。
+def _resolve_config_cls(run_fn: Callable[..., Path]) -> type[BaseTaskConfig]:
+	"""从执行函数首参注解推导任务配置类"""
+	qualname = getattr(run_fn, '__qualname__', repr(run_fn))
+	parameters = list(inspect.signature(run_fn).parameters.values())
+	if not parameters:
+		raise TypeError(f'Task runner {qualname} must take the task config as its first parameter')
+
+	hints = get_type_hints(run_fn)
+	config_name = parameters[0].name
+	if config_name not in hints:
+		raise TypeError(f'Task runner {qualname} must annotate parameter {config_name!r} with a BaseTaskConfig subclass')
+	config_cls = hints[config_name]
+	if not (isinstance(config_cls, type) and issubclass(config_cls, BaseTaskConfig)):
+		raise TypeError(f'Task runner {qualname} config annotation must be a BaseTaskConfig subclass, got {config_cls!r}')
+	return config_cls
+
+
+def register_task[F: Callable[..., Path]](name: str) -> Callable[[F], F]:
+	"""注册任务执行函数的装饰器，配置类由执行函数首参注解推导。
 
 	Args:
-		name: 任务类型唯一标识符
-		config_cls: 任务配置类（须继承 BaseTaskConfig）
-		run_fn: 任务执行函数
+		name: 任务类型唯一标识符，须与配置类 task_type 默认值一致
 	"""
-	if name in TASKS:
-		raise ValueError(f"Task '{name}' is already registered.")
-	TASKS[name] = (config_cls, run_fn)
+
+	def decorator(run_fn: F) -> F:
+		if name in TASKS:
+			raise ValueError(f"Task '{name}' is already registered.")
+		config_cls = _resolve_config_cls(run_fn)
+		task_type = config_cls.model_fields['task_type'].default
+		if task_type != name:
+			raise ValueError(f"Task '{name}' config {config_cls.__name__} declares task_type {task_type!r}")
+		TASKS[name] = (config_cls, run_fn)
+		return run_fn
+
+	return decorator
 
 
 __all__ = [

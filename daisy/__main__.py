@@ -3,7 +3,7 @@
 用法:
 	python -m daisy run <task.toml> [-d device] [-- options]  # 运行任务并支持参数覆盖
 	python -m daisy list [-d tasks_dir]                       # 列出所有任务
-	python -m daisy example <task_type> [output] [-f]         # 导出示例配置
+	python -m daisy example <task_type> [output] [-f] [-i a.py]  # 导出示例配置
 """
 
 from collections.abc import Sequence
@@ -40,11 +40,19 @@ class ListTasks:
 
 @dataclass(slots=True, frozen=True)
 class Example:
-	"""导出任务示例配置"""
+	"""导出任务示例配置
+
+	Args:
+		task_type: 任务类型
+		output: 输出路径
+		force: 覆盖已存在的文件
+		imports: 导出前导入的外部 Python 文件（用于注册外部任务）
+	"""
 
 	task_type: Annotated[str, tyro.conf.Positional]
 	output: Annotated[Path | None, tyro.conf.Positional] = None
 	force: Annotated[bool, tyro.conf.arg(aliases=('-f',))] = False
+	imports: Annotated[tuple[Path, ...], tyro.conf.arg(aliases=('-i',))] = ()
 
 
 type Command = (
@@ -83,8 +91,9 @@ def cmd_list(cmd: ListTasks) -> None:
 
 def cmd_example(cmd: Example) -> None:
 	"""导出任务示例配置"""
-	from daisy.task import export_example_config
+	from daisy.task import export_example_config, import_files
 
+	import_files(cmd.imports)
 	output_path = export_example_config(cmd.task_type, cmd.output, force=cmd.force)
 	print(f'已导出示例配置: {output_path}')
 

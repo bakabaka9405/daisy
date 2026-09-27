@@ -8,8 +8,8 @@ import torch
 
 from daisy.classification import prepare_classification_training
 from daisy.method.classification import ClassificationMethod
-from daisy.task.data import interpret, parse_single_label_dataset, single_label_target
 from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, RichEpochPrint, Trainer
+from ...feed import assert_label_range, feed
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from ...shared import get_classification_transform
 from .config import ClassificationConfig
@@ -22,13 +22,13 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 	run_context = prepare_task_run(config, device, seed=training_cfg.seed)
 	output_path = run_context.output_path
 
-	# 加载数据集并校验划分
+	# 加载数据集并校验划分与标签范围
 	print('\nLoading dataset...')
-	dataset_cfg = config.dataset
-	plan = parse_single_label_dataset(dataset_cfg)
-	datasets = interpret(plan, seed=training_cfg.seed)
+	num_classes = config.model.num_classes
+	datasets = feed(config.dataset, seed=training_cfg.seed)
 	if 'train' not in datasets or 'val' not in datasets:
 		raise ValueError("Classification requires 'train' and 'val' dataset splits")
+	assert_label_range(datasets, num_classes)
 	train_dataset = datasets['train']
 	val_dataset = datasets['val']
 	save_run_snapshot(
@@ -39,9 +39,6 @@ def run(config: ClassificationConfig, device: torch.device) -> Path:
 
 	print(f'Train samples: {len(train_dataset)}')
 	print(f'Val samples: {len(val_dataset)}')
-
-	# 从目标配置中提取分类类别数作为单一来源
-	num_classes = single_label_target(plan).num_classes
 
 	# 创建模型
 	print('\nCreating model...')

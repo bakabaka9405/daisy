@@ -7,7 +7,7 @@ from pydantic import Field
 import tyro.conf
 
 from ...base import BaseConfig, BaseOutputConfig, BaseTaskConfig
-from ...shared import DatasetConfig, SingleSourceDatasetConfig
+from ...shared import DatasetConfig
 
 
 class ModelConfig(BaseConfig):
@@ -15,6 +15,8 @@ class ModelConfig(BaseConfig):
 
 	name: str = 'resnet34'
 	pretrained: bool = True
+	# 分类类别数，feeder 产出的标签须位于 [0, num_classes)
+	num_classes: int = Field(default=2, ge=2)
 	# 可选：加载预训练权重
 	checkpoint: Path | None = None
 
@@ -53,6 +55,6 @@ class ClassificationConfig(BaseTaskConfig):
 
 	task_type: Annotated[Literal['classification'], tyro.conf.Suppress] = 'classification'  # type: ignore[assignment]
 	output: BaseOutputConfig = Field(default_factory=BaseOutputConfig)
-	dataset: DatasetConfig = Field(default_factory=SingleSourceDatasetConfig)
+	dataset: DatasetConfig
 	model: ModelConfig = Field(default_factory=ModelConfig)
 	training: TrainingConfig = Field(default_factory=TrainingConfig)

@@ -19,27 +19,16 @@ from __future__ import annotations
 from .base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
 
 # 主要接口
+from .feed import assert_label_range, assert_multitask_label_range, feed
+from .imports import import_files
 from .runner import load_config, run_task
 from .serialization import build_example_config, export_example_config, save_config
 from .shared import (
-	ColumnSplitConfig,
 	DatasetConfig,
-	DatasetTargetConfig,
-	FolderSourceConfig,
+	FeederConfig,
 	InferenceModelConfig,
 	InferenceRuntimeConfig,
-	LabelConfig,
 	LogOutputConfig,
-	MultiSourceDatasetConfig,
-	MultiTaskConfig,
-	NoSplitConfig,
-	RatioSplitConfig,
-	SheetSourceConfig,
-	SingleLabelConfig,
-	SingleSourceDatasetConfig,
-	SourceConfig,
-	SplitConfig,
-	UnlabeledConfig,
 )
 from .tasks import TASKS, get_task, register_task
 from .tasks.classification.config import (
@@ -65,25 +54,17 @@ __all__ = [
 	'build_example_config',
 	'export_example_config',
 	'save_config',
+	'import_files',
+	# 数据供给
+	'feed',
+	'assert_label_range',
+	'assert_multitask_label_range',
 	# 共享配置
-	'ColumnSplitConfig',
 	'DatasetConfig',
-	'DatasetTargetConfig',
-	'FolderSourceConfig',
+	'FeederConfig',
 	'InferenceModelConfig',
 	'InferenceRuntimeConfig',
-	'LabelConfig',
 	'LogOutputConfig',
-	'MultiSourceDatasetConfig',
-	'MultiTaskConfig',
-	'NoSplitConfig',
-	'RatioSplitConfig',
-	'SheetSourceConfig',
-	'SingleLabelConfig',
-	'SingleSourceDatasetConfig',
-	'SourceConfig',
-	'SplitConfig',
-	'UnlabeledConfig',
 	# 任务配置
 	'ClassificationConfig',
 	'MAEPretrainConfig',

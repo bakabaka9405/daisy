@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 import json
 from pathlib import Path
+import shutil
 from typing import Any, cast
 
 from .base import BaseTaskConfig
@@ -90,9 +92,22 @@ def save_run_snapshot(
 	}
 	if run_context.seed is not None:
 		runtime['seed'] = run_context.seed
+	if config.imports:
+		runtime['imports'] = save_import_files(output_path, config.imports)
 	if extra:
 		runtime.update(extra)
 	save_task_snapshot(output_path, config, extra=runtime)
+
+
+def save_import_files(output_path: str | Path, imports: Sequence[Path], *, dirname: str = 'imports') -> dict[str, str]:
+	"""复制外部 imports 文件到输出目录，返回源路径到 sha256 的映射"""
+	imports_dir = Path(output_path) / dirname
+	imports_dir.mkdir(parents=True, exist_ok=True)
+	digests: dict[str, str] = {}
+	for path in imports:
+		shutil.copy2(path, imports_dir / path.name)
+		digests[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
+	return digests
 
 
 def print_task_completed(output_path: str | Path) -> None:

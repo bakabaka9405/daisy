@@ -44,3 +44,5 @@ class BaseTaskConfig(BaseConfig):
 	# 任务文件路径（加载后自动设置）
 	task_file: Annotated[Path | None, tyro.conf.Suppress] = None
 	task_id: Annotated[str, tyro.conf.Suppress] = ''
+	# task 文件 imports 字段解析出的外部 Python 文件绝对路径（加载后自动设置）
+	imports: Annotated[tuple[Path, ...], tyro.conf.Suppress] = ()

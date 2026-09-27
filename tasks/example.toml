@@ -3,6 +3,8 @@
 
 # 任务类型：classification, detection, segmentation, etc.
 task_type = "classification"
+# 导入注册外部 feeder / task 的 Python 文件，路径相对本文件
+imports = ["feeders/example_feeders.py"]
 
 [meta]
 title = "ResNet34 Smile Classification"
@@ -12,29 +14,20 @@ created_at = "2026-01-18"
 commit = "auto"  # 运行时自动记录 git commit hash
 
 [dataset]
-type = "single"
+feeder = "example_sheet_ratio"  # 已注册的 feeder 标识符
 
-[dataset.source]
-type = "sheet"  # "sheet" 或 "folder"
+[dataset.params]  # 由 feeder 的参数模型校验
 root = "C:/Resources/Datasets/FFHQ数据集标注"
-path = "C:/Resources/Datasets/FFHQ数据集标注.xlsx"
-have_header = true
-
-[dataset.labels]
-mode = "single_label"
-
-[dataset.labels.target]
-column = 1
+sheet = "C:/Resources/Datasets/FFHQ数据集标注.xlsx"
+label_column = 1
 num_classes = 3
-offset = -1
-
-[dataset.split]
-method = "ratio"  # "ratio" 或 "sheet"
+label_offset = -1
 val_ratio = 0.1
 
 [model]
 name = "resnet34"
 pretrained = true
+num_classes = 3
 # checkpoint = "path/to/checkpoint.pth"  # 可选：加载预训练权重
 
 [training]

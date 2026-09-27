@@ -5,16 +5,29 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+from pydantic import BaseModel
 import tomli_w
 
 from .base import BaseTaskConfig
+from .shared import FeederConfig
 from .tasks import get_task
+
+
+class _PlaceholderParams(BaseModel):
+	"""示例配置中的占位 feeder 参数"""
 
 
 def build_example_config(task_type: str) -> BaseTaskConfig:
 	"""根据任务类型构建示例任务配置"""
 	config_cls, _ = get_task(task_type)
-	config = config_cls()
+
+	# 必填 dataset 无通用默认值，以跳过校验的占位 feeder 代替
+	dataset_field = config_cls.model_fields.get('dataset')
+	if dataset_field is not None and dataset_field.is_required():
+		placeholder = FeederConfig.model_construct(feeder='<feeder_id>', params=_PlaceholderParams())
+		config = config_cls.model_construct(dataset=placeholder)
+	else:
+		config = config_cls()
 
 	if not config.meta.title:
 		config.meta.title = f'{task_type} 示例任务'
@@ -67,7 +80,7 @@ def export_example_config(task_type: str, path: str | Path | None = None, *, for
 def save_config(config: BaseTaskConfig, path: str | Path) -> None:
 	"""保存任务配置到 TOML 文件"""
 	path = Path(path)
-	data = config.model_dump(mode='json', exclude={'task_file', 'task_id'}, exclude_none=True)
+	data = config.model_dump(mode='json', exclude={'task_file', 'task_id', 'imports'}, exclude_none=True)
 
 	with open(path, 'wb') as f:
 		tomli_w.dump(data, f)

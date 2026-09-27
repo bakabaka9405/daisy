@@ -1,14 +1,25 @@
-"""数据样本加载与标签解析底层工具"""
+"""供外部 feeder 使用的样本读取与标签解析工具"""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
 import pandas as pd
 
 from daisy.dataset.disk_dataset import load_files_from_folder
+
+DEFAULT_IMAGE_EXTENSIONS: list[str] = [
+	'.jpg',
+	'.jpeg',
+	'.png',
+	'.bmp',
+	'.webp',
+	'.tiff',
+	'.tif',
+]
 
 
 @dataclass(slots=True, frozen=True)
@@ -178,3 +189,109 @@ def read_single_label(
 	"""从数据表中提取并解析单任务标签"""
 	lbl_series = get_column_series(df, spec.column)
 	return parse_target_labels(lbl_series, spec, target_name)
+
+
+def parse_table_paths(
+	df: pd.DataFrame,
+	dataset_root: Path | str,
+	image_column: int | str = 0,
+) -> list[Path]:
+	"""从数据表中提取图像路径列表"""
+	root = Path(dataset_root) if isinstance(dataset_root, str) else dataset_root
+	img_series = get_column_series(df, image_column)
+	return [root / str(x) for x in img_series.tolist()]
+
+
+def parse_single_label_table(
+	df: pd.DataFrame,
+	dataset_root: Path | str,
+	spec: ColumnLabelSpec,
+	*,
+	image_column: int | str = 0,
+) -> tuple[list[Path], list[int]]:
+	"""从数据表中解析图像路径与单任务标签"""
+	paths = parse_table_paths(df, dataset_root, image_column=image_column)
+	labels = read_single_label(df, spec)
+	return paths, labels
+
+
+def read_multitask_labels(
+	df: pd.DataFrame,
+	specs: Mapping[str, ColumnLabelSpec],
+) -> list[dict[str, int]]:
+	"""从数据表中提取并解析多任务标签"""
+	# 解析各子任务的目标标签列表
+	parsed: dict[str, list[int]] = {name: read_single_label(df, spec, target_name=name) for name, spec in specs.items()}
+
+	# 按样本索引组装多任务标签字典
+	num_samples = len(df)
+	return [{name: parsed[name][i] for name in specs} for i in range(num_samples)]
+
+
+def parse_multitask_table(
+	df: pd.DataFrame,
+	dataset_root: Path | str,
+	specs: Mapping[str, ColumnLabelSpec],
+	*,
+	image_column: int | str = 0,
+) -> tuple[list[Path], list[dict[str, int]]]:
+	"""从数据表中解析图像路径与多任务标签"""
+	paths = parse_table_paths(df, dataset_root, image_column=image_column)
+	labels = read_multitask_labels(df, specs)
+	return paths, labels
+
+
+def parse_column_split_indices(
+	file_paths: Sequence[Path],
+	table: pd.DataFrame,
+	*,
+	root: Path,
+	image_column: int | str,
+	assignment_column: int | str,
+	partition_values: Sequence[str | int],
+) -> list[list[int]]:
+	"""解析表格中的划分列并返回各分区对应的样本索引列表。
+
+	外层列表顺序与 partition_values 一一对应；各内层列表按输入顺序保存样本在数据集中的索引；
+	未匹配样本被排除；未分配到任何样本的分区保留为空列表。
+	"""
+	# 第一阶段：解析图像与划分列构建规范化路径映射
+	split_img_series = get_column_series(table, image_column)
+	split_col_series = get_column_series(table, assignment_column)
+
+	split_map: dict[str, int | None] = {}
+	for raw_img, split_val in zip(split_img_series.tolist(), split_col_series.tolist()):
+		img_key = (root / str(raw_img)).resolve().as_posix()
+		if img_key in split_map:
+			raise ValueError(f'Duplicate image path key in split table: {img_key}')
+		partition_index: int | None = None
+		for group_idx, target in enumerate(partition_values):
+			if split_val == target or str(split_val) == str(target):
+				partition_index = group_idx
+				break
+		split_map[img_key] = partition_index
+
+	# 第二阶段：样本覆盖完整性比对
+	main_keys = [p.resolve().as_posix() for p in file_paths]
+	main_key_set = set(main_keys)
+	split_key_set = set(split_map.keys())
+
+	missing = main_key_set - split_key_set
+	if missing:
+		raise ValueError(
+			f'Split table is missing {len(missing)} dataset samples, e.g. {sorted(missing)[:5]}'
+		)
+	extra = split_key_set - main_key_set
+	if extra:
+		raise ValueError(
+			f'Split table has {len(extra)} extra rows not in dataset, e.g. {sorted(extra)[:5]}'
+		)
+
+	# 第三阶段：按输入顺序分配样本索引至对应分区
+	groups: list[list[int]] = [[] for _ in partition_values]
+	for idx, key in enumerate(main_keys):
+		partition_index = split_map[key]
+		if partition_index is not None:
+			groups[partition_index].append(idx)
+
+	return groups

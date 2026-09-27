@@ -106,6 +106,8 @@ class ClassificationMethod(Method[nn.Module]):
 			mode='macro',
 		)
 
+		assert isinstance(auroc, np.float64)
+
 		return EvalMetrics(
 			loss=loss.item(),
 			acc=metrics.acc,

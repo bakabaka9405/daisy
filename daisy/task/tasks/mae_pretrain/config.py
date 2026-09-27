@@ -6,14 +6,9 @@ from typing import Annotated, Literal
 from pydantic import Field
 import tyro.conf
 
+from daisy.feeder import ImageFolderParams
 from ...base import BaseConfig, BaseTaskConfig
-from ...shared import (
-	DatasetConfig,
-	LogOutputConfig,
-	NoSplitConfig,
-	SingleSourceDatasetConfig,
-	UnlabeledConfig,
-)
+from ...shared import DatasetConfig, FeederConfig, LogOutputConfig
 
 
 class MAEModelConfig(BaseConfig):
@@ -60,11 +55,8 @@ class MAETrainingConfig(BaseConfig):
 	transform: MAETransformConfig = Field(default_factory=MAETransformConfig)
 
 
-def _default_mae_dataset() -> SingleSourceDatasetConfig:
-	return SingleSourceDatasetConfig(
-		labels=UnlabeledConfig(),
-		split=NoSplitConfig(),
-	)
+def _default_mae_dataset() -> FeederConfig:
+	return FeederConfig(feeder='image_folder', params=ImageFolderParams())
 
 
 class MAEPretrainConfig(BaseTaskConfig):
