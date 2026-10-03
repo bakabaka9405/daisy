@@ -154,7 +154,7 @@ def _build_config(data: dict[str, Any], path: Path, imports: list[Path]) -> Base
 	return config
 
 
-def load_config(path: str | Path) -> BaseTaskConfig:
+def load_config(path: Path) -> BaseTaskConfig:
 	"""从 TOML 文件加载任务配置
 
 	根据 TOML 中的 task_type 字段自动选择正确的配置类。
@@ -168,14 +168,13 @@ def load_config(path: str | Path) -> BaseTaskConfig:
 	Returns:
 		对应任务类型的配置对象
 	"""
-	path = Path(path)
 	data, imports = _load_raw_config(path)
 	import_files(imports)
 	data.pop('run', None)
 	return _build_config(data, path, imports)
 
 
-def load_run_configs(path: str | Path) -> list[BaseTaskConfig]:
+def load_run_configs(path: Path) -> list[BaseTaskConfig]:
 	"""从 TOML 文件加载全部 run 的任务配置
 
 	run 数组的每个条目是一次参数重载：先按条目的 _remove 从基础配置中删除键（回到配置模型默认值），
@@ -188,7 +187,6 @@ def load_run_configs(path: str | Path) -> list[BaseTaskConfig]:
 	Returns:
 		按 run 数组顺序排列的配置列表（run_id、run_overrides、run_default 已设置）；无 run 时为只含基础配置的列表
 	"""
-	path = Path(path)
 	data, imports = _load_raw_config(path)
 	import_files(imports)
 	runs = _parse_runs(data.pop('run', None), path)
@@ -229,7 +227,7 @@ def select_runs(configs: Sequence[BaseTaskConfig], run_ids: Sequence[str]) -> li
 
 
 def run_task(
-	config: BaseTaskConfig | str | Path,
+	config: BaseTaskConfig | Path,
 	device: torch.device | str | None = None,
 ) -> Path:
 	"""运行任务
@@ -241,7 +239,7 @@ def run_task(
 	Returns:
 		输出路径
 	"""
-	if isinstance(config, (str, Path)):
+	if isinstance(config, Path):
 		config = load_config(config)
 
 	if device is None:

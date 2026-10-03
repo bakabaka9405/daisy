@@ -33,13 +33,12 @@ class ColumnLabelSpec:
 
 
 def read_sheet(
-	sheet_path: Path | str,
+	sheet_path: Path,
 	*,
 	sheet_name: int | str = 0,
 	have_header: bool = False,
 ) -> pd.DataFrame:
 	"""按文件后缀读取 CSV 或 Excel 表格文件为 DataFrame"""
-	sheet_path = Path(sheet_path)
 	suffix = sheet_path.suffix.lower()
 
 	if suffix == '.csv':
@@ -74,8 +73,8 @@ def get_column_series(df: pd.DataFrame, col: int | str) -> pd.Series:
 
 
 def load_samples_from_sheet(
-	dataset_root: Path | str,
-	sheet_path: Path | str,
+	dataset_root: Path,
+	sheet_path: Path,
 	sheet_name: int | str = 0,
 	have_header: bool = False,
 	column: int | str = 1,
@@ -90,9 +89,8 @@ def load_samples_from_sheet(
 		have_header=have_header,
 	)
 
-	root = Path(dataset_root) if isinstance(dataset_root, str) else dataset_root
 	img_series = get_column_series(df, image_column)
-	files = [root / str(x) for x in img_series.tolist()]
+	files = [dataset_root / str(x) for x in img_series.tolist()]
 	label_series = get_column_series(df, column)
 	raw_labels = label_series.astype(label_dtype).tolist()
 	labels = [x + label_offset for x in raw_labels]
@@ -101,16 +99,13 @@ def load_samples_from_sheet(
 
 
 def load_samples_from_folder(
-	root: Path | str,
+	root: Path,
 	class_dict: dict[str, int] | None = None,
 	extensions: Sequence[str] | None = None,
 	*,
 	num_classes: int | None = None,
 ) -> tuple[list[Path], list[int], dict[str, int]]:
 	"""从文件夹按类别子目录结构加载图像路径与标签"""
-	if isinstance(root, str):
-		root = Path(root)
-
 	subdirs = sorted([d for d in root.iterdir() if d.is_dir()], key=lambda d: d.name)
 	should_build_dict = class_dict is None
 
@@ -193,18 +188,17 @@ def read_single_label(
 
 def parse_table_paths(
 	df: pd.DataFrame,
-	dataset_root: Path | str,
+	dataset_root: Path,
 	image_column: int | str = 0,
 ) -> list[Path]:
 	"""从数据表中提取图像路径列表"""
-	root = Path(dataset_root) if isinstance(dataset_root, str) else dataset_root
 	img_series = get_column_series(df, image_column)
-	return [root / str(x) for x in img_series.tolist()]
+	return [dataset_root / str(x) for x in img_series.tolist()]
 
 
 def parse_single_label_table(
 	df: pd.DataFrame,
-	dataset_root: Path | str,
+	dataset_root: Path,
 	spec: ColumnLabelSpec,
 	*,
 	image_column: int | str = 0,
@@ -230,7 +224,7 @@ def read_multitask_labels(
 
 def parse_multitask_table(
 	df: pd.DataFrame,
-	dataset_root: Path | str,
+	dataset_root: Path,
 	specs: Mapping[str, ColumnLabelSpec],
 	*,
 	image_column: int | str = 0,

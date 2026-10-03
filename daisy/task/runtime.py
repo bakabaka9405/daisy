@@ -86,7 +86,7 @@ def prepare_task_run(
 
 
 def save_run_snapshot(
-	output_path: str | Path,
+	output_path: Path,
 	config: BaseTaskConfig,
 	run_context: TaskRunContext,
 	*,
@@ -106,9 +106,9 @@ def save_run_snapshot(
 	save_task_snapshot(output_path, config, extra=runtime)
 
 
-def save_import_files(output_path: str | Path, imports: Sequence[Path], *, dirname: str = 'imports') -> dict[str, str]:
+def save_import_files(output_path: Path, imports: Sequence[Path], *, dirname: str = 'imports') -> dict[str, str]:
 	"""复制外部 imports 文件到输出目录，返回源路径到 sha256 的映射"""
-	imports_dir = Path(output_path) / dirname
+	imports_dir = output_path / dirname
 	imports_dir.mkdir(parents=True, exist_ok=True)
 	digests: dict[str, str] = {}
 	for path in imports:
@@ -117,7 +117,7 @@ def save_import_files(output_path: str | Path, imports: Sequence[Path], *, dirna
 	return digests
 
 
-def print_task_completed(output_path: str | Path) -> None:
+def print_task_completed(output_path: Path) -> None:
 	"""打印统一的任务完成信息"""
 	print('\n' + '=' * 60)
 	print('Task completed!')
@@ -125,23 +125,21 @@ def print_task_completed(output_path: str | Path) -> None:
 	print('=' * 60)
 
 
-def save_json(path: str | Path, data: Any) -> None:
+def save_json(path: Path, data: Any) -> None:
 	"""保存 JSON 文件"""
-	path = Path(path)
 	path.parent.mkdir(parents=True, exist_ok=True)
 	with open(path, 'w', encoding='utf-8') as f:
 		json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def save_task_snapshot(
-	output_path: str | Path,
+	output_path: Path,
 	config: BaseTaskConfig,
 	*,
 	extra: dict[str, Any] | None = None,
 	filename: str = 'task_snapshot.json',
 ) -> None:
 	"""保存 task 配置快照"""
-	output_path = Path(output_path)
 	# run_default 只影响选择哪些 run，条目原文（含 default）已记录在 run_overrides 中
 	snapshot = config.model_dump(mode='json', exclude={'task_file', 'run_default'}, exclude_none=True)
 	snapshot['task_id'] = config.task_id

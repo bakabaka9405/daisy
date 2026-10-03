@@ -59,7 +59,7 @@ def _get_available_output_path(path: Path) -> Path:
 		index += 1
 
 
-def export_example_config(task_type: str, path: str | Path | None = None, *, force: bool = False) -> Path:
+def export_example_config(task_type: str, path: Path | None = None, *, force: bool = False) -> Path:
 	"""导出某个任务类型的示例配置文件"""
 	config = build_example_config(task_type)
 
@@ -67,7 +67,7 @@ def export_example_config(task_type: str, path: str | Path | None = None, *, for
 		default_path = _get_default_example_path(task_type)
 		output_path = default_path if force else _get_available_output_path(default_path)
 	else:
-		output_path = Path(path)
+		output_path = path
 
 	if output_path.exists() and not force:
 		raise FileExistsError(f'Output file already exists: {output_path}')
@@ -77,9 +77,8 @@ def export_example_config(task_type: str, path: str | Path | None = None, *, for
 	return output_path
 
 
-def save_config(config: BaseTaskConfig, path: str | Path) -> None:
+def save_config(config: BaseTaskConfig, path: Path) -> None:
 	"""保存任务配置到 TOML 文件"""
-	path = Path(path)
 	data = config.model_dump(mode='json', exclude={'task_file', 'task_id', 'imports', 'run_id', 'run_overrides', 'run_default'}, exclude_none=True)
 
 	with open(path, 'wb') as f:

@@ -15,7 +15,7 @@ import torch
 import torch.nn as nn
 
 
-def load_moco_pretrained_weights(model: nn.Module, checkpoint_path: str | Path, engine: str = 'v3'):
+def load_moco_pretrained_weights(model: nn.Module, checkpoint_path: Path, engine: str = 'v3'):
 	"""从 MoCo checkpoint 中提取 encoder 权重到标准模型
 
 	Args:

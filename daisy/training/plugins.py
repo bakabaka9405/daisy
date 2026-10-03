@@ -104,11 +104,11 @@ class BestModel(Plugin):
 		self,
 		watch_metric: str,
 		mode: Literal['max', 'min'] = 'max',
-		save_path: Path | str | None = None,
+		save_path: Path | None = None,
 	):
 		self.watch_metric = watch_metric
 		self.mode = mode
-		self.save_path = Path(save_path) if save_path else None
+		self.save_path = save_path
 
 		self.best_value: float = -float('inf') if mode == 'max' else float('inf')
 		self.best_epoch: int = -1
@@ -173,11 +173,11 @@ class Checkpoint(Plugin):
 
 	def __init__(
 		self,
-		save_dir: Path | str,
+		save_dir: Path,
 		save_freq: int = 0,
 		keep_recent: int = 0,
 	):
-		self.save_dir = Path(save_dir)
+		self.save_dir = save_dir
 		self.save_freq = save_freq
 		self.keep_recent = keep_recent
 
@@ -334,10 +334,10 @@ class CSVLog(Plugin):
 
 	def __init__(
 		self,
-		log_path: Path | str,
+		log_path: Path,
 		watch: Iterable[str],
 	):
-		self.log_path = Path(log_path)
+		self.log_path = log_path
 		self.watch: tuple[str, ...] = tuple(watch)
 		self.history: list[dict[str, Any]] = []
 

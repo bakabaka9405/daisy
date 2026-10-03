@@ -3,17 +3,18 @@
 提供任务配置、执行与序列化等功能。
 
 基本用法:
+    from pathlib import Path
     from daisy.task import load_config, run_task
 
     # 从 TOML 文件运行任务
-    run_task('tasks/example.toml')
+    run_task(Path('tasks/example.toml'))
 
     # 加载配置后运行
-    config = load_config('tasks/example.toml')
+    config = load_config(Path('tasks/example.toml'))
     run_task(config)
 
     # 含 run 数组的任务：逐个 run 的配置，顺序运行
-    run_tasks(load_run_configs('tasks/ablation.toml'))
+    run_tasks(load_run_configs(Path('tasks/ablation.toml')))
 """
 
 from __future__ import annotations

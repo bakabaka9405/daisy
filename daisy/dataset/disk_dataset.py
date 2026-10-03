@@ -94,7 +94,7 @@ class DiskDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 		)
 
 
-def load_files_from_folder(root: Path | str, extensions: Sequence[str] | tuple[str, ...] | None = None) -> list[Path]:
+def load_files_from_folder(root: Path, extensions: Sequence[str] | tuple[str, ...] | None = None) -> list[Path]:
 	"""从文件夹递归加载所有图像文件
 
 	Args:
@@ -104,9 +104,6 @@ def load_files_from_folder(root: Path | str, extensions: Sequence[str] | tuple[s
 	Returns:
 		所有图像文件的路径列表
 	"""
-	if isinstance(root, str):
-		root = Path(root)
-
 	if extensions is None:
 		extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff', '.tif')
 

@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 
 
-def cv_imread(path: str | Path):
+def cv_imread(path: Path):
 	cv_img = cv2.imdecode(np.fromfile(str(path), dtype=np.uint8), cv2.IMREAD_COLOR)
 	return cv_img
 
@@ -11,12 +11,12 @@ def cv_imread(path: str | Path):
 class ImageClipper:
 	def __init__(
 		self,
-		input_dir: str | Path,
-		output_dir: str | Path,
+		input_dir: Path,
+		output_dir: Path,
 		max_display_size=800,
 	):
-		self.input_dir = Path(input_dir)
-		self.output_dir = Path(output_dir)
+		self.input_dir = input_dir
+		self.output_dir = output_dir
 		self.max_display_size = max_display_size
 
 		# 创建输出文件夹
@@ -279,7 +279,7 @@ def main():
 		output_folder = 'cropped_images'  # 默认输出文件夹
 
 	# 创建并运行裁剪工具
-	clipper = ImageClipper(input_folder, output_folder)
+	clipper = ImageClipper(Path(input_folder), Path(output_folder))
 	clipper.run()
 
 

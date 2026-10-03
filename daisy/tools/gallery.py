@@ -10,7 +10,7 @@ def cv_imread(file_path):
 
 
 def show_gallery(
-	images: list[str | Path | NDArray],
+	images: list[Path | NDArray],
 	grid_size: tuple[int, int] = (3, 3),
 	image_size: tuple[int, int] = (224, 224),
 	window_name: str = 'Image Gallery',
@@ -33,8 +33,8 @@ def show_gallery(
 	filenames = []
 
 	for img in images:
-		if isinstance(img, (str, Path)):
-			path = Path(img)
+		if isinstance(img, Path):
+			path = img
 			try:
 				image = cv_imread(str(path))
 				if image is None:
@@ -193,9 +193,7 @@ def show_image_comparison(
 if __name__ == '__main__':
 	path = open('C:/Temp/path.txt', 'r').readlines()
 
-	path = [i.strip() for i in path]
+	root = Path(r'C:\Resources\Datasets\微笑图片标注汇总25-3-4\微笑图片标注汇总25-3-4')
+	images: list[Path | NDArray] = [root / i.strip() for i in path]
 
-	for i in range(len(path)):
-		path[i] = rf'C:\Resources\Datasets\微笑图片标注汇总25-3-4\微笑图片标注汇总25-3-4\{path[i]}'
-
-	show_gallery(path, (5, 5), (100, 200))  # type:ignore
+	show_gallery(images, (5, 5), (100, 200))
