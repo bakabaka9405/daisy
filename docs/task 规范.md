@@ -43,23 +43,28 @@ runner 复用 `runtime.py`：
 
 ## 3. CLI 参数与执行机制
 
-CLI 使用 tyro 绑定 Pydantic 配置模型。`--` 前为命令选项，后为任务配置覆盖项。参数优先级遵循 **CLI > TOML > 模型默认值**。
+CLI 使用 tyro 绑定 Pydantic 配置模型。`--` 前为命令选项，后为任务配置覆盖项。参数优先级遵循 **CLI > run 条目 > TOML > 模型默认值**；task 文件含 `run` 数组（见 4.4）时，CLI 覆盖项作用于每个 run。
 
 执行流程包含以下阶段：
 
-1. `load_config(path)` 使用 `tomllib` 读取 TOML 文件，沿 `extends` 链合并配置，并按父级在前、去重的顺序收集各层 `imports`（相对声明它的文件解析）后调用 `import_files` 导入。导入以文件名为顶层模块名，文件所在目录加入 `sys.path`；同名不同路径的文件视为冲突并报错。文件须显式声明 `task_type` 字段：
+1. `load_run_configs(path)` 使用 `tomllib` 读取 TOML 文件，沿 `extends` 链合并配置，并按父级在前、去重的顺序收集各层 `imports`（相对声明它的文件解析）后调用 `import_files` 导入。导入以文件名为顶层模块名，文件所在目录加入 `sys.path`；同名不同路径的文件视为冲突并报错。文件须显式声明 `task_type` 字段：
    - 缺失 `task_type` 时，抛出 `ValueError("Missing 'task_type' in task file: <path>. Please specify a task type.")`；
    - `task_type` 为空或非字符串类型时，抛出 `ValueError("Invalid 'task_type' in task file: <path>. Expected non-empty string.")`；
    - `task_type` 未在 `TASKS` 中注册时，由 `get_task` 抛出 `ValueError("Unknown task type: '<task_type>'. Available types: [...]")`；
-2. 通过 `config_cls.model_validate(data)` 校验并实例化具体任务配置对象；
-3. 使用 `tyro.cli` 将命令行 `--` 后的覆盖参数绑定至配置实例，完成最终校验；
-4. 将校验后的配置对象传入 `run_task(config, device)` 分发执行。
+2. 通过 `config_cls.model_validate(data)` 校验并实例化具体任务配置对象；存在 `run` 数组时，先校验不含任何条目的基础配置，再对每个条目合并后分别校验，得到各 run 的配置；
+3. 按 `--runs` 选择 run（保持 task 文件中的顺序）：`default` 表示所有默认运行（`default = true`）的 run，可与其他 run id 组合；不指定 `--runs` 时等价于 `--runs default`；未知 id、task 文件无 `run` 却给出 run id、或最终没有选中任何 run 时报错；
+4. 使用 `tyro.cli` 将命令行 `--` 后的覆盖参数绑定至每个 run 的配置实例，完成最终校验；
+5. `run_tasks(configs, device)` 检查各 run 渲染后的输出路径互不相同，再在同一进程中顺序调用 `run_task(config, device)` 分发执行；任一 run 报错立即终止，此前完成的 run 保留。
+
+`load_config(path)` 返回忽略 `run` 数组的基础配置，供 `daisy list` 等只需单个配置的场景使用。
 
 常用命令格式：
 
 - 命令帮助：`python -m daisy run --help`；
 - 任务字段帮助：`python -m daisy run task.toml -- --help`；
 - 指定设备与学习率：`python -m daisy run task.toml -d cpu -- --training.lr 0.02`；
+- 只运行部分 run，并对其统一覆盖：`python -m daisy run ablation.toml --runs imagenet_mae random -- --training.epochs 1`；
+- 默认运行的 run 加上一个非默认 run：`python -m daisy run ablation.toml --runs default extra`；
 - 导出示例配置：`python -m daisy example <task_type>`；
 - 列出任务文件：`python -m daisy list`。
 
@@ -121,7 +126,44 @@ num_classes = 3
 ### 4.3 配置序列化与示例生成
 
 - 示例构建：`build_example_config(task_type)` 通过 `get_task(task_type)` 获取具体的配置类，直接实例化配置对象填充默认值，设置 `meta` 预设字段；`dataset` 为必填的任务写入占位 `feeder = '<feeder_id>'`；外部任务通过 `python -m daisy example <task_type> -i <file.py>` 先导入再导出；
-- 配置持久化：`save_config(config, path)` 通过 `config.model_dump(exclude={'task_file', 'task_id', 'imports'}, exclude_none=True)` 导出字典，使用 `tomli_w.dump` 写入 TOML 文件；`export_example_config(task_type, path)` 负责输出路径处理与文件写入。
+- 配置持久化：`save_config(config, path)` 通过 `config.model_dump(exclude={'task_file', 'task_id', 'imports', 'run_id', 'run_overrides', 'run_default'}, exclude_none=True)` 导出字典，使用 `tomli_w.dump` 写入 TOML 文件；`export_example_config(task_type, path)` 负责输出路径处理与文件写入。
+
+### 4.4 run 数组
+
+简单消融可以在一个 task 文件中用 `run` 数组描述：每个条目是一次参数重载，等价于一次带 CLI 覆盖的运行。复杂的网格调参仍由外部脚本循环调用。
+
+```toml
+extends = "base.toml"
+
+[output]
+save_path = "outputs/{task_id}/{run_id}"
+
+[[run]]
+id = "imagenet_mae"
+_remove = ["model.checkpoint_path"]
+model.name = "vit_base_patch16_224.mae"
+
+[[run]]
+id = "imagenet_mae_ffhq"
+```
+
+- `run` 与 `extends`、`imports` 同为顶层保留键，值为非空的表数组；
+- 每个条目必须有 `id`：非空，只含字母、数字、`.`、`_`、`-`，同一 task 文件内不重复，且不能为保留字 `default`。`id` 不进入配置，用于输出路径模板变量 `{run_id}`、`--runs` 选择、运行时打印与快照；
+- 条目可选 `default`（布尔，默认 `true`）：为 `false` 的 run 只在 `--runs` 显式给出其 id 时运行，适合只在部分设置下才需要的变体（如只在低训练集比例下补充的长训练）。`default` 不进入配置；
+- 条目先按其 `_remove`（见 4.5）从基础配置中删除键，再将其余内容按 `extends` 的语义深度合并到基础配置上（表递归合并，标量与列表整体替换），最后由配置模型校验，拼错的字段名同样报错；
+- `run` 随 `extends` 继承：子文件未声明 `run` 时沿用父级的 `run`，声明时整体替换，`_remove = ["run"]` 则去掉继承来的 `run`；
+- 基础配置（不含任何条目）须能单独通过校验；
+- 各 run 的输出路径必须互不相同，通常在 `save_path` 中使用 `{run_id}`；
+- `task_snapshot.json` 记录 `run_id` 与 `run_overrides`（条目去掉 `id` 后的原文，含 `_remove` 与 `default`），无 `run` 时不出现。
+
+### 4.5 `_remove`：删除继承的值
+
+TOML 没有 null，无法用覆盖把字段设回 `None` 或模型默认值。`_remove` 是点分隔键路径的数组，表示删除这些键，使字段回到上一层的值或配置模型默认值：
+
+- 在 task 文件顶层：先从 `extends` 加载的父级配置中删除这些键，再合并当前文件；没有 `extends` 的文件使用 `_remove` 报错；
+- 在 `[[run]]` 条目中：先从基础配置中删除这些键，再合并该条目；
+- 要删除的键在继承来的配置中不存在时报错，避免拼写错误被静默忽略；
+- 例：父级设置了 `model.checkpoint_path`，而模型默认值为 `None`，则 `_remove = ["model.checkpoint_path"]` 使其为 `None`。
 
 ## 5. 任务行为与产物
 

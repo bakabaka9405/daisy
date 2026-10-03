@@ -48,7 +48,17 @@ train = "rectangle_train"  # rectangle_train, rectangle_train_slight, stretch_tr
 val = "rectangle_val"      # rectangle_val, stretch_val
 
 [output]
-save_path = "outputs/{task_id}"  # 支持 {task_id}, {date} 变量
+save_path = "outputs/{task_id}"  # 支持 {task_id}, {run_id}, {date} 变量
 keep_count = 1
 save_best = true
 log = true
+
+# 可选：run 数组，每个条目是一次参数重载，一个文件描述多次运行（简单消融）
+# 使用时 save_path 需区分各 run，例如 "outputs/{task_id}/{run_id}"
+# [[run]]
+# id = "resnet34"
+#
+# [[run]]
+# id = "resnet50"
+# _remove = ["model.pretrained"]  # 删除上面设置的值，回到模型默认值
+# model.name = "resnet50"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 import tyro.conf
@@ -28,7 +28,7 @@ class BaseMetaConfig(BaseConfig):
 class BaseOutputConfig(BaseConfig):
 	"""输出配置"""
 
-	save_path: str = 'outputs/{task_id}'  # 支持 {task_id} 变量
+	save_path: str = 'outputs/{task_id}'  # 支持 {task_id}、{run_id}、{date} 及任意配置字段（如 {training.seed}）
 	keep_count: int = 1
 	save_best: bool = True
 	log: bool = True
@@ -46,3 +46,7 @@ class BaseTaskConfig(BaseConfig):
 	task_id: Annotated[str, tyro.conf.Suppress] = ''
 	# task 文件 imports 字段解析出的外部 Python 文件绝对路径（加载后自动设置）
 	imports: Annotated[tuple[Path, ...], tyro.conf.Suppress] = ()
+	# task 文件 run 数组中当前条目的 id、重载内容与是否默认运行（加载后自动设置；无 run 时分别为空字符串、None 与 True）
+	run_id: Annotated[str, tyro.conf.Suppress] = ''
+	run_overrides: Annotated[dict[str, Any] | None, tyro.conf.Suppress] = None
+	run_default: Annotated[bool, tyro.conf.Suppress] = True

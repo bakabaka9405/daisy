@@ -32,11 +32,16 @@ class TaskRunContext:
 	seed: int | None = None
 
 
-def resolve_output_path(save_path_template: str, config: BaseTaskConfig) -> Path:
-	"""解析并创建输出目录"""
+def format_output_path(save_path_template: str, config: BaseTaskConfig) -> Path:
+	"""按配置字段渲染输出路径模板（不创建目录）"""
 	values: dict[str, Any] = dict(config)
 	values['date'] = datetime.now().strftime('%Y%m%d')
-	output_path = Path(save_path_template.format(**values))
+	return Path(save_path_template.format(**values))
+
+
+def resolve_output_path(save_path_template: str, config: BaseTaskConfig) -> Path:
+	"""解析并创建输出目录"""
+	output_path = format_output_path(save_path_template, config)
 	output_path.mkdir(parents=True, exist_ok=True)
 	return output_path
 
@@ -56,6 +61,8 @@ def prepare_task_run(
 
 	print('=' * 60)
 	print(f'Task: {config.meta.title or config.task_id}')
+	if config.run_id:
+		print(f'Run: {config.run_id}')
 	print(f'Description: {config.meta.description}')
 	for line in header_lines:
 		print(f'{line.label}: {line.value}')
@@ -135,8 +142,11 @@ def save_task_snapshot(
 ) -> None:
 	"""保存 task 配置快照"""
 	output_path = Path(output_path)
-	snapshot = config.model_dump(mode='json', exclude={'task_file'}, exclude_none=True)
+	# run_default 只影响选择哪些 run，条目原文（含 default）已记录在 run_overrides 中
+	snapshot = config.model_dump(mode='json', exclude={'task_file', 'run_default'}, exclude_none=True)
 	snapshot['task_id'] = config.task_id
+	if not config.run_id:
+		snapshot.pop('run_id')
 	if config.task_file is not None:
 		snapshot['task_file'] = str(config.task_file)
 	if extra:

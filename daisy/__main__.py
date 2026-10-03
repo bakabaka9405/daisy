@@ -1,7 +1,7 @@
 """Daisy CLI 入口
 
 用法:
-	python -m daisy run <task.toml> [-d device] [-- options]  # 运行任务并支持参数覆盖
+	python -m daisy run <task.toml> [-d device] [--runs id ...] [-- options]  # 运行任务（含 run 数组时逐个运行）并支持参数覆盖
 	python -m daisy list [-d tasks_dir]                       # 列出所有任务
 	python -m daisy example <task_type> [output] [-f] [-i a.py]  # 导出示例配置
 """
@@ -22,13 +22,15 @@ class Run:
 
 	Args:
 		task: 任务配置文件路径
-		overrides: 通过 -- 分隔符传入的任务配置覆盖参数
+		overrides: 通过 -- 分隔符传入的任务配置覆盖参数，作用于每个 run（优先级高于 run 条目）
 		device: 运行设备 (例如: cuda, cpu)
+		runs: 只运行这些 id 的 run（按任务文件中的顺序）；default 表示所有默认运行的 run，可与其他 id 组合；不指定时等价于 default
 	"""
 
 	task: Annotated[Path, tyro.conf.Positional]
 	overrides: Annotated[tuple[str, ...], tyro.conf.Positional] = ()
 	device: Annotated[str | None, tyro.conf.arg(aliases=('-d',))] = None
+	runs: tuple[str, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -104,11 +106,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 	match command:
 		case Run():
-			from daisy.task import load_config, run_task
+			from daisy.task import load_run_configs, run_tasks, select_runs
 
-			loaded = load_config(command.task)
-			config = tyro.cli(type(loaded), default=loaded, args=command.overrides, prog='daisy run TASK --')
-			run_task(config, device=command.device)
+			loaded = select_runs(load_run_configs(command.task), command.runs)
+			configs = [tyro.cli(type(c), default=c, args=command.overrides, prog='daisy run TASK --') for c in loaded]
+			run_tasks(configs, device=command.device)
 		case ListTasks():
 			cmd_list(command)
 		case Example():
