@@ -117,11 +117,12 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 			data_loader,
 			lambda batch: (self.predict_step(batch[0]), batch[1]),
 		)
-		pred = preds.numpy(force=True).astype(np.float64)
-		true = targets.numpy(force=True).astype(np.float64)
+		pred = preds.numpy(force=True).astype(np.int64)
+		true = targets.numpy(force=True).astype(np.int64)
+		pred_f, true_f = pred.astype(np.float64), true.astype(np.float64)
 		return {
-			'mae': float(mae_score(true, pred)),
-			'rmse': float(rmse_score(true, pred)),
+			'mae': float(mae_score(true_f, pred_f)),
+			'rmse': float(rmse_score(true_f, pred_f)),
 			'acc': float(accuracy_score(true, pred)),
 			'kappa': qwk_score(true, pred, self.num_classes),
 		}

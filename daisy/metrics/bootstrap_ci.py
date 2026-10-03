@@ -4,7 +4,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import ArrayLike
 
 from daisy.typing import VectorF64, VectorI64
 
@@ -30,10 +29,9 @@ def bootstrap_ci(
 	return lower, upper
 
 
-def stratified_resample(strata: ArrayLike, rng: np.random.Generator) -> VectorI64:
+def stratified_resample(strata: VectorI64, rng: np.random.Generator) -> VectorI64:
 	"""在各层内有放回地重采样样本下标（各层样本数不变），按层的取值顺序拼接。"""
-	labels = np.asarray(strata).ravel()
-	return np.concatenate([rng.choice(ix, len(ix)) for ix in (np.flatnonzero(labels == s) for s in np.unique(labels))])
+	return np.concatenate([rng.choice(ix, len(ix)) for ix in (np.flatnonzero(strata == s) for s in np.unique(strata))])
 
 
 @dataclass(slots=True, frozen=True)
@@ -51,7 +49,7 @@ def paired_bootstrap(
 	stat_b: Callable[[VectorI64], float],
 	n: int,
 	*,
-	strata: ArrayLike | None = None,
+	strata: VectorI64 | None = None,
 	n_boot: int = 2000,
 	alpha: float = 0.05,
 	seed: int | np.random.Generator = 0,
@@ -69,7 +67,7 @@ def paired_bootstrap(
 		raise ValueError(f'n_boot must be positive, got {n_boot}')
 	if not 0 < alpha < 1:
 		raise ValueError(f'alpha must be in (0, 1), got {alpha}')
-	labels = np.zeros(n, dtype=np.int64) if strata is None else np.asarray(strata).ravel()
+	labels = np.zeros(n, dtype=np.int64) if strata is None else strata
 	if labels.shape[0] != n:
 		raise ValueError(f'strata must have length {n}, got {labels.shape[0]}')
 

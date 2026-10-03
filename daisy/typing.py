@@ -12,12 +12,12 @@ type VectorF64 = np.ndarray[tuple[int], np.dtype[np.float64]]
 type MatrixI64 = np.ndarray[tuple[int, int], np.dtype[np.int64]]
 type MatrixF32 = np.ndarray[tuple[int, int], np.dtype[np.float32]]
 type MatrixF64 = np.ndarray[tuple[int, int], np.dtype[np.float64]]
+type Array3F64 = np.ndarray[tuple[int, int, int], np.dtype[np.float64]]
 
 type ImageU8 = np.ndarray[tuple[int, int, int], np.dtype[np.uint8]]
 type ImageF32 = np.ndarray[tuple[int, int, int], np.dtype[np.float32]]
 
 type NDArrayF64 = NDArray[np.float64]
-type NDArrayI64 = NDArray[np.int64]
 
 
 def to_array(x: Tensor | ArrayLike) -> NDArray:
