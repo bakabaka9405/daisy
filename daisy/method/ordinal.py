@@ -10,11 +10,11 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.metrics import accuracy_score, cohen_kappa_score
+from sklearn.metrics import accuracy_score
 from torch import Tensor
 
 from daisy.method.base import Method
-from daisy.metrics import mae_score, rmse_score
+from daisy.metrics import mae_score, qwk_score, rmse_score
 from daisy.model.ordinal import (
 	ClassificationModel,
 	CLMModel,
@@ -123,7 +123,7 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 			'mae': float(mae_score(true, pred)),
 			'rmse': float(rmse_score(true, pred)),
 			'acc': float(accuracy_score(true, pred)),
-			'kappa': float(cohen_kappa_score(true, pred, weights='quadratic', labels=list(range(self.num_classes)))),
+			'kappa': qwk_score(true, pred, self.num_classes),
 		}
 
 
