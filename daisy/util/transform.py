@@ -234,6 +234,7 @@ def get_rectangle_train_transform_slight():
 def get_rectangle_train_transform(
 	zoom_out_max: float = 4.0,
 	*,
+	input_size: int | tuple[int, int] = (112, 224),
 	mean: Sequence[float] = (0.485, 0.456, 0.406),
 	std: Sequence[float] = (0.229, 0.224, 0.225),
 ):
@@ -241,7 +242,7 @@ def get_rectangle_train_transform(
 		[
 			transforms.RandomZoomOut(side_range=(1.0, zoom_out_max)),
 			transforms.RandomRotation(degrees=(-10, 10), interpolation=InterpolationMode.BILINEAR),
-			transforms.RandomResizedCrop((112, 224), scale=(0.9, 1.0), ratio=(1.9, 2.1)),
+			transforms.RandomResizedCrop(input_size, scale=(0.9, 1.0), ratio=(1.9, 2.1)),
 			transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
 			transforms.RandomHorizontalFlip(),
 			LazyNormalization(mean, std),
@@ -251,12 +252,13 @@ def get_rectangle_train_transform(
 
 def get_rectangle_val_transform(
 	*,
+	input_size: int | tuple[int, int] = (112, 224),
 	mean: Sequence[float] = (0.485, 0.456, 0.406),
 	std: Sequence[float] = (0.229, 0.224, 0.225),
 ):
 	return transforms.Compose(
 		[
-			transforms.Resize((112, 224)),
+			transforms.Resize(input_size),
 			LazyNormalization(mean, std),
 		]
 	)
