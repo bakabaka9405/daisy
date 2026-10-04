@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from contextlib import ExitStack
 from typing import cast
 
+import icontract
 import torch
 from torch import Tensor, nn
 from zennit.core import BasicHook
@@ -36,6 +37,8 @@ class AttnLRP:
 		self.model = model
 		self.rules = rules
 
+	@icontract.require(lambda target_index: target_index >= 0)
+	@icontract.ensure(lambda images, result: result.shape == images.shape)
 	def generate(
 		self,
 		images: Tensor,

@@ -3,11 +3,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import icontract
 import numpy as np
 
 from daisy.typing import VectorF64, VectorI64
 
 
+@icontract.require(lambda alpha: 0 < alpha < 1)
+@icontract.require(lambda n_boot: n_boot >= 1)
+@icontract.require(lambda y_true, y_pred: y_true.shape == y_pred.shape)
+@icontract.ensure(lambda result: result[0] <= result[1])
 def bootstrap_ci(
 	y_true: VectorF64,
 	y_pred: VectorF64,
@@ -29,6 +34,7 @@ def bootstrap_ci(
 	return lower, upper
 
 
+@icontract.ensure(lambda strata, result: np.array_equal(np.sort(strata[result]), np.sort(strata)), '各层样本数不变')
 def stratified_resample(strata: VectorI64, rng: np.random.Generator) -> VectorI64:
 	"""在各层内有放回地重采样样本下标（各层样本数不变），按层的取值顺序拼接。"""
 	return np.concatenate([rng.choice(ix, len(ix)) for ix in (np.flatnonzero(strata == s) for s in np.unique(strata))])
@@ -44,6 +50,12 @@ class PairedBootstrapResult:
 	p: float
 
 
+@icontract.require(lambda n, strata: strata is None or strata.shape == (n,))
+@icontract.require(lambda alpha: 0 < alpha < 1)
+@icontract.require(lambda n_boot: n_boot >= 1)
+@icontract.require(lambda n: n >= 1)
+@icontract.ensure(lambda result: 0 <= result.p <= 1)
+@icontract.ensure(lambda result: result.ci_low <= result.ci_high)
 def paired_bootstrap(
 	stat_a: Callable[[VectorI64], float],
 	stat_b: Callable[[VectorI64], float],
@@ -61,15 +73,7 @@ def paired_bootstrap(
 	p 值为双侧：2 · min(P(Δ* ≤ 0), P(Δ* ≥ 0))，上限为 1。
 	seed 可传入 Generator，以便多次比较共享同一随机数序列。
 	"""
-	if n < 1:
-		raise ValueError(f'n must be positive, got {n}')
-	if n_boot < 1:
-		raise ValueError(f'n_boot must be positive, got {n_boot}')
-	if not 0 < alpha < 1:
-		raise ValueError(f'alpha must be in (0, 1), got {alpha}')
 	labels = np.zeros(n, dtype=np.int64) if strata is None else strata
-	if labels.shape[0] != n:
-		raise ValueError(f'strata must have length {n}, got {labels.shape[0]}')
 
 	def delta(idx: VectorI64) -> float:
 		return float(stat_a(idx) - stat_b(idx))

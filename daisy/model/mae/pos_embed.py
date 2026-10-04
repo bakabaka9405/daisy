@@ -7,11 +7,29 @@
 
 import math
 
+import icontract
 import numpy as np
 import torch
 from timm.layers.helpers import to_2tuple
 
 
+def _num_checkpoint_pos_tokens(model, checkpoint_model: dict[str, torch.Tensor]) -> int:
+	"""checkpoint 位置编码中除 cls 等额外 token 之外的位置 token 数。"""
+	num_extra_tokens = model.pos_embed.shape[-2] - model.patch_embed.num_patches
+	return checkpoint_model['pos_embed'].shape[-2] - num_extra_tokens
+
+
+def _is_perfect_square(n: int) -> bool:
+	return math.isqrt(n) ** 2 == n
+
+
+def _grid_area(grid_size: int | tuple[int, int]) -> int:
+	gh, gw = to_2tuple(grid_size)
+	return int(gh) * int(gw)
+
+
+@icontract.require(lambda embed_dim: embed_dim % 4 == 0)
+@icontract.ensure(lambda embed_dim, grid_size, cls_token, result: result.shape == (int(cls_token) + _grid_area(grid_size), embed_dim))
 def get_2d_sincos_pos_embed(
 	embed_dim: int,
 	grid_size: int | tuple[int, int],
@@ -42,10 +60,11 @@ def get_2d_sincos_pos_embed(
 	return pos_embed
 
 
+@icontract.require(lambda grid: grid.shape[0] == 2)
+@icontract.require(lambda embed_dim: embed_dim % 4 == 0)
+@icontract.ensure(lambda embed_dim, grid, result: result.shape == (grid[0].size, embed_dim))
 def get_2d_sincos_pos_embed_from_grid(embed_dim: int, grid: np.ndarray) -> np.ndarray:
 	"""从网格生成 2D 位置编码"""
-	assert embed_dim % 2 == 0
-
 	# use half of dimensions to encode grid_h
 	emb_h = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[0])  # (H*W, D/2)
 	emb_w = get_1d_sincos_pos_embed_from_grid(embed_dim // 2, grid[1])  # (H*W, D/2)
@@ -54,6 +73,8 @@ def get_2d_sincos_pos_embed_from_grid(embed_dim: int, grid: np.ndarray) -> np.nd
 	return emb
 
 
+@icontract.require(lambda embed_dim: embed_dim % 2 == 0)
+@icontract.ensure(lambda embed_dim, pos, result: result.shape == (pos.size, embed_dim))
 def get_1d_sincos_pos_embed_from_grid(embed_dim: int, pos: np.ndarray) -> np.ndarray:
 	"""
 	从位置生成 1D 正弦余弦位置编码
@@ -65,7 +86,6 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim: int, pos: np.ndarray) -> np.nda
 	Returns:
 		out: (M, D)
 	"""
-	assert embed_dim % 2 == 0
 	omega = np.arange(embed_dim // 2, dtype=float)
 	omega /= embed_dim / 2.0
 	omega = 1.0 / 10000**omega  # (D/2,)
@@ -80,6 +100,22 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim: int, pos: np.ndarray) -> np.nda
 	return emb
 
 
+@icontract.require(
+	lambda model, checkpoint_model, source_grid_size: (
+		'pos_embed' not in checkpoint_model
+		or source_grid_size is None
+		or math.prod(source_grid_size) == _num_checkpoint_pos_tokens(model, checkpoint_model)
+	),
+	'Explicit source_grid_size does not match checkpoint positional token count.',
+)
+@icontract.require(
+	lambda model, checkpoint_model, source_grid_size: (
+		'pos_embed' not in checkpoint_model
+		or source_grid_size is not None
+		or _is_perfect_square(_num_checkpoint_pos_tokens(model, checkpoint_model))
+	),
+	'Cannot infer square source grid size; source_grid_size must be explicitly provided for non-square checkpoints.',
+)
 def interpolate_pos_embed(
 	model,
 	checkpoint_model: dict[str, torch.Tensor],
@@ -97,26 +133,13 @@ def interpolate_pos_embed(
 	if 'pos_embed' in checkpoint_model:
 		pos_embed_checkpoint = checkpoint_model['pos_embed']
 		embedding_size = pos_embed_checkpoint.shape[-1]
-		num_patches = model.patch_embed.num_patches
-		num_extra_tokens = model.pos_embed.shape[-2] - num_patches
-		num_checkpoint_tokens = pos_embed_checkpoint.shape[-2] - num_extra_tokens
+		num_extra_tokens = model.pos_embed.shape[-2] - model.patch_embed.num_patches
 
 		if source_grid_size is None:
-			orig_h = math.isqrt(num_checkpoint_tokens)
-			if orig_h * orig_h != num_checkpoint_tokens:
-				raise ValueError(
-					f'Cannot infer square source grid size from {num_checkpoint_tokens} tokens; '
-					f'source_grid_size must be explicitly provided for non-square checkpoints.'
-				)
+			orig_h = math.isqrt(_num_checkpoint_pos_tokens(model, checkpoint_model))
 			orig_grid_size = (orig_h, orig_h)
 		else:
-			orig_h, orig_w = source_grid_size
-			if orig_h * orig_w != num_checkpoint_tokens:
-				raise ValueError(
-					f'Explicit source_grid_size {source_grid_size} ({orig_h * orig_w} tokens) '
-					f'does not match checkpoint positional token count ({num_checkpoint_tokens}).'
-				)
-			orig_grid_size = (orig_h, orig_w)
+			orig_grid_size = source_grid_size
 
 		target_grid_size: tuple[int, int] = model.patch_embed.grid_size
 		# class_token and dist_token are kept unchanged

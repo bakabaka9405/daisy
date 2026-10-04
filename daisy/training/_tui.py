@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any
 
+import icontract
 from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
@@ -67,6 +68,7 @@ class MetricTable(DataTable):
 		self.border_title = 'Metrics'
 		self.add_columns(*self._column_labels)
 
+	@icontract.require(lambda self, row: len(row) == len(self._column_labels))
 	def append_row(self, row: Sequence[str]) -> None:
 		follow = self.row_count == 0 or self.cursor_row == self.row_count - 1
 		self.add_row(*(Text(cell, justify='right') for cell in row))

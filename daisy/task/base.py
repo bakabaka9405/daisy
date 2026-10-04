@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any
 
+import icontract
 from pydantic import BaseModel, ConfigDict, Field
 import tyro.conf
 
@@ -32,6 +33,10 @@ class BaseOutputConfig(BaseConfig):
 	keep_count: int = 1
 	save_best: bool = True
 	log: bool = True
+
+	@icontract.require(lambda self: self.keep_count >= 0)
+	def model_post_init(self, context: Any, /) -> None:
+		pass
 
 
 class BaseTaskConfig(BaseConfig):

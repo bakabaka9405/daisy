@@ -3,6 +3,7 @@
 from collections.abc import Iterator
 from typing import Any
 
+import icontract
 import torch
 from timm.data.loader import MultiEpochsDataLoader
 from torch.utils.data import Dataset
@@ -57,6 +58,8 @@ class Prefetcher:
 			yield out
 
 
+@icontract.require(lambda num_workers: num_workers >= 0)
+@icontract.require(lambda batch_size: batch_size >= 1)
 def make_dataloader(
 	dataset: Dataset,
 	batch_size: int,

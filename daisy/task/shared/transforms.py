@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import icontract
 from timm.data.transforms_factory import create_transform
 from torchvision.transforms import InterpolationMode, v2 as transforms
 
@@ -10,6 +11,14 @@ from daisy.util.transform import ZeroOneNormalize
 from typing import Any, Callable, Literal, cast
 
 
+def _is_positive_size(size: int | tuple[int, int]) -> bool:
+	"""图像尺寸（整数或 (H, W)）各维为正"""
+	return all(s > 0 for s in (size if isinstance(size, tuple) else (size,)))
+
+
+@icontract.require(
+	lambda name: name in {'rectangle_train', 'rectangle_val', 'rectangle_train_slight', 'stretch_train', 'stretch_val'}, 'Unknown transform'
+)
 def get_classification_transform(name: str):
 	"""根据名称获取分类任务 transform"""
 	transform_map = {
@@ -19,13 +28,12 @@ def get_classification_transform(name: str):
 		'stretch_train': daisy.util.transform.get_stretch_train_transform,
 		'stretch_val': daisy.util.transform.get_stretch_val_transform,
 	}
-
-	if name not in transform_map:
-		raise ValueError(f'Unknown transform: {name}. Available: {list(transform_map.keys())}')
-
 	return transform_map[name]()
 
 
+@icontract.require(lambda remode: remode.lower() in {'', 'const', 'rand', 'pixel'})
+@icontract.require(lambda reprob: 0 <= reprob <= 1)
+@icontract.require(lambda input_size: input_size > 0)
 def get_mae_finetune_train_transform(
 	input_size: int = 224,
 	aa: str = 'rand-m9-mstd0.5-inc1',
@@ -49,6 +57,7 @@ def get_mae_finetune_train_transform(
 	return transforms.Compose([transforms.ToPILImage(), cast(Callable[..., Any], timm_transform)])
 
 
+@icontract.require(lambda input_size: _is_positive_size(input_size))
 def get_mae_finetune_val_transform(
 	input_size: int | tuple[int, int] = 224,
 	backend: Literal['pil', 'tensor'] = 'tensor',

@@ -1,9 +1,11 @@
 from pathlib import Path
 from shutil import copyfile
 import cv2
+import icontract
 import numpy as np
 
 
+@icontract.require(lambda num_class: 1 <= num_class <= 9, '按键仅支持 1-9 类')
 def classify_images(image_folder: Path, output_folders: Path, num_class: int):
 	# 获取所有图片文件
 	image_files = [f for f in image_folder.iterdir() if f.name.endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.gif'))]

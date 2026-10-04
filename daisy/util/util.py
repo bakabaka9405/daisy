@@ -1,6 +1,8 @@
+from pathlib import Path
 import random
 import subprocess
 
+import icontract
 import torch
 import numpy
 from torch import Tensor
@@ -9,6 +11,11 @@ from typing import Any, SupportsIndex
 from collections.abc import Iterable
 
 
+def _has_classifier(model: Any) -> bool:
+	return hasattr(model, 'fc') or hasattr(model, 'head') or hasattr(model, 'classifier')
+
+
+@icontract.require(lambda seed: 0 <= seed < 2**32)
 def set_global_seed(seed: int):
 	random.seed(seed)
 	numpy.random.seed(seed)
@@ -37,13 +44,17 @@ def enable_cudnn_benchmark():
 	torch.backends.cudnn.deterministic = False
 
 
+@icontract.require(lambda blr: blr is None or blr > 0)
+@icontract.require(lambda lr: lr is None or lr > 0)
+@icontract.require(lambda lr, blr: lr is not None or blr is not None, 'Either lr or blr must be set')
+@icontract.require(lambda accum_iter: accum_iter >= 1)
+@icontract.require(lambda batch_size: batch_size >= 1)
 def resolve_lr(batch_size: int, accum_iter: int, *, lr: float | None = None, blr: float | None = None) -> float:
 	"""解析实际学习率：优先返回显式 lr，否则按 blr * 有效批大小 / 256 换算。"""
 	if lr is not None:
 		return lr
-	if blr is not None:
-		return blr * batch_size * accum_iter / 256.0
-	raise ValueError('Either lr or blr must be set')
+	assert blr is not None
+	return blr * batch_size * accum_iter / 256.0
 
 
 def DecodeImageFromFile(path: str, device: torch.device | None = None) -> Tensor:
@@ -58,6 +69,7 @@ class ZeroOneNormalize:
 		return tensor.float().div(255)
 
 
+@icontract.require(lambda model: _has_classifier(model), 'Invalid model type')
 def get_model_classifier(model):
 	if hasattr(model, 'fc'):
 		return model.fc
@@ -66,21 +78,18 @@ def get_model_classifier(model):
 			return model.head
 		else:
 			return model.head.fc
-	elif hasattr(model, 'classifier'):
-		return model.classifier
 	else:
-		raise ValueError('Invalid model type')
+		return model.classifier
 
 
+@icontract.require(lambda identity, num_classes: not identity or num_classes == 0, 'num_classes must be 0 if identity is True')
+@icontract.require(lambda identity, num_classes: identity or num_classes != 0, 'num_classes must be specified if identity is False')
+@icontract.require(lambda num_classes: num_classes >= 0)
+@icontract.require(lambda model: _has_classifier(model), 'Invalid model type')
 def change_model_classifier(model, *, identity: bool = False, num_classes: int = 0):
 	# Change the output layer to match the number of classes
 	# The output layer is either model.fc or model.head.fc or model.classifier
 	# Differ between models created by torchvision or timm
-
-	if not identity and num_classes == 0:
-		raise ValueError('num_classes must be specified if identity is False')
-	if identity and num_classes != 0:
-		raise ValueError('num_classes must be 0 if identity is True')
 
 	if identity:
 		if hasattr(model, 'fc'):
@@ -93,11 +102,9 @@ def change_model_classifier(model, *, identity: bool = False, num_classes: int =
 			else:
 				assert isinstance(model.head.fc, torch.nn.Linear)
 				model.head.fc = torch.nn.Identity().to(model.head.fc.weight.device)
-		elif hasattr(model, 'classifier'):
+		else:
 			assert isinstance(model.classifier, torch.nn.Linear)
 			model.classifier = torch.nn.Identity().to(model.classifier.weight.device)
-		else:
-			raise ValueError('Invalid model type')
 
 	else:
 		if hasattr(model, 'fc'):
@@ -110,11 +117,9 @@ def change_model_classifier(model, *, identity: bool = False, num_classes: int =
 			else:
 				assert isinstance(model.head.fc, torch.nn.Linear)
 				model.head.fc = torch.nn.Linear(model.head.fc.in_features, num_classes).to(model.head.fc.weight.device)
-		elif hasattr(model, 'classifier'):
+		else:
 			assert isinstance(model.classifier, torch.nn.Linear)
 			model.classifier = torch.nn.Linear(model.classifier.in_features, num_classes).to(model.classifier.weight.device)
-		else:
-			raise ValueError('Invalid model type')
 
 
 def freeze_model(model):
@@ -131,13 +136,10 @@ def gather_list_by_indexes[T](lst: list[T], index: Iterable[SupportsIndex]) -> l
 	return [lst[i] for i in index]
 
 
+# 可变位置参数在契约中通过 icontract 提供的 _ARGS（全部位置参数元组）访问
+@icontract.require(lambda _ARGS: all(len(i) == len(_ARGS[0]) for i in _ARGS), '数组长度不相等')
+@icontract.require(lambda _ARGS: len(_ARGS) > 0, '打乱至少需要一个参数')
 def shuffle_correlated_lists(*args: list):
-	if len(args) == 0:
-		raise ValueError('打乱至少需要一个参数')
-
-	if max(len(i) for i in args) != min(len(i) for i in args):
-		raise ValueError('数组长度不相等')
-
 	length = len(args[0])
 
 	idx = numpy.random.permutation(length)
@@ -148,6 +150,8 @@ def shuffle_correlated_lists(*args: list):
 			i[j] = tmp[j]
 
 
+@icontract.require(lambda val: val >= 0)
+@icontract.require(lambda files, labels: len(files) == len(labels))
 def copy_by_label(files: list, labels: list[int], label: int, val: int) -> None:
 	mask = [1 if i == label else 0 for i in labels]
 	copied_files = [i for i, j in zip(files, mask) if j == 1]
@@ -156,14 +160,17 @@ def copy_by_label(files: list, labels: list[int], label: int, val: int) -> None:
 	labels += [label] * (len(copied_files) * val)
 
 
+@icontract.require(lambda labels, _ARGS: all(len(i) == len(labels) for i in _ARGS[2:]))
 def extract_by_label(labels: list[int], target: int, *args: list):
 	return ([j for j, k in zip(i, labels) if k == target] for i in args)
 
 
+@icontract.require(lambda labels, _ARGS: all(len(i) == len(labels) for i in _ARGS[2:]))
 def exclude_by_label(labels: list[int], target: int, *args: list):
 	return ([j for j, k in zip(i, labels) if k != target] for i in args)
 
 
+@icontract.require(lambda labels, _ARGS: all(len(i) == len(labels) for i in _ARGS[2:]))
 def filter_by_label(labels: list[int], cond: Any, *args: list):
 	return ([j for j, k in zip(i, labels) if cond(k)] for i in args)
 

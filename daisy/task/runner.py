@@ -12,6 +12,7 @@ import tomllib
 from typing import Any, cast
 
 from deepmerge import Merger
+import icontract
 import torch
 
 from .base import BaseTaskConfig
@@ -25,33 +26,72 @@ _RUN_ID_PATTERN = re.compile(r'[A-Za-z0-9._-]+')
 DEFAULT_RUNS = 'default'
 
 
-def _parse_imports(raw: Any, path: Path) -> list[Path]:
-	"""解析 imports 字段，相对当前 TOML 文件所在目录解析为绝对路径"""
-	if raw is None:
-		return []
-	if not isinstance(raw, list) or not all(isinstance(p, str) and p for p in raw):
-		raise ValueError(f"Invalid 'imports' in task file: {path}. Expected list of non-empty path strings.")
-	return [(path.parent / p).resolve() for p in raw]
+def _is_dotted_key_list(raw: Any) -> bool:
+	"""raw 是否为点分隔键路径（各段非空）的列表"""
+	return isinstance(raw, list) and all(isinstance(k, str) and k and all(k.split('.')) for k in raw)
 
 
-def _parse_remove(raw: Any, where: str) -> list[tuple[str, ...]]:
-	"""解析 _remove 字段：点分隔的键路径列表（如 'model.checkpoint_path'）"""
-	if raw is None:
-		return []
-	if not isinstance(raw, list) or not all(isinstance(k, str) and k and all(k.split('.')) for k in raw):
-		raise ValueError(f"Invalid '_remove' in {where}. Expected list of dotted key paths such as 'model.checkpoint_path'.")
-	return [tuple(k.split('.')) for k in raw]
-
-
-def _remove_keys(data: dict[str, Any], keys: list[tuple[str, ...]], where: str) -> None:
-	"""从原始配置字典中删除键，使其回到上一层的值或配置模型默认值；键不存在时报错"""
-	for key in keys:
+def _keys_removable(data: dict[str, Any], keys: list[tuple[str, ...]]) -> bool:
+	"""按顺序删除 keys 时每个键都存在：键在原字典中存在，且不位于先前已删除的键之下"""
+	for i, key in enumerate(keys):
+		if any(key[: len(prev)] == prev for prev in keys[:i]):
+			return False
 		node: Any = data
 		for part in key[:-1]:
 			node = node.get(part) if isinstance(node, dict) else None
 		if not isinstance(node, dict) or key[-1] not in node:
-			raise ValueError(f"Cannot remove '{'.'.join(key)}' in {where}: key is not set by the inherited configuration")
+			return False
+	return True
+
+
+@icontract.require(
+	lambda raw: raw is None or (isinstance(raw, list) and all(isinstance(p, str) and p for p in raw)),
+	"Invalid 'imports' in task file. Expected list of non-empty path strings.",
+)
+def _parse_imports(raw: Any, path: Path) -> list[Path]:
+	"""解析 imports 字段，相对当前 TOML 文件所在目录解析为绝对路径"""
+	if raw is None:
+		return []
+	return [(path.parent / p).resolve() for p in raw]
+
+
+@icontract.require(
+	lambda raw: raw is None or _is_dotted_key_list(raw),
+	"Invalid '_remove'. Expected list of dotted key paths such as 'model.checkpoint_path'.",
+)
+def _parse_remove(raw: Any, where: str) -> list[tuple[str, ...]]:
+	"""解析 _remove 字段：点分隔的键路径列表（如 'model.checkpoint_path'）
+
+	where 仅用于违约信息中标明出处。
+	"""
+	if raw is None:
+		return []
+	return [tuple(k.split('.')) for k in raw]
+
+
+@icontract.require(lambda data, keys: _keys_removable(data, keys), 'Cannot remove key: key is not set by the inherited configuration')
+def _remove_keys(data: dict[str, Any], keys: list[tuple[str, ...]], where: str) -> None:
+	"""从原始配置字典中删除键，使其回到上一层的值或配置模型默认值
+
+	where 仅用于违约信息中标明出处。
+	"""
+	for key in keys:
+		node: Any = data
+		for part in key[:-1]:
+			node = node[part]
 		del node[key[-1]]
+
+
+def _is_table_array(raw: Any) -> bool:
+	"""raw 是否为非空的表数组（[[run]]）"""
+	return isinstance(raw, list) and len(raw) > 0 and all(isinstance(entry, dict) for entry in raw)
+
+
+def _has_valid_run_ids(raw: Any) -> bool:
+	"""raw 是否为表数组，且各条目的 id 均为由字母、数字、'.'、'_'、'-' 组成的非空字符串"""
+	return _is_table_array(raw) and all(
+		isinstance(run_id := entry.get('id'), str) and _RUN_ID_PATTERN.fullmatch(run_id) is not None for entry in raw
+	)
 
 
 @dataclass(slots=True, frozen=True)
@@ -65,6 +105,23 @@ class _RunEntry:
 	source: dict[str, Any]  # 条目去掉 id 后的原文，记录到快照
 
 
+@icontract.require(
+	lambda raw: not _is_table_array(raw) or all(isinstance(entry.get('default', True), bool) for entry in raw),
+	"Invalid 'default' in run. Expected boolean.",
+)
+@icontract.require(
+	lambda raw: not _has_valid_run_ids(raw) or len({entry['id'] for entry in raw}) == len(raw), 'Duplicate run id in task file'
+)
+@icontract.require(
+	lambda raw: not _is_table_array(raw) or all(entry.get('id') != DEFAULT_RUNS for entry in raw),
+	f"Run id '{DEFAULT_RUNS}' is reserved for selecting all default runs",
+)
+@icontract.require(
+	lambda raw: not _is_table_array(raw) or _has_valid_run_ids(raw),
+	"Invalid run id. Expected non-empty string of letters, digits, '.', '_' or '-'.",
+)
+@icontract.require(lambda raw: raw is None or _is_table_array(raw), "Invalid 'run' in task file. Expected non-empty array of tables ([[run]]).")
+@icontract.ensure(lambda raw, result: len(result) == (0 if raw is None else len(raw)))
 def _parse_runs(raw: Any, path: Path) -> list[_RunEntry]:
 	"""解析 run 字段
 
@@ -74,26 +131,13 @@ def _parse_runs(raw: Any, path: Path) -> list[_RunEntry]:
 	"""
 	if raw is None:
 		return []
-	if not isinstance(raw, list) or not raw or not all(isinstance(entry, dict) for entry in raw):
-		raise ValueError(f"Invalid 'run' in task file: {path}. Expected non-empty array of tables ([[run]]).")
 
 	runs: list[_RunEntry] = []
-	for i, entry in enumerate(raw):
+	for entry in raw:
 		source = dict(entry)
-		run_id = source.pop('id', None)
-		if not isinstance(run_id, str) or _RUN_ID_PATTERN.fullmatch(run_id) is None:
-			raise ValueError(
-				f"Invalid run id {run_id!r} at run[{i}] in task file: {path}. "
-				"Expected non-empty string of letters, digits, '.', '_' or '-'."
-			)
-		if run_id == DEFAULT_RUNS:
-			raise ValueError(f"Run id '{DEFAULT_RUNS}' at run[{i}] in task file: {path} is reserved for selecting all default runs")
-		if any(run_id == existing.run_id for existing in runs):
-			raise ValueError(f"Duplicate run id '{run_id}' in task file: {path}")
+		run_id = source.pop('id')
 		overrides = dict(source)
 		default = overrides.pop('default', True)
-		if not isinstance(default, bool):
-			raise ValueError(f"Invalid 'default' in run '{run_id}' of task file: {path}. Expected boolean.")
 		remove = _parse_remove(overrides.pop('_remove', None), f"run '{run_id}' of task file: {path}")
 		runs.append(_RunEntry(run_id=run_id, default=default, remove=remove, overrides=overrides, source=source))
 	return runs
@@ -109,7 +153,7 @@ def _load_raw_config(path: Path, visited: tuple[Path, ...] = ()) -> tuple[dict[s
 	Returns:
 		合并后的原始配置字典，以及父级在前、去重后的 imports 绝对路径列表
 	"""
-	# 第一阶段：循环继承检测
+	# 第一阶段：循环继承检测。icontract 在递归调用中不检查契约，因此不能写成前置条件
 	resolved_path = path.resolve()
 	if resolved_path in visited:
 		chain = ' -> '.join(str(p) for p in (*visited, resolved_path))
@@ -138,15 +182,13 @@ def _load_raw_config(path: Path, visited: tuple[Path, ...] = ()) -> tuple[dict[s
 	return data, list(dict.fromkeys(imports))
 
 
+@icontract.require(
+	lambda data: isinstance(data['task_type'], str) and len(data['task_type']) > 0, "Invalid 'task_type' in task file. Expected non-empty string."
+)
+@icontract.require(lambda data: data.get('task_type') is not None, "Missing 'task_type' in task file. Please specify a task type.")
 def _build_config(data: dict[str, Any], path: Path, imports: list[Path]) -> BaseTaskConfig:
 	"""按 task_type 选择配置类，校验原始字典并设置运行时元信息"""
-	task_type = data.get('task_type')
-	if task_type is None:
-		raise ValueError(f"Missing 'task_type' in task file: {path}. Please specify a task type.")
-	if not isinstance(task_type, str) or not task_type:
-		raise ValueError(f"Invalid 'task_type' in task file: {path}. Expected non-empty string.")
-
-	config_cls, _ = get_task(task_type)
+	config_cls, _ = get_task(data['task_type'])
 	config = config_cls.model_validate(data)
 	config.task_file = path
 	config.task_id = path.stem
@@ -174,6 +216,7 @@ def load_config(path: Path) -> BaseTaskConfig:
 	return _build_config(data, path, imports)
 
 
+@icontract.ensure(lambda result: len(result) > 0)
 def load_run_configs(path: Path) -> list[BaseTaskConfig]:
 	"""从 TOML 文件加载全部 run 的任务配置
 
@@ -207,23 +250,31 @@ def load_run_configs(path: Path) -> list[BaseTaskConfig]:
 	return configs
 
 
+def _chosen_runs(configs: Sequence[BaseTaskConfig], run_ids: Sequence[str]) -> list[BaseTaskConfig]:
+	"""run_ids 选中的 run（保持原顺序）；run_ids 为空等价于 ['default']"""
+	selected = set(run_ids or [DEFAULT_RUNS])
+	explicit = selected - {DEFAULT_RUNS}
+	return [c for c in configs if c.run_id in explicit or (DEFAULT_RUNS in selected and c.run_default)]
+
+
+@icontract.require(lambda configs, run_ids: len(_chosen_runs(configs, run_ids)) > 0, 'No run selected: the task file has no default run')
+@icontract.require(lambda configs, run_ids: set(run_ids) - {DEFAULT_RUNS} <= {c.run_id for c in configs}, 'Unknown run id(s)')
+@icontract.require(
+	lambda configs, run_ids: not set(run_ids) - {DEFAULT_RUNS} or any(c.run_id for c in configs),
+	"Run ids were given but the task file declares no 'run' array",
+)
 def select_runs(configs: Sequence[BaseTaskConfig], run_ids: Sequence[str]) -> list[BaseTaskConfig]:
 	"""按 run id 选择 run（保持 TOML 中的顺序）
 
 	run_ids 为空等价于 ['default']；其中的 'default' 表示所有默认运行（default = true）的 run，可与其他 id 组合。
 	"""
-	selected = set(run_ids or [DEFAULT_RUNS])
-	explicit = selected - {DEFAULT_RUNS}
-	available = [config.run_id for config in configs]
-	if explicit and not any(available):
-		raise ValueError("Run ids were given but the task file declares no 'run' array")
-	unknown = sorted(explicit - set(available))
-	if unknown:
-		raise ValueError(f'Unknown run id(s): {", ".join(unknown)}. Available: {", ".join(available)}')
-	chosen = [c for c in configs if c.run_id in explicit or (DEFAULT_RUNS in selected and c.run_default)]
-	if not chosen:
-		raise ValueError(f"No run selected: the task file has no default run. Available: {', '.join(available)}")
-	return chosen
+	return _chosen_runs(configs, run_ids)
+
+
+def _distinct_output_paths(configs: Sequence[BaseTaskConfig]) -> bool:
+	"""各配置渲染后的输出路径互不相同"""
+	paths = [format_output_path(cast(Any, config).output.save_path, config).resolve() for config in configs]
+	return len(set(paths)) == len(paths)
 
 
 def run_task(
@@ -251,6 +302,12 @@ def run_task(
 	return run_fn(config, device)
 
 
+@icontract.require(
+	lambda configs: _distinct_output_paths(configs),
+	'Multiple runs resolve to the same output path. Distinguish runs in output.save_path, e.g. with {run_id}.',
+)
+@icontract.require(lambda configs: len(configs) > 0, 'run_tasks requires at least one config')
+@icontract.ensure(lambda configs, result: len(result) == len(configs))
 def run_tasks(
 	configs: Sequence[BaseTaskConfig],
 	device: torch.device | str | None = None,
@@ -266,16 +323,6 @@ def run_tasks(
 	Returns:
 		各 run 的输出路径
 	"""
-	if not configs:
-		raise ValueError('run_tasks requires at least one config')
-	paths = [format_output_path(cast(Any, config).output.save_path, config).resolve() for config in configs]
-	duplicates = sorted({str(p) for p in paths if paths.count(p) > 1})
-	if duplicates:
-		raise ValueError(
-			f'Multiple runs resolve to the same output path: {", ".join(duplicates)}. '
-			'Distinguish runs in output.save_path, e.g. with {run_id}.'
-		)
-
 	outputs: list[Path] = []
 	for i, config in enumerate(configs):
 		if len(configs) > 1:

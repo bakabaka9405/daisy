@@ -2,6 +2,7 @@ from collections.abc import Callable, Sequence
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
 from typing import Literal
+import icontract
 from PIL import Image
 
 from .index_dataset import IndexDataset
@@ -15,6 +16,9 @@ class DiskDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 	transform: Callable[..., ImageT]
 	backend: Literal['pil', 'tensor']
 
+	@icontract.require(
+		lambda file_paths, labels: labels is None or len(labels) == len(file_paths), 'labels length must match file_paths length'
+	)
 	def __init__(
 		self,
 		file_paths: list[Path],
@@ -23,8 +27,6 @@ class DiskDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 		*,
 		backend: Literal['pil', 'tensor'] = 'tensor',
 	):
-		if labels is not None and len(labels) != len(file_paths):
-			raise ValueError('labels length must match file_paths length')
 		self.file_paths = file_paths
 		self.labels = labels
 		self.transform = transform
@@ -54,20 +56,31 @@ class DiskDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 	def applyTransform(self, transform: Callable[..., ImageT]) -> None:
 		self.transform = transform
 
+	@icontract.require(lambda k: k >= 0)
+	@icontract.ensure(lambda self, k, result: len(result) == min(k, len(self)))
 	def take(self, k: int) -> 'DiskDataset[ImageT, LabelT]':
 		labels = None if self.labels is None else self.labels[:k]
 		return DiskDataset(self.file_paths[:k], labels, self.transform, backend=self.backend)
 
+	@icontract.require(lambda self, indices: all(0 <= i < len(self) for i in indices))
+	@icontract.ensure(lambda indices, result: len(result) == len(indices))
 	def subset(self, indices: list[int]) -> 'DiskDataset[ImageT, LabelT]':
 		sub_file_paths = [self.file_paths[i] for i in indices]
 		sub_labels = None if self.labels is None else [self.labels[i] for i in indices]
 		return DiskDataset(sub_file_paths, sub_labels, self.transform, backend=self.backend)
 
 	@classmethod
+	@icontract.require(
+		lambda datasets: all((ds.labels is None) == (datasets[0].labels is None) for ds in datasets),
+		'Cannot concat labeled datasets with unlabeled datasets',
+	)
+	@icontract.require(
+		lambda datasets: all(ds.backend == datasets[0].backend for ds in datasets), 'Cannot concat datasets with different backends'
+	)
+	@icontract.require(lambda datasets: len(datasets) > 0, 'Cannot concat empty dataset sequence')
+	@icontract.ensure(lambda datasets, result: len(result) == sum(len(ds) for ds in datasets))
 	def concat(cls, datasets: Sequence['DiskDataset[ImageT, LabelT]']) -> 'DiskDataset[ImageT, LabelT]':
 		"""拼接多个 DiskDataset 实例为一个新的 DiskDataset"""
-		if not datasets:
-			raise ValueError('Cannot concat empty dataset sequence')
 		if len(datasets) == 1:
 			return datasets[0]
 
@@ -77,10 +90,6 @@ class DiskDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 		all_labels: list[LabelT] = []
 
 		for ds in datasets:
-			if ds.backend != first.backend:
-				raise ValueError(f'Cannot concat datasets with different backends: {ds.backend} != {first.backend}')
-			if (ds.labels is not None) != has_labels:
-				raise ValueError('Cannot concat labeled datasets with unlabeled datasets')
 			all_paths.extend(ds.file_paths)
 			if has_labels:
 				assert ds.labels is not None

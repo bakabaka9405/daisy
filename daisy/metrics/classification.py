@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import icontract
+import numpy as np
 from numpy.typing import ArrayLike
 from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, precision_score, recall_score
 
@@ -36,6 +38,9 @@ class EvalMetrics:
 			return 0.0
 
 
+@icontract.require(lambda num_classes: num_classes >= 1)
+@icontract.require(lambda y_true, y_pred: np.shape(y_true) == np.shape(y_pred))
+@icontract.ensure(lambda num_classes, result: len(result) == num_classes and all(len(row) == num_classes for row in result))
 def calc_confusion_matrix(y_true: ArrayLike, y_pred: ArrayLike, num_classes: int) -> list[list[int]]:
 	"""计算混淆矩阵"""
 	labels = list(range(num_classes))
@@ -43,6 +48,9 @@ def calc_confusion_matrix(y_true: ArrayLike, y_pred: ArrayLike, num_classes: int
 	return matrix.tolist()  # type: ignore[return-value]
 
 
+@icontract.require(lambda num_classes: num_classes >= 0)
+@icontract.require(lambda y_true, y_pred: np.shape(y_true) == np.shape(y_pred))
+@icontract.ensure(lambda result: all(0 <= v <= 1 for v in (result.acc, result.precision, result.recall, result.f1)))
 def fast_calc_metrics(y_true: ArrayLike, y_pred: ArrayLike, num_classes: int = 0) -> EvalMetrics:
 	"""快速计算分类评估指标"""
 	acc = accuracy_score(y_true, y_pred)

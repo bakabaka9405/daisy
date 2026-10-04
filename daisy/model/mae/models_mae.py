@@ -10,9 +10,11 @@
 from functools import partial
 from typing import cast, override
 
+import icontract
 import timm
 import torch
 import torch.nn as nn
+from timm.layers.helpers import to_2tuple
 from timm.layers.patch_embed import PatchEmbed
 from timm.models.vision_transformer import Block
 
@@ -23,6 +25,11 @@ class MaskedAutoencoderViT(nn.Module):
 	"""Masked Autoencoder with VisionTransformer backbone"""
 
 	@override
+	@icontract.require(lambda decoder_embed_dim, decoder_num_heads: decoder_embed_dim % decoder_num_heads == 0)
+	@icontract.require(lambda embed_dim, num_heads: embed_dim % num_heads == 0)
+	@icontract.require(
+		lambda img_size, patch_size: all(s % patch_size == 0 for s in to_2tuple(img_size)), 'Image dimensions must be divisible by patch dimensions'
+	)
 	def __init__(
 		self,
 		img_size: int | tuple[int, int] = 224,
@@ -41,10 +48,6 @@ class MaskedAutoencoderViT(nn.Module):
 
 		# MAE encoder specifics
 		self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
-		img_h, img_w = cast(tuple[int, int], self.patch_embed.img_size)
-		patch_h, patch_w = cast(tuple[int, int], self.patch_embed.patch_size)
-		if img_h % patch_h != 0 or img_w % patch_w != 0:
-			raise ValueError(f'Image dimensions {(img_h, img_w)} must be divisible by patch dimensions {(patch_h, patch_w)}')
 		num_patches = self.patch_embed.num_patches
 
 		self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -133,6 +136,14 @@ class MaskedAutoencoderViT(nn.Module):
 			nn.init.constant_(m.bias, 0)
 			nn.init.constant_(m.weight, 1.0)
 
+	@icontract.require(
+		lambda self, imgs: imgs.ndim == 4 and imgs.shape[1:] == (self.patch_embed.proj.in_channels,) + tuple(self.patch_embed.img_size),
+		'Expected input image shape (N, C, H, W) matching the model',
+	)
+	@icontract.ensure(
+		lambda self, imgs, result: result.shape
+		== (imgs.shape[0], self.patch_embed.num_patches, self.patch_embed.patch_size[0] ** 2 * self.patch_embed.proj.in_channels)
+	)
 	def patchify(self, imgs: torch.Tensor) -> torch.Tensor:
 		"""
 		将图像转换为 patch 序列
@@ -145,17 +156,19 @@ class MaskedAutoencoderViT(nn.Module):
 		"""
 		p = cast(int, self.patch_embed.patch_size[0])
 		c = int(self.patch_embed.proj.in_channels)
-		img_h, img_w = cast(tuple[int, int], self.patch_embed.img_size)
 		grid_h, grid_w = cast(tuple[int, int], self.patch_embed.grid_size)
-
-		if imgs.ndim != 4 or imgs.shape[1] != c or imgs.shape[2] != img_h or imgs.shape[3] != img_w:
-			raise ValueError(f'Expected input image shape (N, {c}, {img_h}, {img_w}), but got {tuple(imgs.shape)}')
 
 		x = imgs.reshape(shape=(imgs.shape[0], c, grid_h, p, grid_w, p))
 		x = torch.einsum('nchpwq->nhwpqc', x)
 		x = x.reshape(shape=(imgs.shape[0], grid_h * grid_w, p**2 * c))
 		return x
 
+	@icontract.require(
+		lambda self, x: x.ndim == 3
+		and x.shape[1:] == (self.patch_embed.num_patches, self.patch_embed.patch_size[0] ** 2 * self.patch_embed.proj.in_channels),
+		'Expected token tensor shape (N, L, patch_size**2 * C) matching the model',
+	)
+	@icontract.ensure(lambda self, x, result: result.shape == (x.shape[0], self.patch_embed.proj.in_channels) + tuple(self.patch_embed.img_size))
 	def unpatchify(self, x: torch.Tensor) -> torch.Tensor:
 		"""
 		将 patch 序列转换回图像
@@ -169,11 +182,6 @@ class MaskedAutoencoderViT(nn.Module):
 		p = cast(int, self.patch_embed.patch_size[0])
 		c = int(self.patch_embed.proj.in_channels)
 		grid_h, grid_w = cast(tuple[int, int], self.patch_embed.grid_size)
-		expected_tokens = grid_h * grid_w
-		expected_features = p**2 * c
-
-		if x.ndim != 3 or x.shape[1] != expected_tokens or x.shape[2] != expected_features:
-			raise ValueError(f'Expected token tensor shape (N, {expected_tokens}, {expected_features}), but got {tuple(x.shape)}')
 
 		x = x.reshape(shape=(x.shape[0], grid_h, grid_w, p, p, c))
 		x = torch.einsum('nhwpqc->nchpwq', x)
@@ -181,6 +189,10 @@ class MaskedAutoencoderViT(nn.Module):
 		return imgs
 
 	@torch.compiler.disable
+	@icontract.require(lambda mask_ratio: 0 <= mask_ratio < 1)
+	@icontract.require(lambda x: x.ndim == 3)
+	@icontract.ensure(lambda x, result: result[1].shape == x.shape[:2] and result[2].shape == x.shape[:2])
+	@icontract.ensure(lambda x, mask_ratio, result: result[0].shape == (x.shape[0], int(x.shape[1] * (1 - mask_ratio)), x.shape[2]))
 	def random_masking(self, x: torch.Tensor, mask_ratio: float):
 		"""
 		对每个样本进行随机 masking
@@ -215,6 +227,8 @@ class MaskedAutoencoderViT(nn.Module):
 
 		return x_masked, mask, ids_restore
 
+	@icontract.require(lambda x: x.ndim == 4)
+	@icontract.ensure(lambda self, x, result: result[1].shape == (x.shape[0], self.patch_embed.num_patches))
 	def forward_encoder(self, x: torch.Tensor, mask_ratio: float):
 		"""编码器前向传播"""
 		# embed patches
@@ -238,6 +252,11 @@ class MaskedAutoencoderViT(nn.Module):
 
 		return x, mask, ids_restore
 
+	@icontract.require(lambda x, ids_restore: ids_restore.ndim == 2 and ids_restore.shape[0] == x.shape[0])
+	@icontract.require(lambda x: x.ndim == 3)
+	@icontract.ensure(
+		lambda self, x, ids_restore, result: result.shape == (x.shape[0], ids_restore.shape[1], self.decoder_pred.out_features)
+	)
 	def forward_decoder(self, x: torch.Tensor, ids_restore: torch.Tensor):
 		"""解码器前向传播"""
 		# embed tokens
@@ -266,6 +285,13 @@ class MaskedAutoencoderViT(nn.Module):
 		return x
 
 	@override
+	@icontract.require(lambda mask_ratio: 0 <= mask_ratio < 1)
+	@icontract.require(lambda imgs: imgs.ndim == 4)
+	@icontract.ensure(lambda self, imgs, result: result[1].shape == (imgs.shape[0], self.patch_embed.num_patches))
+	@icontract.ensure(
+		lambda self, imgs, result: result[0].shape
+		== (imgs.shape[0], self.patch_embed.num_patches, self.patch_embed.patch_size[0] ** 2 * self.patch_embed.proj.in_channels)
+	)
 	def forward(self, imgs: torch.Tensor, mask_ratio: float = 0.75) -> tuple[torch.Tensor, torch.Tensor]:
 		"""
 		MAE 前向传播
@@ -370,8 +396,7 @@ MAE_MODELS = {
 }
 
 
+@icontract.require(lambda model_name: model_name in MAE_MODELS, 'Unknown model')
 def create_mae_model(model_name: str, **kwargs) -> MaskedAutoencoderViT:
 	"""创建 MAE 模型"""
-	if model_name not in MAE_MODELS:
-		raise ValueError(f'Unknown model: {model_name}. Available: {list(MAE_MODELS.keys())}')
 	return MAE_MODELS[model_name](**kwargs)

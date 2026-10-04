@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+import icontract
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
@@ -53,6 +54,7 @@ def _build_curve_colors(total_curves: int, cmap: str) -> list[Any]:
 	return [color_map(float(position)) for position in positions]
 
 
+@icontract.ensure(lambda thresholds, result: result.shape == thresholds.shape)
 def _compute_treat_all_net_benefit(
 	thresholds: VectorF64,
 	prevalence: np.float64,
@@ -61,6 +63,8 @@ def _compute_treat_all_net_benefit(
 	return prevalence - (1.0 - prevalence) * threshold_odds
 
 
+@icontract.require(lambda plot_items: len(plot_items) > 0)
+@icontract.ensure(lambda result: 0 <= result[0] <= 1)
 def _resolve_reference_prevalence(plot_items: list[tuple[str, str, DcaCurve]]) -> tuple[np.float64, str]:
 	class_curves = [curve for curve_key, _, curve in plot_items if curve_key.startswith('class_')]
 	if class_curves:
@@ -72,6 +76,8 @@ def _resolve_reference_prevalence(plot_items: list[tuple[str, str, DcaCurve]]) -
 	return np.mean(np.stack([curve.prevalence for _, _, curve in plot_items])), 'Treat all (mean prevalence)'
 
 
+@icontract.require(lambda plot_items: len(plot_items) > 0)
+@icontract.ensure(lambda result: result[0] < result[1])
 def _resolve_y_limits(
 	plot_items: list[tuple[str, str, DcaCurve]],
 	plot_treat_none: bool,

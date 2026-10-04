@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import override
 
+import icontract
 import torch
 import torch.nn as nn
 
@@ -14,11 +15,13 @@ class BackboneModel(nn.Module):
 	"""包含特征提取 backbone 的基础模型组件。"""
 
 	@override
+	@icontract.require(lambda backbone: hasattr(backbone, 'num_features'), 'backbone 必须提供 num_features 属性')
 	def __init__(self, backbone: nn.Module) -> None:
 		super().__init__()
 		self.backbone = backbone
 		self.width: int = getattr(backbone, 'num_features')
 
+	@icontract.ensure(lambda self, images, result: result.shape == (images.shape[0], self.width))
 	def forward_features(self, images: torch.Tensor) -> torch.Tensor:
 		return self.backbone(images)
 
@@ -27,12 +30,14 @@ class ClassificationModel(BackboneModel):
 	"""带标准多分类线性头的模型。"""
 
 	@override
+	@icontract.require(lambda num_classes: num_classes >= 2)
 	def __init__(self, backbone: nn.Module, num_classes: int) -> None:
 		super().__init__(backbone)
 		self.num_classes = num_classes
 		self.fc = nn.Linear(self.width, num_classes)
 
 	@override
+	@icontract.ensure(lambda self, images, result: result.shape == (images.shape[0], self.num_classes))
 	def forward(self, images: torch.Tensor) -> torch.Tensor:
 		return self.fc(self.backbone(images))
 
@@ -46,6 +51,7 @@ class ScalarModel(BackboneModel):
 		self.fc = nn.Linear(self.width, 1, bias=bias)
 
 	@override
+	@icontract.ensure(lambda images, result: result.shape == (images.shape[0],))
 	def forward(self, images: torch.Tensor) -> torch.Tensor:
 		return self.fc(self.backbone(images)).squeeze(-1)
 
@@ -54,6 +60,7 @@ class CLMModel(BackboneModel):
 	"""累积链接模型（CLM）：单输出无偏置线性头与有序阈值参数。"""
 
 	@override
+	@icontract.require(lambda num_classes: num_classes >= 2)
 	def __init__(self, backbone: nn.Module, num_classes: int) -> None:
 		super().__init__(backbone)
 		self.num_classes = num_classes
@@ -62,6 +69,7 @@ class CLMModel(BackboneModel):
 		self.delta: nn.Parameter | None = nn.Parameter(torch.zeros(num_classes - 2)) if num_classes >= 3 else None
 
 	@override
+	@icontract.ensure(lambda images, result: result.shape == (images.shape[0],))
 	def forward(self, images: torch.Tensor) -> torch.Tensor:
 		return self.fc(self.backbone(images)).squeeze(-1)
 
@@ -70,6 +78,7 @@ class CORALModel(BackboneModel):
 	"""CORAL 模型：单输出无偏置线性头与共享权重递减偏置向量。"""
 
 	@override
+	@icontract.require(lambda num_classes: num_classes >= 2)
 	def __init__(self, backbone: nn.Module, num_classes: int) -> None:
 		super().__init__(backbone)
 		self.num_classes = num_classes
@@ -77,6 +86,7 @@ class CORALModel(BackboneModel):
 		self.coral_bias = nn.Parameter(torch.linspace(1.0, -1.0, num_classes - 1))
 
 	@override
+	@icontract.ensure(lambda images, result: result.shape == (images.shape[0],))
 	def forward(self, images: torch.Tensor) -> torch.Tensor:
 		return self.fc(self.backbone(images)).squeeze(-1)
 
@@ -85,12 +95,14 @@ class CORNModel(BackboneModel):
 	"""CORN 模型：输出 K-1 个二分类条件阈值 logit。"""
 
 	@override
+	@icontract.require(lambda num_classes: num_classes >= 2)
 	def __init__(self, backbone: nn.Module, num_classes: int) -> None:
 		super().__init__(backbone)
 		self.num_classes = num_classes
 		self.fc = nn.Linear(self.width, num_classes - 1)
 
 	@override
+	@icontract.ensure(lambda self, images, result: result.shape == (images.shape[0], self.num_classes - 1))
 	def forward(self, images: torch.Tensor) -> torch.Tensor:
 		return self.fc(self.backbone(images))
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import override
 
+import icontract
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -17,6 +18,8 @@ from daisy.training.trainer import Trainer
 class Method[M: nn.Module](ABC, Plugin):
 	"""算法方法基类，作为核心插件向 Trainer 提供模型、默认优化器与训练 step。"""
 
+	@icontract.require(lambda weight_decay: weight_decay >= 0)
+	@icontract.require(lambda lr: lr > 0)
 	def __init__(
 		self,
 		backbone: nn.Module,

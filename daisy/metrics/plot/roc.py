@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+import icontract
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib.axes import Axes
@@ -55,6 +56,7 @@ def _build_curve_colors(total_curves: int, cmap: str) -> list[Any]:
 	return [color_map(float(position)) for position in positions]
 
 
+@icontract.ensure(lambda result: len(result) > 0 and all(0 <= v <= 1 for v in result.values()))
 def plot_roc_curve(
 	y_pred: MatrixF64,
 	y_true: VectorI64,

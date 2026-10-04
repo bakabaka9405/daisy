@@ -18,8 +18,6 @@ def import_files(paths: Iterable[Path]) -> None:
 		path = raw_path.resolve()
 		if path.suffix != '.py':
 			raise ValueError(f'Import file must be a .py file: {path}')
-		if not path.is_file():
-			raise FileNotFoundError(f'Import file not found: {path}')
 		name = path.stem
 		if not name.isidentifier():
 			raise ValueError(f'Import file name {path.name!r} is not a valid module name')

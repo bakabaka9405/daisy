@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import icontract
 import numpy as np
 from daisy.typing import VectorF64, MatrixF64
 from .icc import icc_a1_score
 
 
+@icontract.require(lambda y_true, y_pred: y_true.shape == y_pred.shape)
+@icontract.ensure(lambda result: -1 - 1e-9 <= result <= 1 + 1e-9)
 def pc_score(y_true: VectorF64 | MatrixF64, y_pred: VectorF64 | MatrixF64) -> np.float64:
 	"""Pearson Correlation coefficient. Returns 0.0 for constant predictions."""
 	y_true = y_true.reshape(y_true.shape[0], 1 if y_true.ndim == 1 else y_true.shape[-1])
@@ -23,14 +26,19 @@ def pc_score(y_true: VectorF64 | MatrixF64, y_pred: VectorF64 | MatrixF64) -> np
 	return result.mean()
 
 
+@icontract.require(lambda y_true, y_pred: y_true.shape == y_pred.shape)
+@icontract.ensure(lambda result: result >= 0)
 def mae_score(y_true: VectorF64, y_pred: VectorF64) -> np.float64:
 	return np.mean(np.abs(y_true - y_pred))
 
 
+@icontract.require(lambda y_true, y_pred: y_true.shape == y_pred.shape)
+@icontract.ensure(lambda result: result >= 0)
 def rmse_score(y_true: VectorF64, y_pred: VectorF64) -> np.float64:
 	return np.sqrt(np.mean((y_true - y_pred) ** 2))
 
 
+@icontract.require(lambda y_true, y_pred: y_true.shape == y_pred.shape)
 def evaluate_regression_scores(y_pred: VectorF64, y_true: VectorF64) -> dict[str, float]:
 	"""计算回归指标。"""
 	return {

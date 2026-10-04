@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import override
 
+import icontract
 import numpy as np
 import torch
 import torch.nn as nn
@@ -17,6 +18,7 @@ from daisy.training.trainer import Trainer
 from daisy.typing import GenericDataLoader as DataLoader
 
 
+@icontract.require(lambda smoothing: 0 <= smoothing < 1)
 def create_criterion(mixup_enabled: bool, smoothing: float) -> nn.Module:
 	"""根据配置创建损失函数"""
 	if mixup_enabled:
@@ -32,6 +34,9 @@ class ClassificationMethod(Method[nn.Module]):
 	"""通用多分类算法方法。"""
 
 	@override
+	@icontract.require(lambda smoothing: 0 <= smoothing < 1)
+	@icontract.require(lambda mixup, cutmix: mixup >= 0 and cutmix >= 0)
+	@icontract.require(lambda num_classes: num_classes >= 2)
 	def __init__(
 		self,
 		model: nn.Module,
@@ -70,6 +75,9 @@ class ClassificationMethod(Method[nn.Module]):
 		"""直接采用传入的完整分类模型。"""
 		return backbone
 
+	@icontract.require(lambda self, batch: self.mixup_fn is None or batch[0].shape[0] % 2 == 0, 'Mixup 要求批大小为偶数')
+	@icontract.require(lambda batch: batch[0].shape[0] == batch[1].shape[0])
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		if self.mixup_fn is not None:
@@ -77,11 +85,13 @@ class ClassificationMethod(Method[nn.Module]):
 		return self.criterion(self.model(images), targets)
 
 	@override
+	@icontract.ensure(lambda self, X, result: result.shape == (X.shape[0], self.num_classes))
 	def inference_step(self, X: Tensor) -> torch.Tensor:
 		"""执行单批推理，返回原始未归一化的分类 logits。"""
 		return self.model(X)
 
 	@override
+	@icontract.ensure(lambda X, result: result.shape == (X.shape[0],))
 	def predict_step(self, X: Tensor) -> torch.Tensor:
 		"""执行单批预测，调用 inference_step 并返回解码后的类别索引。"""
 		return self.inference_step(X).argmax(dim=1)

@@ -11,6 +11,7 @@ from functools import partial, reduce
 from operator import mul
 from typing import Any
 
+import icontract
 import torch
 import torch.nn as nn
 from timm.models.vision_transformer import VisionTransformer
@@ -60,12 +61,16 @@ class VisionTransformerMoCo(VisionTransformer):
 				if self.patch_embed.proj.bias is not None:
 					self.patch_embed.proj.bias.requires_grad = False
 
+	@icontract.require(lambda temperature: temperature > 0)
+	@icontract.require(
+		lambda self: getattr(self, 'num_prefix_tokens', getattr(self, 'num_tokens', 1)) == 1, 'Assuming one and only one token, [cls]'
+	)
+	@icontract.require(lambda self: self.embed_dim % 4 == 0, 'Embed dimension must be divisible by 4 for 2D sin-cos position embedding')
 	def build_2d_sincos_position_embedding(self, temperature: float = 10000.0):
 		h, w = self.patch_embed.grid_size
 		grid_w = torch.arange(w, dtype=torch.float32)
 		grid_h = torch.arange(h, dtype=torch.float32)
 		grid_w, grid_h = torch.meshgrid(grid_w, grid_h, indexing='ij')
-		assert self.embed_dim % 4 == 0, 'Embed dimension must be divisible by 4 for 2D sin-cos position embedding'
 		pos_dim = self.embed_dim // 4
 		omega = torch.arange(pos_dim, dtype=torch.float32) / pos_dim
 		omega = 1.0 / (temperature**omega)
@@ -73,9 +78,7 @@ class VisionTransformerMoCo(VisionTransformer):
 		out_h = torch.einsum('m,d->md', [grid_h.flatten(), omega])
 		pos_emb = torch.cat([torch.sin(out_w), torch.cos(out_w), torch.sin(out_h), torch.cos(out_h)], dim=1)[None, :, :]
 
-		# num_prefix_tokens 是 timm 新版 API (替代旧版 num_tokens)
-		num_prefix = getattr(self, 'num_prefix_tokens', getattr(self, 'num_tokens', 1))
-		assert num_prefix == 1, 'Assuming one and only one token, [cls]'
+		# num_prefix_tokens 是 timm 新版 API (替代旧版 num_tokens)，前置条件已要求其为 1
 		pe_token = torch.zeros([1, 1, self.embed_dim], dtype=torch.float32)
 		self.pos_embed = nn.Parameter(torch.cat([pe_token, pos_emb], dim=1))
 		self.pos_embed.requires_grad = False
@@ -86,6 +89,10 @@ class ConvStem(nn.Module):
 	https://arxiv.org/abs/2106.14881
 	"""
 
+	@icontract.require(lambda img_size, patch_size: all(s % patch_size == 0 for s in to_2tuple(img_size)))
+	@icontract.require(lambda in_chans: in_chans == 3, 'ConvStem 的第一层卷积固定为 3 通道输入')
+	@icontract.require(lambda embed_dim: embed_dim % 8 == 0, 'Embed dimension must be divisible by 8 for ConvStem')
+	@icontract.require(lambda patch_size: patch_size == 16, 'ConvStem only supports patch size of 16')
 	def __init__(
 		self,
 		img_size: int = 224,
@@ -96,9 +103,6 @@ class ConvStem(nn.Module):
 		flatten: bool = True,
 	):
 		super().__init__()
-
-		assert patch_size == 16, 'ConvStem only supports patch size of 16'
-		assert embed_dim % 8 == 0, 'Embed dimension must be divisible by 8 for ConvStem'
 
 		img_size_t: tuple[int, int] = to_2tuple(img_size)  # type: ignore[assignment]
 		patch_size_t: tuple[int, int] = to_2tuple(patch_size)  # type: ignore[assignment]
@@ -122,11 +126,10 @@ class ConvStem(nn.Module):
 
 		self.norm = norm_layer(embed_dim) if norm_layer else nn.Identity()
 
+	@icontract.require(lambda self, x: x.shape[2:] == self.img_size, "Input image size doesn't match model")
+	@icontract.require(lambda x: x.ndim == 4)
+	@icontract.ensure(lambda self, x, result: not self.flatten or result.shape[:2] == (x.shape[0], self.num_patches))
 	def forward(self, x: torch.Tensor) -> torch.Tensor:
-		B, C, H, W = x.shape
-		assert H == self.img_size[0] and W == self.img_size[1], (
-			f"Input image size ({H}*{W}) doesn't match model ({self.img_size[0]}*{self.img_size[1]})."
-		)
 		x = self.proj(x)
 		if self.flatten:
 			x = x.flatten(2).transpose(1, 2)  # BCHW -> BNC

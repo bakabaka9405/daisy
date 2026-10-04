@@ -1,6 +1,7 @@
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+import icontract
 import torch
 from torch import Tensor
 from torch.utils.data._utils.collate import collate, default_collate_fn_map
@@ -15,6 +16,9 @@ class LazyNormalization:
 	mean: tuple[float, ...]
 	std: tuple[float, ...]
 
+	@icontract.require(lambda std: all(s > 0 for s in std))
+	@icontract.require(lambda mean: len(mean) > 0)
+	@icontract.require(lambda mean, std: len(mean) == len(std))
 	def __init__(self, mean: Sequence[float], std: Sequence[float]) -> None:
 		object.__setattr__(self, 'mean', tuple(mean))
 		object.__setattr__(self, 'std', tuple(std))
@@ -34,14 +38,14 @@ class LazyNormalizedTensor:
 		return LazyNormalizedTensor(self.tensor.pin_memory(), self.policy)
 
 
+@icontract.require(lambda batch: all(item.policy == batch[0].policy for item in batch), '同一 batch 内的 LazyNormalization 策略必须一致')
+@icontract.require(lambda batch: len(batch) > 0)
 def _collate_lazy_normalized(
 	batch: list[LazyNormalizedTensor],
 	*,
 	collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ) -> LazyNormalizedTensor:
 	policy = batch[0].policy
-	if any(item.policy != policy for item in batch):
-		raise ValueError('同一 batch 内的 LazyNormalization 策略必须一致')
 	collated = collate([item.tensor for item in batch], collate_fn_map=collate_fn_map)
 	return LazyNormalizedTensor(collated, policy)
 
@@ -57,9 +61,12 @@ class ZeroOneNormalize:
 class ResizeAndPad:
 	size: int
 
+	@icontract.require(lambda size: size >= 1)
 	def __init__(self, size: int):
 		self.size = size
 
+	@icontract.require(lambda tensor: tensor.ndim == 3)
+	@icontract.ensure(lambda self, result: result.shape[-2:] == (self.size, self.size))
 	def __call__(self, tensor: torch.Tensor):
 		# 确保张量是浮点类型，避免F.interpolate出错
 		if tensor.dtype != torch.float32:
@@ -223,6 +230,7 @@ def get_rectangle_train_transform_slight():
 	)
 
 
+@icontract.require(lambda zoom_out_max: zoom_out_max >= 1.0)
 def get_rectangle_train_transform(
 	zoom_out_max: float = 4.0,
 	*,

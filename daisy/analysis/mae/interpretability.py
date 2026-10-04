@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
+import icontract
 import numpy as np
 import torch
 from timm.layers.attention import Attention
@@ -46,6 +47,9 @@ def _hook_attention_weights(model: VisionTransformer):
 			mod.fused_attn = fused_attn  # type: ignore[misc]
 
 
+@icontract.require(lambda attention_matrices: all(m.ndim == 3 and m.shape[-1] == m.shape[-2] for m in attention_matrices))
+@icontract.require(lambda attention_matrices, start_layer: 0 <= start_layer < len(attention_matrices))
+@icontract.ensure(lambda attention_matrices, result: result.shape == attention_matrices[-1].shape)
 def _compute_rollout(
 	attention_matrices: list[torch.Tensor],
 	start_layer: int = 0,
@@ -80,6 +84,11 @@ def _compute_grad_rollout(
 	return _compute_rollout(avg_matrices, start_layer)
 
 
+@icontract.require(lambda model, start_layer: 0 <= start_layer < len(model.blocks))
+@icontract.require(lambda target_class: target_class >= 0)
+@icontract.require(lambda image: image.ndim == 3)
+@icontract.require(lambda model: not model.training, 'model must be in eval mode')
+@icontract.require(lambda model: model.global_pool == 'token', "global_pool must be 'token'")
 def generate_vit_grad_rollout_heatmap(
 	model: VisionTransformer,
 	image: torch.Tensor,
@@ -103,9 +112,6 @@ def generate_vit_grad_rollout_heatmap(
 			- heatmap: ndarray shape (input_size, input_size)，范围 [0, 1]
 			- overlay: ndarray shape (input_size, input_size, 3)，范围 [0, 1]
 	"""
-	if model.global_pool != 'token':
-		raise ValueError(f"Unsupported global_pool={model.global_pool!r}; expected 'token'.")
-
 	device = next(model.parameters()).device
 	input_tensor = image.unsqueeze(0).to(device)
 	model.zero_grad()
@@ -114,7 +120,7 @@ def generate_vit_grad_rollout_heatmap(
 	with torch.enable_grad(), _hook_attention_weights(model) as (all_attentions, all_gradients):
 		tokens = model.forward_features(input_tensor)
 		output = model.forward_head(tokens)
-		if not 0 <= target_class < output.shape[1]:
+		if target_class >= output.shape[1]:
 			raise ValueError('target_class is outside the logits range.')
 
 		one_hot = torch.zeros_like(output)
@@ -132,6 +138,7 @@ def generate_vit_grad_rollout_heatmap(
 	return show_cam_on_image(image, mask, input_size)
 
 
+@icontract.require(lambda image: image.ndim == 3 or (image.ndim == 4 and image.shape[0] == 1), 'image must be (3, H, W) or (1, 3, H, W)')
 def generate_vit_attention_relevance_heatmap(
 	explainer: ViTAttentionRelevanceExplainer,
 	image: torch.Tensor,

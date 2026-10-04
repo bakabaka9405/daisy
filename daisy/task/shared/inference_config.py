@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal
 
-from pydantic import model_validator
+import icontract
 
 from daisy.method.ordinal import METHODS
 from ..base import BaseConfig
@@ -24,16 +24,12 @@ class InferenceModelConfig(BaseConfig):
 	drop_path: float = 0.1
 	img_size: int = 224
 
-	@model_validator(mode='after')
-	def validate_ordinal(self) -> Self:
-		if self.family == 'ordinal':
-			if self.method not in METHODS:
-				raise ValueError(
-					f"Unknown ordinal method: '{self.method}'. Must be one of {list(METHODS.keys())}"
-				)
-			if self.num_classes < 2:
-				raise ValueError(f'num_classes must be >= 2 for ordinal models, got {self.num_classes}')
-		return self
+	@icontract.require(lambda self: self.img_size > 0)
+	@icontract.require(lambda self: 0 <= self.drop_path < 1)
+	@icontract.require(lambda self: self.family != 'ordinal' or self.num_classes >= 2, 'num_classes must be >= 2 for ordinal models')
+	@icontract.require(lambda self: self.family != 'ordinal' or self.method in METHODS, 'Unknown ordinal method')
+	def model_post_init(self, context: Any, /) -> None:
+		pass
 
 
 class InferenceRuntimeConfig(BaseConfig):
@@ -45,3 +41,9 @@ class InferenceRuntimeConfig(BaseConfig):
 	transform: str = 'rectangle_val'
 	input_size: int = 224
 	seed: int | None = None
+
+	@icontract.require(lambda self: self.input_size > 0)
+	@icontract.require(lambda self: self.num_workers >= 0)
+	@icontract.require(lambda self: self.batch_size >= 1)
+	def model_post_init(self, context: Any, /) -> None:
+		pass

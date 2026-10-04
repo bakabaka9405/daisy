@@ -14,6 +14,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
+import icontract
 import torch
 from rich.console import Console
 from rich.table import Table
@@ -39,6 +40,9 @@ class CosineAnnealingLR(Plugin):
 	支持 layer-wise lr scale（通过 param_group['lr_scale']）。
 	"""
 
+	@icontract.require(lambda warmup_epochs: warmup_epochs >= 0)
+	@icontract.require(lambda lr, min_lr: 0 <= min_lr <= lr)
+	@icontract.require(lambda lr: lr > 0)
 	def __init__(
 		self,
 		lr: float,
@@ -57,16 +61,18 @@ class CosineAnnealingLR(Plugin):
 		else:
 			trainer.on_epoch_start(self._step)
 
+	@icontract.require(lambda epoch: epoch >= 0)
+	@icontract.ensure(lambda self, result: 0 <= result <= self.lr * (1 + 1e-9))
 	def _calc_lr(self, epoch: float, total_epochs: int) -> float:
 		if epoch < self.warmup_epochs:
 			return self.lr * epoch / max(self.warmup_epochs, 1e-8)
 		progress = (epoch - self.warmup_epochs) / max(total_epochs - self.warmup_epochs, 1)
 		return self.min_lr + (self.lr - self.min_lr) * 0.5 * (1.0 + math.cos(math.pi * progress))
 
+	@icontract.require(lambda state: state.optimizer is not None, 'CosineAnnealingLR 需要 optimizer。')
 	def _step(self, state: TrainState) -> None:
 		optimizer = state.optimizer
-		if optimizer is None:
-			raise RuntimeError('CosineAnnealingLR 需要 optimizer。')
+		assert optimizer is not None
 
 		if self.per_iteration:
 			frac = state.epoch + state.batch_idx / max(state.total_batches, 1)
@@ -135,6 +141,7 @@ class BestModel(Plugin):
 class EarlyStop(Plugin):
 	"""指标连续 ``patience`` 个 epoch 未改善时请求终止训练。"""
 
+	@icontract.require(lambda patience: patience >= 1)
 	def __init__(
 		self,
 		watch_metric: str,
@@ -171,6 +178,8 @@ class EarlyStop(Plugin):
 class Checkpoint(Plugin):
 	"""按频率保存 checkpoint，并可滚动保留最近若干个。"""
 
+	@icontract.require(lambda keep_recent: keep_recent >= 0)
+	@icontract.require(lambda save_freq: save_freq >= 0)
 	def __init__(
 		self,
 		save_dir: Path,
@@ -232,6 +241,7 @@ class RichEpochPrint(Plugin):
 
 	PROGRESS_INTERVAL = 0.2
 
+	@icontract.require(lambda max_log_lines: max_log_lines >= 1)
 	def __init__(self, watch: Iterable[str], max_log_lines: int = 10000):
 		self.watch: tuple[str, ...] = tuple(watch)
 		self.max_log_lines = max_log_lines
@@ -255,12 +265,13 @@ class RichEpochPrint(Plugin):
 	def _columns(self) -> tuple[str, ...]:
 		return ('epoch', *self.watch)
 
+	@icontract.require(lambda self: self._app is not None, 'RichEpochPrint 回调只能在 fit 期间触发。')
 	def _require_app(self) -> TrainMonitorApp:
-		if self._app is None:
-			raise RuntimeError('RichEpochPrint 回调只能在 fit 期间触发。')
-		if self._app.abort.is_set():
+		app = self._app
+		assert app is not None
+		if app.abort.is_set():
 			raise KeyboardInterrupt('用户在界面中中止训练。')
-		return self._app
+		return app
 
 	def _wrap(self, run: Callable[[], TrainState]) -> TrainState:
 		self.history = []
@@ -317,6 +328,7 @@ class RichEpochPrint(Plugin):
 class BatchPrint(Plugin):
 	"""按指定频率打印 batch 进度。"""
 
+	@icontract.require(lambda print_freq: print_freq >= 0)
 	def __init__(self, print_freq: int = 50):
 		self.print_freq = print_freq
 

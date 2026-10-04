@@ -1,8 +1,9 @@
 """分类任务配置"""
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
+import icontract
 from pydantic import Field
 import tyro.conf
 
@@ -48,6 +49,19 @@ class TrainingConfig(BaseConfig):
 	early_stop_epoch: int = 5
 	cmp_obj: Literal['acc', 'prec', 'recall', 'f1'] = 'f1'
 	transform: TransformConfig = Field(default_factory=TransformConfig)
+
+	@icontract.require(lambda self: self.early_stop_epoch >= 1)
+	@icontract.require(lambda self: min(self.num_workers if isinstance(self.num_workers, tuple) else (self.num_workers,)) >= 0)
+	@icontract.require(lambda self: self.max_norm > 0)
+	@icontract.require(lambda self: self.accum_iter >= 1)
+	@icontract.require(lambda self: 0 <= self.smoothing < 1)
+	@icontract.require(lambda self: self.warmup_epochs >= 0)
+	@icontract.require(lambda self: self.weight_decay >= 0)
+	@icontract.require(lambda self: self.lr > 0)
+	@icontract.require(lambda self: self.batch_size >= 1)
+	@icontract.require(lambda self: self.epochs >= 1)
+	def model_post_init(self, context: Any, /) -> None:
+		pass
 
 
 class ClassificationConfig(BaseTaskConfig):

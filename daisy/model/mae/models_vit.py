@@ -10,6 +10,7 @@
 from functools import partial
 from pathlib import Path
 
+import icontract
 import torch
 import torch.nn as nn
 from timm.models.vision_transformer import VisionTransformer
@@ -67,6 +68,7 @@ VIT_MODELS = {
 }
 
 
+@icontract.require(lambda name: name in VIT_MODELS, 'Unknown model')
 def create_vit_model(name: str, **kwargs) -> VisionTransformer:
 	"""创建 ViT 模型
 
@@ -81,11 +83,10 @@ def create_vit_model(name: str, **kwargs) -> VisionTransformer:
 	Returns:
 		ViT 模型实例
 	"""
-	if name not in VIT_MODELS:
-		raise ValueError(f'Unknown model: {name}. Available: {list(VIT_MODELS.keys())}')
 	return VIT_MODELS[name](**kwargs)
 
 
+@icontract.require(lambda head_init_std: head_init_std > 0)
 def load_mae_pretrained_weights(
 	model: VisionTransformer,
 	checkpoint_path: Path,

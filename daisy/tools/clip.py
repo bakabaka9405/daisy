@@ -1,4 +1,5 @@
 import cv2
+import icontract
 import numpy as np
 from pathlib import Path
 
@@ -9,6 +10,7 @@ def cv_imread(path: Path):
 
 
 class ImageClipper:
+	@icontract.require(lambda max_display_size: max_display_size > 0)
 	def __init__(
 		self,
 		input_dir: Path,

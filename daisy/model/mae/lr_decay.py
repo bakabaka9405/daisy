@@ -10,9 +10,12 @@
 
 from typing import Any
 
+import icontract
 import torch.nn as nn
 
 
+@icontract.require(lambda num_layers: num_layers >= 1)
+@icontract.ensure(lambda num_layers, result: 0 <= result <= num_layers)
 def get_layer_id_for_vit(name: str, num_layers: int) -> int:
 	"""获取参数所属的层 ID
 
@@ -36,6 +39,9 @@ def get_layer_id_for_vit(name: str, num_layers: int) -> int:
 		return num_layers
 
 
+@icontract.require(lambda layer_decay: 0 < layer_decay <= 1)
+@icontract.require(lambda weight_decay: weight_decay >= 0)
+@icontract.require(lambda model: hasattr(model, 'blocks'), '模型必须包含 blocks（Transformer blocks）')
 def param_groups_lrd(
 	model: nn.Module,
 	weight_decay: float = 0.05,

@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+import icontract
 import numpy as np
 import torch
 
@@ -23,27 +24,25 @@ class TaskPredictions:
 	probabilities: torch.Tensor | None = None
 
 
+def _has_auroc_probabilities(results: Mapping[str, TaskPredictions], metrics: Sequence[ClassificationMetric]) -> bool:
+	"""请求 auroc 时每个任务头均已提供 probabilities"""
+	return 'auroc' not in metrics or all(res.probabilities is not None for res in results.values())
+
+
+@icontract.require(
+	lambda results, metrics: _has_auroc_probabilities(results, metrics),
+	'Task missing probabilities required for AUROC calculation',
+)
+@icontract.require(
+	lambda results, num_classes: results.keys() == num_classes.keys(),
+	'Mismatch between results tasks and num_classes tasks',
+)
 def calculate_multihead_metrics(
 	results: Mapping[str, TaskPredictions],
 	num_classes: Mapping[str, int],
 	metrics: Sequence[ClassificationMetric],
 ) -> dict[str, dict[str, float]]:
 	"""根据各任务预测结果计算分类评估指标，输出键为任务名称的指标字典。"""
-	if results.keys() != num_classes.keys():
-		raise ValueError(
-			f'Mismatch between results tasks ({set(results.keys())}) and num_classes tasks ({set(num_classes.keys())})'
-		)
-
-	if 'auroc' in metrics:
-		for task_name, res in results.items():
-			if res.probabilities is None:
-				raise ValueError(f"Task '{task_name}' missing probabilities required for AUROC calculation")
-
-	valid_metrics = {'acc', 'precision', 'recall', 'f1', 'auroc', 'mae'}
-	for m in metrics:
-		if m not in valid_metrics:
-			raise ValueError(f"Unsupported metric '{m}', expected one of {sorted(valid_metrics)}")
-
 	need_fast_calc = any(m in {'acc', 'precision', 'recall', 'f1'} for m in metrics)
 	all_metrics: dict[str, dict[str, float]] = {}
 

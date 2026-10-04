@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import Literal, override
 
+import icontract
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -19,6 +20,8 @@ class MoCoPretrainMethod(Method[nn.Module]):
 	"""MoCo (v2/v3) 自监督对比学习预训练方法。"""
 
 	@override
+	@icontract.require(lambda moco_m: 0 <= moco_m <= 1)
+	@icontract.require(lambda momentum: 0 <= momentum < 1)
 	def __init__(
 		self,
 		model: nn.Module,
@@ -82,6 +85,9 @@ class MoCoPretrainMethod(Method[nn.Module]):
 		else:
 			self.current_m = float(getattr(self.model, 'm', self.moco_m))
 
+	@icontract.require(lambda batch: batch[0].ndim == 4 and batch[0].shape == batch[1].shape)
+	@icontract.require(lambda batch: len(batch) == 2)
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> Tensor:
 		"""解包双视图张量，分发 v2 与 v3 对比损失并阻断非有限数值的反向传播。"""
 		im_1, im_2 = batch

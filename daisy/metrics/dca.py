@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+import icontract
 import numpy as np
 
 from daisy.typing import MatrixF64, VectorF64, VectorI64
@@ -17,37 +18,9 @@ class DcaCurve:
 	prevalence: np.float64
 
 
-def _validate_inputs(
-	y_true: VectorI64,
-	y_prob: MatrixF64,
-) -> None:
-	if y_true.size == 0:
-		raise ValueError('样本不能为空')
-	if y_prob.shape[0] != y_true.size:
-		raise ValueError('标签与概率的样本数必须一致')
-	if y_prob.shape[1] < 2:
-		raise ValueError('类别数必须至少为 2')
-	if not np.all((y_true >= 0) & (y_true < y_prob.shape[1])):
-		raise ValueError('标签必须位于类别编号范围内')
-	if not np.all((y_prob >= 0) & (y_prob <= 1)):
-		raise ValueError('概率必须位于 [0, 1]')
-	if not np.allclose(y_prob.sum(axis=1), 1.0, atol=1e-6, rtol=1e-6):
-		raise ValueError('每个样本的类别概率之和必须为 1')
-
-
-def _validate_thresholds(thresholds: VectorF64 | None) -> VectorF64:
-	if thresholds is None:
-		return np.linspace(0.01, 0.99, num=99, dtype=np.float64)
-
-	if thresholds.size == 0:
-		raise ValueError('阈值不能为空')
-	if not np.all((thresholds > 0) & (thresholds < 1)):
-		raise ValueError('阈值必须位于 (0, 1)')
-	if not np.all(np.diff(thresholds) > 0):
-		raise ValueError('阈值必须严格递增')
-	return thresholds
-
-
+@icontract.require(lambda positive_mask, probabilities: positive_mask.shape == probabilities.shape)
+@icontract.ensure(lambda result: 0 <= result.prevalence <= 1)
+@icontract.ensure(lambda thresholds, result: result.net_benefit.shape == thresholds.shape)
 def _compute_binary_dca_curve(
 	positive_mask: np.ndarray[tuple[int], np.dtype[np.bool_]],
 	probabilities: VectorF64,
@@ -69,6 +42,7 @@ def _compute_binary_dca_curve(
 	)
 
 
+@icontract.ensure(lambda y_prob, result: len(result) == y_prob.shape[1])
 def _compute_ovr_curves(
 	y_true: VectorI64,
 	y_prob: MatrixF64,
@@ -82,6 +56,7 @@ def _compute_ovr_curves(
 	return curves
 
 
+@icontract.require(lambda ovr_curves: len(ovr_curves) > 0)
 def _compute_macro_curve(ovr_curves: dict[int, DcaCurve]) -> DcaCurve:
 	curve_values = list(ovr_curves.values())
 	thresholds = curve_values[0].thresholds
@@ -95,6 +70,15 @@ def _compute_macro_curve(ovr_curves: dict[int, DcaCurve]) -> DcaCurve:
 	)
 
 
+@icontract.require(lambda thresholds: thresholds is None or np.all(np.diff(thresholds) > 0), '阈值必须严格递增')
+@icontract.require(lambda thresholds: thresholds is None or np.all((thresholds > 0) & (thresholds < 1)), '阈值必须位于 (0, 1)')
+@icontract.require(lambda thresholds: thresholds is None or thresholds.size > 0, '阈值不能为空')
+@icontract.require(lambda y_prob: np.allclose(y_prob.sum(axis=1), 1.0, atol=1e-6, rtol=1e-6), '每个样本的类别概率之和必须为 1')
+@icontract.require(lambda y_prob: np.all((y_prob >= 0) & (y_prob <= 1)), '概率必须位于 [0, 1]')
+@icontract.require(lambda y_true, y_prob: np.all((y_true >= 0) & (y_true < y_prob.shape[1])), '标签必须位于类别编号范围内')
+@icontract.require(lambda y_prob: y_prob.shape[1] >= 2, '类别数必须至少为 2')
+@icontract.require(lambda y_true, y_prob: y_true.shape == (y_prob.shape[0],), '标签与概率的样本数必须一致')
+@icontract.require(lambda y_true: y_true.size > 0, '样本不能为空')
 def compute_multiclass_dca_curves(
 	y_true: VectorI64,
 	y_prob: MatrixF64,
@@ -104,11 +88,7 @@ def compute_multiclass_dca_curves(
 ) -> dict[str, DcaCurve]:
 	"""由 (N,) 整数标签、(N, C) 概率及严格递增的阈值计算多分类 DCA。"""
 
-	# 验证数据取值及样本关系。
-	if mode not in {'ovr', 'micro', 'macro', 'all'}:
-		raise ValueError('Invalid mode argument.')
-	_validate_inputs(y_true, y_prob)
-	threshold_array = _validate_thresholds(thresholds)
+	threshold_array = np.linspace(0.01, 0.99, num=99, dtype=np.float64) if thresholds is None else thresholds
 
 	# 各类别使用相同的样本与阈值计算净获益。
 	ovr_curves = _compute_ovr_curves(y_true, y_prob, threshold_array)

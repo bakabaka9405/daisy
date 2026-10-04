@@ -4,13 +4,14 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any
 
+import icontract
 import torch
 import torch.nn as nn
 from daisy.typing import GenericDataLoader as DataLoader
 from daisy.util.data import Prefetcher
 
 from daisy.training.state import TrainState
-from torch.utils._pytree import tree_map
+from torch.utils._pytree import tree_leaves, tree_map
 
 
 SideEffectFn = Callable[[TrainState], None]
@@ -27,6 +28,8 @@ class Trainer:
 	当前 epoch 的标量指标保存在 ``state.record`` 中，并在下一轮开始前清空。
 	"""
 
+	@icontract.require(lambda clip_grad: clip_grad is None or clip_grad > 0)
+	@icontract.require(lambda accum_iter: accum_iter >= 1)
 	def __init__(
 		self,
 		model: nn.Module | None = None,
@@ -63,13 +66,10 @@ class Trainer:
 		"""获取当前绑定的 process_fn。"""
 		return self._process_fn
 
+	@icontract.require(lambda process_fn: callable(process_fn), 'process_fn must be callable.')
+	@icontract.require(lambda self: self._process_fn is None, 'process_fn has already been set.')
 	def set_process_fn(self, process_fn: ProcessFn) -> Trainer:
 		"""设置训练处理闭包，至多允许绑定一次（包含构造函数初始化）。"""
-		if self._process_fn is not None:
-			raise RuntimeError('process_fn has already been set.')
-		if not callable(process_fn):
-			raise TypeError('process_fn must be callable.')
-
 		self._process_fn = process_fn
 		return self
 
@@ -108,25 +108,21 @@ class Trainer:
 			plugin.register(self)
 		return self
 
+	@icontract.require(lambda epochs, start_epoch: 0 <= start_epoch <= epochs)
+	@icontract.require(lambda self: self.process_fn is not None, 'fit 需要 process_fn。')
+	@icontract.require(lambda self: self.optimizer is not None, 'fit 需要 optimizer。')
+	@icontract.require(lambda self: self.model is not None, 'fit 需要 model。')
 	def fit(self, train_loader: DataLoader, epochs: int, *, start_epoch: int = 0) -> TrainState:
 		"""执行 ``[start_epoch, epochs)`` 区间训练并返回最终状态。"""
-		if self.model is None:
-			raise RuntimeError('fit 需要 model。')
-		if self.optimizer is None:
-			raise RuntimeError('fit 需要 optimizer。')
-		if self.process_fn is None:
-			raise RuntimeError('fit 需要 process_fn。')
-
 		run: FitFn = partial(self._fit, train_loader, epochs, start_epoch)
 		for wrapper in reversed(self._around_fit):
 			run = partial(wrapper, run)
 		return run()
 
 	def _fit(self, train_loader: DataLoader, epochs: int, start_epoch: int) -> TrainState:
-		if self.model is None:
-			raise RuntimeError('Model is required for _fit.')
-		if self.optimizer is None:
-			raise RuntimeError('Optimizer is required for _fit.')
+		# 前提已由 fit 的契约保证，此处仅做类型收窄
+		assert self.model is not None
+		assert self.optimizer is not None
 
 		optimizer = self.optimizer
 		self.model.to(self.device)
@@ -170,15 +166,13 @@ class Trainer:
 		return state
 
 	def _train_one_epoch(self, train_loader: Prefetcher, state: TrainState) -> float:
-		if self.model is None:
-			raise RuntimeError('Model is required for _train_one_epoch.')
-		if self.optimizer is None:
-			raise RuntimeError('Optimizer is required for _train_one_epoch.')
-		if self.process_fn is None:
-			raise RuntimeError('process_fn is required for _train_one_epoch.')
+		# 前提已由 fit 的契约保证，此处仅做类型收窄
+		assert self.model is not None
+		assert self.optimizer is not None
+		process_fn = self.process_fn
+		assert process_fn is not None
 
 		optimizer = self.optimizer
-		process_fn = self.process_fn
 		self.model.train()
 		total_loss = torch.zeros((), device=self.device)
 		num_batches = len(train_loader)
@@ -191,8 +185,6 @@ class Trainer:
 
 			with torch.autocast(device_type=self.device.type, enabled=self.use_amp):
 				raw_loss = process_fn(batch)
-				# if not isinstance(raw_loss, torch.Tensor) or raw_loss.ndim != 0:
-				# 	raise TypeError('process_fn 必须返回标量 Tensor loss。')
 				# 缩放 loss，使累计梯度与整批平均梯度处于同一尺度。
 				loss = raw_loss / self.accum_iter
 
@@ -218,10 +210,12 @@ class Trainer:
 		return (total_loss / max(num_batches, 1)).item()
 
 	@torch.no_grad()
+	@icontract.require(lambda data_loader: len(data_loader) > 0, 'Data loader yielded no batches for inference.')
+	@icontract.require(lambda self: self.model is not None, 'inference 需要 model。')
+	@icontract.ensure(lambda result: all(leaf.device.type == 'cpu' for leaf in tree_leaves(result)))
 	def inference[T](self, data_loader: DataLoader, predict_fn: Callable[[Any], T]) -> T:
 		"""按 batch 顺序拼接预测结果，返回保持 pytree 结构的 CPU 张量。"""
-		if self.model is None:
-			raise RuntimeError('inference 需要 model。')
+		assert self.model is not None
 
 		loader = data_loader if isinstance(data_loader, Prefetcher) else Prefetcher(data_loader, self.device)
 		was_training = self.model.training
@@ -234,9 +228,6 @@ class Trainer:
 				with torch.autocast(device_type=self.device.type, enabled=self.use_amp):
 					outputs = predict_fn(batch)
 				batch_outputs.append(tree_map(lambda t: t.cpu(), outputs))
-
-			if not batch_outputs:
-				raise ValueError('Data loader yielded no batches for inference.')
 
 			return tree_map(lambda *leaves: torch.cat(leaves, dim=0), *batch_outputs)
 		finally:

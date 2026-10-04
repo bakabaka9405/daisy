@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Literal
 import warnings
 
+import icontract
 import numpy as np
 from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.metrics import multilabel_confusion_matrix
@@ -46,30 +47,27 @@ def _safe_specificity_divide(
 	return result
 
 
-def _resolve_labels(
-	y_true: VectorI64 | MatrixI64,
-	y_pred: VectorI64 | MatrixI64,
-	*,
-	average: AverageMode,
-	labels: VectorI64 | None,
-	pos_label: int,
-) -> VectorI64 | None:
-	if average not in {None, 'binary', 'micro', 'macro', 'weighted', 'samples'}:
-		raise ValueError('average 无效')
-
+def _resolve_labels(*, average: AverageMode, labels: VectorI64 | None, pos_label: int) -> VectorI64 | None:
 	if average == 'binary':
-		if type_of_target(y_true) == 'binary':
-			present_labels = unique_labels(y_true, y_pred)
-			if present_labels.size >= 2 and not np.any(present_labels == pos_label):
-				raise ValueError('pos_label 不是有效标签')
-			return np.array([pos_label], dtype=np.int64)
-		raise ValueError("非二分类目标不能使用 average='binary'")
+		return np.array([pos_label], dtype=np.int64)
 
 	if pos_label != 1:
 		warnings.warn("average 不是 'binary' 时将忽略 pos_label。", UserWarning, stacklevel=3)
 	return labels
 
 
+def _valid_pos_label(y_true: VectorI64 | MatrixI64, y_pred: VectorI64 | MatrixI64, pos_label: int) -> bool:
+	present_labels = unique_labels(y_true, y_pred)
+	return present_labels.size < 2 or bool(np.any(present_labels == pos_label))
+
+
+@icontract.require(lambda y_true, sample_weight: sample_weight is None or sample_weight.shape == (y_true.shape[0],))
+@icontract.require(
+	lambda y_true, y_pred, pos_label, average: average != 'binary' or _valid_pos_label(y_true, y_pred, pos_label), 'pos_label 不是有效标签'
+)
+@icontract.require(lambda y_true, average: average != 'binary' or type_of_target(y_true) == 'binary', "非二分类目标不能使用 average='binary'")
+@icontract.require(lambda y_true, y_pred: y_true.shape == y_pred.shape)
+@icontract.ensure(lambda result: np.all(np.isnan(result) | ((np.asarray(result) >= 0) & (np.asarray(result) <= 1))))
 def specificity_score(
 	y_true: VectorI64 | MatrixI64,
 	y_pred: VectorI64 | MatrixI64,
@@ -82,7 +80,7 @@ def specificity_score(
 ) -> np.float64 | VectorF64:
 	"""计算特异度（真负例率）。"""
 
-	resolved_labels = _resolve_labels(y_true, y_pred, average=average, labels=labels, pos_label=pos_label)
+	resolved_labels = _resolve_labels(average=average, labels=labels, pos_label=pos_label)
 	mcm = multilabel_confusion_matrix(
 		y_true,
 		y_pred,

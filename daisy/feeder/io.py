@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import icontract
 import pandas as pd
 
 from daisy.dataset.disk_dataset import load_files_from_folder
@@ -31,7 +32,12 @@ class ColumnLabelSpec:
 	offset: int
 	class_dict: dict[str, int] | None
 
+	def __post_init__(self) -> None:
+		if self.num_classes < 1:
+			raise ValueError(f'num_classes must be >= 1, got {self.num_classes}')
 
+
+@icontract.require(lambda sheet_path: sheet_path.suffix.lower() in {'.csv', '.xlsx', '.xls'}, 'Unknown file type')
 def read_sheet(
 	sheet_path: Path,
 	*,
@@ -39,22 +45,28 @@ def read_sheet(
 	have_header: bool = False,
 ) -> pd.DataFrame:
 	"""按文件后缀读取 CSV 或 Excel 表格文件为 DataFrame"""
-	suffix = sheet_path.suffix.lower()
-
-	if suffix == '.csv':
+	if sheet_path.suffix.lower() == '.csv':
 		return pd.read_csv(
 			sheet_path,
 			header=0 if have_header else None,
 		)
-	if suffix in ('.xlsx', '.xls'):
-		return pd.read_excel(
-			sheet_path,
-			sheet_name=sheet_name,
-			header=0 if have_header else None,
-		)
-	raise ValueError(f'Unknown file type {sheet_path.suffix}')
+	return pd.read_excel(
+		sheet_path,
+		sheet_name=sheet_name,
+		header=0 if have_header else None,
+	)
 
 
+def _has_column(df: pd.DataFrame, col: int | str) -> bool:
+	if col in df.columns:
+		return True
+	if isinstance(col, int):
+		return -df.shape[1] <= col < df.shape[1]
+	return col.isdigit() and int(col) in df.columns
+
+
+@icontract.require(lambda df, col: _has_column(df, col), 'Column not found in sheet columns')
+@icontract.ensure(lambda df, result: len(result) == len(df))
 def get_column_series(df: pd.DataFrame, col: int | str) -> pd.Series:
 	"""从 DataFrame 中根据名称或位置索引获取列 Series"""
 	if col in df.columns:
@@ -64,14 +76,13 @@ def get_column_series(df: pd.DataFrame, col: int | str) -> pd.Series:
 		return res
 	if isinstance(col, int):
 		return df.iloc[:, col]
-	if isinstance(col, str) and col.isdigit() and int(col) in df.columns:
-		res = df[int(col)]
-		if isinstance(res, pd.DataFrame):
-			return res.iloc[:, 0]  # type: ignore
-		return res
-	raise KeyError(f'Column {col!r} not found in sheet columns: {list(df.columns)}')
+	res = df[int(col)]
+	if isinstance(res, pd.DataFrame):
+		return res.iloc[:, 0]  # type: ignore
+	return res
 
 
+@icontract.ensure(lambda result: len(result[0]) == len(result[1]))
 def load_samples_from_sheet(
 	dataset_root: Path,
 	sheet_path: Path,
@@ -98,6 +109,32 @@ def load_samples_from_sheet(
 	return files, labels
 
 
+def _class_subdirs(root: Path) -> list[Path]:
+	return sorted([d for d in root.iterdir() if d.is_dir()], key=lambda d: d.name)
+
+
+def _folder_labels_in_range(root: Path, class_dict: dict[str, int], extensions: Sequence[str] | None, num_classes: int) -> bool:
+	"""含有图像文件的类别子目录，其 class_dict 标签都位于 [0, num_classes)。"""
+	ext_tuple = tuple(extensions) if extensions is not None else None
+	return all(
+		0 <= class_dict[d.name] < num_classes or not load_files_from_folder(d, extensions=ext_tuple) for d in _class_subdirs(root)
+	)
+
+
+@icontract.require(
+	lambda root, class_dict, extensions, num_classes: (
+		num_classes is None or class_dict is None or _folder_labels_in_range(root, class_dict, extensions, num_classes)
+	),
+	'Label out of range [0, num_classes - 1]',
+)
+@icontract.require(
+	lambda root, class_dict, num_classes: num_classes is None or class_dict is not None or len(_class_subdirs(root)) <= num_classes,
+	'Discovered classes in folder exceed num_classes',
+)
+@icontract.require(
+	lambda root, class_dict: class_dict is None or all(d.name in class_dict for d in _class_subdirs(root)), 'Class folder not in class_dict'
+)
+@icontract.ensure(lambda result: len(result[0]) == len(result[1]))
 def load_samples_from_folder(
 	root: Path,
 	class_dict: dict[str, int] | None = None,
@@ -106,7 +143,7 @@ def load_samples_from_folder(
 	num_classes: int | None = None,
 ) -> tuple[list[Path], list[int], dict[str, int]]:
 	"""从文件夹按类别子目录结构加载图像路径与标签"""
-	subdirs = sorted([d for d in root.iterdir() if d.is_dir()], key=lambda d: d.name)
+	subdirs = _class_subdirs(root)
 	should_build_dict = class_dict is None
 
 	if should_build_dict:
@@ -121,8 +158,6 @@ def load_samples_from_folder(
 	ext_tuple = tuple(extensions) if extensions is not None else None
 
 	for folder in subdirs:
-		if folder.name not in resolved_class_dict:
-			raise ValueError(f'Class {folder.name} not in class_dict')
 		label = resolved_class_dict[folder.name]
 
 		folder_files = load_files_from_folder(folder, extensions=ext_tuple)
@@ -130,52 +165,46 @@ def load_samples_from_folder(
 			files.append(file)
 			labels.append(label)
 
-	if num_classes is not None:
-		if class_dict is None and len(resolved_class_dict) > num_classes:
-			raise ValueError(f'Discovered {len(resolved_class_dict)} classes in folder, exceeding num_classes={num_classes}')
-		for lbl in labels:
-			if lbl < 0 or lbl >= num_classes:
-				raise ValueError(f'Label {lbl} out of range [0, {num_classes - 1}]')
-
 	return files, labels, resolved_class_dict
 
 
+def _numeric_labels(series: pd.Series) -> pd.Series:
+	return pd.Series(pd.to_numeric(series, errors='coerce'))
+
+
+def _parse_labels(series: pd.Series, spec: ColumnLabelSpec) -> pd.Series:
+	"""把标签列映射为整型类别编号（class_dict 映射，或数值化后加 offset）"""
+	if spec.class_dict is not None:
+		return series.astype(str).str.strip().map(spec.class_dict).astype('Int64')
+	return pd.Series(pd.to_numeric(series)).astype('Int64') + spec.offset
+
+
+@icontract.require(
+	lambda series, spec: _parse_labels(series, spec).between(0, spec.num_classes - 1).all(), 'Label for target out of range [0, num_classes - 1]'
+)
+@icontract.require(
+	lambda series, spec: spec.class_dict is not None or (_numeric_labels(series) % 1 == 0).all(),
+	'Label for target is fractional; non-integral labels are not allowed',
+)
+@icontract.require(
+	lambda series, spec: spec.class_dict is not None or _numeric_labels(series).notna().all(), 'Cannot parse label for target as integer'
+)
+@icontract.require(
+	lambda series, spec: spec.class_dict is None or series.astype(str).str.strip().isin(list(spec.class_dict)).all(),
+	'Value for target not in declared class_dict',
+)
+@icontract.require(lambda series: not series.isna().any(), 'Missing label for target')
+@icontract.ensure(lambda series, result: len(result) == len(series))
 def parse_target_labels(
 	series: pd.Series,
 	spec: ColumnLabelSpec,
 	name: str,
 ) -> list[int]:
 	"""解析并校验标签列，利用 Pandas 类型系统保证整型约束及类别范围"""
-	if series.isna().any():
-		raise ValueError(f'Missing label for target {name!r}')
-
-	if spec.class_dict is not None:
-		mapped = series.astype(str).str.strip().map(spec.class_dict)
-		if mapped.isna().any():
-			unmapped = series.loc[mapped.isna()].iloc[0]
-			raise ValueError(f'Value {unmapped!r} for target {name!r} not in declared class_dict')
-		labels = mapped.astype('Int64')
-	else:
-		try:
-			numeric = pd.Series(pd.to_numeric(series, errors='raise'))
-		except (ValueError, TypeError) as err:
-			raise ValueError(f'Cannot parse label for target {name!r} as integer: {err}') from err
-
-		try:
-			labels = numeric.astype('Int64')
-		except TypeError as err:
-			bad = series.loc[numeric != numeric.astype('int64')].iloc[0]
-			raise ValueError(f'Label {bad!r} for target {name!r} is fractional; non-integral labels are not allowed') from err
-
-		labels = labels + spec.offset
-
-	if not labels.between(0, spec.num_classes - 1).all():
-		bad = labels.loc[~labels.between(0, spec.num_classes - 1)].iloc[0]
-		raise ValueError(f'Label {bad} for target {name!r} out of range [0, {spec.num_classes - 1}]')
-
-	return labels.tolist()
+	return _parse_labels(series, spec).tolist()
 
 
+@icontract.ensure(lambda df, result: len(result) == len(df))
 def read_single_label(
 	df: pd.DataFrame,
 	spec: ColumnLabelSpec,
@@ -186,6 +215,7 @@ def read_single_label(
 	return parse_target_labels(lbl_series, spec, target_name)
 
 
+@icontract.ensure(lambda df, result: len(result) == len(df))
 def parse_table_paths(
 	df: pd.DataFrame,
 	dataset_root: Path,
@@ -209,6 +239,7 @@ def parse_single_label_table(
 	return paths, labels
 
 
+@icontract.ensure(lambda df, result: len(result) == len(df))
 def read_multitask_labels(
 	df: pd.DataFrame,
 	specs: Mapping[str, ColumnLabelSpec],
@@ -235,6 +266,29 @@ def parse_multitask_table(
 	return paths, labels
 
 
+def _split_table_keys(table: pd.DataFrame, root: Path, image_column: int | str) -> list[str]:
+	"""划分表中各行图像的规范化路径键"""
+	return [(root / str(raw_img)).resolve().as_posix() for raw_img in get_column_series(table, image_column).tolist()]
+
+
+def _dataset_keys(file_paths: Sequence[Path]) -> list[str]:
+	"""数据集样本的规范化路径键"""
+	return [p.resolve().as_posix() for p in file_paths]
+
+
+@icontract.require(
+	lambda file_paths, table, root, image_column: set(_split_table_keys(table, root, image_column)) <= set(_dataset_keys(file_paths)),
+	'Split table has extra rows not in dataset',
+)
+@icontract.require(
+	lambda file_paths, table, root, image_column: set(_dataset_keys(file_paths)) <= set(_split_table_keys(table, root, image_column)),
+	'Split table is missing dataset samples',
+)
+@icontract.require(
+	lambda table, root, image_column: len(set(_split_table_keys(table, root, image_column))) == len(table),
+	'Duplicate image path key in split table',
+)
+@icontract.ensure(lambda partition_values, result: len(result) == len(partition_values))
 def parse_column_split_indices(
 	file_paths: Sequence[Path],
 	table: pd.DataFrame,
@@ -250,14 +304,10 @@ def parse_column_split_indices(
 	未匹配样本被排除；未分配到任何样本的分区保留为空列表。
 	"""
 	# 第一阶段：解析图像与划分列构建规范化路径映射
-	split_img_series = get_column_series(table, image_column)
 	split_col_series = get_column_series(table, assignment_column)
 
 	split_map: dict[str, int | None] = {}
-	for raw_img, split_val in zip(split_img_series.tolist(), split_col_series.tolist()):
-		img_key = (root / str(raw_img)).resolve().as_posix()
-		if img_key in split_map:
-			raise ValueError(f'Duplicate image path key in split table: {img_key}')
+	for img_key, split_val in zip(_split_table_keys(table, root, image_column), split_col_series.tolist()):
 		partition_index: int | None = None
 		for group_idx, target in enumerate(partition_values):
 			if split_val == target or str(split_val) == str(target):
@@ -265,25 +315,9 @@ def parse_column_split_indices(
 				break
 		split_map[img_key] = partition_index
 
-	# 第二阶段：样本覆盖完整性比对
-	main_keys = [p.resolve().as_posix() for p in file_paths]
-	main_key_set = set(main_keys)
-	split_key_set = set(split_map.keys())
-
-	missing = main_key_set - split_key_set
-	if missing:
-		raise ValueError(
-			f'Split table is missing {len(missing)} dataset samples, e.g. {sorted(missing)[:5]}'
-		)
-	extra = split_key_set - main_key_set
-	if extra:
-		raise ValueError(
-			f'Split table has {len(extra)} extra rows not in dataset, e.g. {sorted(extra)[:5]}'
-		)
-
-	# 第三阶段：按输入顺序分配样本索引至对应分区
+	# 第二阶段：按输入顺序分配样本索引至对应分区
 	groups: list[list[int]] = [[] for _ in partition_values]
-	for idx, key in enumerate(main_keys):
+	for idx, key in enumerate(_dataset_keys(file_paths)):
 		partition_index = split_map[key]
 		if partition_index is not None:
 			groups[partition_index].append(idx)

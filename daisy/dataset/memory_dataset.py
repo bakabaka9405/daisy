@@ -1,5 +1,6 @@
 from collections.abc import Callable
 
+import icontract
 from torch import Tensor
 from torchvision.io import decode_image, ImageReadMode
 from pathlib import Path
@@ -13,6 +14,11 @@ class MemoryDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 	labels: list[LabelT] | None
 	transform: Callable[..., ImageT]
 
+	@icontract.require(lambda data, labels: labels is None or len(labels) == len(data), 'labels length must match data length')
+	@icontract.require(
+		lambda data: all(isinstance(i, Path) for i in data) or all(isinstance(i, Tensor) for i in data),
+		'data should all either be Path or Tensor',
+	)
 	def __init__(
 		self,
 		data: list[Path] | list[Tensor],
@@ -22,8 +28,6 @@ class MemoryDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 		if len(data) == 0:
 			self.tensors = []
 		elif isinstance(data[0], Path):
-			if any(not isinstance(i, Path) for i in data):
-				raise ValueError('data should all either be Path or Tensor')
 			self.tensors = [
 				decode_image(
 					str(path),
@@ -32,12 +36,8 @@ class MemoryDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 				for path in data
 			]
 		else:
-			if any(not isinstance(i, Tensor) for i in data):
-				raise ValueError('data should all either be Path or Tensor')
 			self.tensors = cast(list[Tensor], data)
 
-		if labels is not None and len(labels) != len(self.tensors):
-			raise ValueError('labels length must match data length')
 		self.labels = labels
 		self.transform = transform
 
@@ -61,10 +61,14 @@ class MemoryDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 	def applyTransform(self, transform: Callable[[Tensor], Tensor]) -> None:
 		self.tensors = [transform(tensor) for tensor in self.tensors]
 
+	@icontract.require(lambda k: k >= 0)
+	@icontract.ensure(lambda self, k, result: len(result) == min(k, len(self)))
 	def take(self, k: int) -> 'MemoryDataset[ImageT, LabelT]':
 		labels = None if self.labels is None else self.labels[:k]
 		return MemoryDataset(self.tensors[:k], labels, self.transform)
 
+	@icontract.require(lambda self, indices: all(0 <= i < len(self) for i in indices))
+	@icontract.ensure(lambda indices, result: len(result) == len(indices))
 	def subset(self, indices: list[int]) -> 'MemoryDataset[ImageT, LabelT]':
 		labels = None if self.labels is None else [self.labels[i] for i in indices]
 		return MemoryDataset(

@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import icontract
 import torch
 from torch import Tensor, nn
 from torch.autograd import Function
@@ -42,6 +43,7 @@ class DivideGradientFn(Function):
 		return grad_output / ctx.factor, None
 
 
+@icontract.require(lambda factor: factor > 0)
 def divide_gradient(input: Tensor, factor: float = 2.0) -> Tensor:
 	"""将张量的反向梯度除以指定因子，用于注意力模块的均匀分配规则。"""
 	return DivideGradientFn.apply(input, factor)  # type: ignore
@@ -64,6 +66,7 @@ class IdentityRuleImplicitFn(Function):
 		return None, gradient, None
 
 
+@icontract.require(lambda epsilon: epsilon > 0)
 def identity_rule_implicit(fn: Callable[[Tensor], Tensor], input: Tensor, epsilon: float = 1e-10) -> Tensor:
 	"""在元素级非线性函数上应用隐式恒等传播规则。"""
 	return IdentityRuleImplicitFn.apply(fn, input, epsilon)  # type: ignore
@@ -127,11 +130,13 @@ class GradientInputEpsilon(Epsilon, GradientInputBasicHook):
 	"""梯度输入兼容的 Epsilon 规则钩子。"""
 
 
+@icontract.require(lambda gamma: gamma >= 0)
 def gamma_rule(gamma: float = 0.25) -> BasicHook:
 	"""创建梯度输入兼容的 Gamma 规则钩子。"""
 	return GradientInputGamma(gamma=gamma)
 
 
+@icontract.require(lambda epsilon: epsilon > 0)
 def epsilon_rule(epsilon: float = 1e-6) -> BasicHook:
 	"""创建梯度输入兼容的 Epsilon 规则钩子。"""
 	return GradientInputEpsilon(epsilon=epsilon)

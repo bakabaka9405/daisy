@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+import icontract
 import torch
 import torch.nn as nn
 
@@ -26,8 +27,8 @@ class TrainState:
 	record: dict[str, Any] = field(default_factory=dict)
 
 	@property
+	@icontract.require(lambda self: self.optimizer is not None, 'current_lr 需要 optimizer。')
 	def current_lr(self) -> float:
 		"""当前第一个参数组的学习率。"""
-		if self.optimizer is None:
-			raise RuntimeError('current_lr 需要 optimizer。')
+		assert self.optimizer is not None
 		return self.optimizer.param_groups[0]['lr']

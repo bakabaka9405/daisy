@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import override
+from typing import cast, override
 
+import icontract
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -39,21 +40,20 @@ class MultiHeadClassificationMethod(Method[MultiHeadModel]):
 		)
 
 	@override
+	@icontract.require(lambda backbone: isinstance(backbone, MultiHeadModel), 'Expected MultiHeadModel')
 	def build_model(self, backbone: nn.Module) -> MultiHeadModel:
 		"""校验并返回 MultiHeadModel 实例。"""
-		if not isinstance(backbone, MultiHeadModel):
-			raise TypeError(f'Expected MultiHeadModel, got {type(backbone).__name__}')
-		return backbone
+		return cast(MultiHeadModel, backbone)
 
+	@icontract.require(lambda batch: all(t.shape[0] == batch[0].shape[0] for t in batch[1].values()))
+	@icontract.require(
+		lambda self, batch: batch[1].keys() == self.model.num_classes.keys(), 'Target task keys do not match model output task keys'
+	)
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, dict[str, Tensor]]) -> torch.Tensor:
 		"""执行单批计算并按任务头名称计算平均损失。"""
 		images, targets = batch
 		logits_dict = self.model(images)
-		if targets.keys() != logits_dict.keys():
-			raise ValueError(
-				f'Target task keys {set(targets.keys())} do not match model output task keys {set(logits_dict.keys())}'
-			)
-
 		losses = [self.criterion(logits_dict[task_name], targets[task_name]) for task_name in logits_dict]
 		return torch.stack(losses).mean()
 
@@ -63,6 +63,7 @@ class MultiHeadClassificationMethod(Method[MultiHeadModel]):
 		return self.model(X)
 
 	@override
+	@icontract.ensure(lambda X, result: all(v.shape == (X.shape[0],) for v in result.values()))
 	def predict_step(self, X: Tensor) -> dict[str, Tensor]:
 		"""执行单批预测，返回各任务解码后的 argmax 类别索引字典。"""
 		return {task_name: logits.argmax(dim=1) for task_name, logits in self.inference_step(X).items()}
@@ -76,14 +77,12 @@ class MultiHeadClassificationMethod(Method[MultiHeadModel]):
 		"""使用 Trainer 执行推理并计算多任务分类评估指标。"""
 		need_probs = 'auroc' in metrics
 
+		@icontract.require(
+			lambda batch: batch[1].keys() == self.model.num_classes.keys(), 'Mismatch between target tasks and model output tasks'
+		)
 		def predict_fn(batch: tuple[Tensor, dict[str, Tensor]]) -> dict[str, dict[str, Tensor]]:
 			images, targets = batch
 			logits_dict = self.inference_step(images)
-			if targets.keys() != logits_dict.keys():
-				raise ValueError(
-					f'Mismatch between target tasks {set(targets.keys())} and model output tasks {set(logits_dict.keys())}'
-				)
-
 			outputs: dict[str, dict[str, Tensor]] = {}
 			for task in targets:
 				leaf_dict: dict[str, Tensor] = {

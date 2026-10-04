@@ -4,17 +4,23 @@
 不对 <= 1D 参数 (normalization gamma/beta, bias) 应用 rate scaling 和 weight decay。
 """
 
+import icontract
 import torch
 
 
 class LARS(torch.optim.Optimizer):
 	"""LARS optimizer, no rate scaling or weight decay for parameters <= 1D."""
 
+	@icontract.require(lambda trust_coefficient: trust_coefficient > 0)
+	@icontract.require(lambda momentum: 0 <= momentum < 1)
+	@icontract.require(lambda weight_decay: weight_decay >= 0)
+	@icontract.require(lambda lr: lr >= 0)
 	def __init__(self, params, lr: float = 0, weight_decay: float = 0, momentum: float = 0.9, trust_coefficient: float = 0.001):
 		defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum, trust_coefficient=trust_coefficient)
 		super().__init__(params, defaults)
 
 	@torch.no_grad()
+	@icontract.require(lambda closure: closure is None, 'LARS 不支持 closure')
 	def step(self, closure=None) -> None:  # type: ignore[override]
 		for g in self.param_groups:
 			for p in g['params']:

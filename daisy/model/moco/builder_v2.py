@@ -6,10 +6,20 @@
 - 始终使用 v2 的 2 层 MLP head
 """
 
+import icontract
 import torch
 import torch.nn as nn
 
 from daisy.util import get_model_classifier
+
+
+def _has_classifier_head(model: nn.Module) -> bool:
+	"""模型是否带有可替换的分类头（fc / head / classifier）。"""
+	return (
+		(hasattr(model, 'fc') and isinstance(model.fc, (nn.Linear, nn.Sequential)))
+		or hasattr(model, 'head')
+		or hasattr(model, 'classifier')
+	)
 
 
 class MoCoV2(nn.Module):
@@ -18,6 +28,9 @@ class MoCoV2(nn.Module):
 	queue: torch.Tensor
 	queue_ptr: torch.Tensor
 
+	@icontract.require(lambda T: T > 0)
+	@icontract.require(lambda m: 0 <= m <= 1)
+	@icontract.require(lambda dim, K: dim >= 1 and K >= 1)
 	def __init__(
 		self,
 		base_encoder,
@@ -62,6 +75,7 @@ class MoCoV2(nn.Module):
 		self.register_buffer('queue_ptr', torch.zeros(1, dtype=torch.long))
 
 	@staticmethod
+	@icontract.require(lambda model: _has_classifier_head(model), 'Cannot find classifier head to replace')
 	def _replace_classifier(model: nn.Module, hidden_dim: int, out_dim: int):
 		"""替换模型分类头为 2 层 MLP (Linear -> ReLU -> Linear)"""
 		mlp = nn.Sequential(
@@ -76,10 +90,8 @@ class MoCoV2(nn.Module):
 				model.head.fc = mlp  # type: ignore[union-attr]
 			else:
 				model.head = mlp  # type: ignore[assignment]
-		elif hasattr(model, 'classifier'):
-			model.classifier = mlp  # type: ignore[assignment]
 		else:
-			raise ValueError('Cannot find classifier head to replace')
+			model.classifier = mlp  # type: ignore[assignment]
 
 	@torch.no_grad()
 	def _momentum_update_key_encoder(self):
@@ -88,6 +100,8 @@ class MoCoV2(nn.Module):
 			param_k.data = param_k.data * self.m + param_q.data * (1.0 - self.m)
 
 	@torch.no_grad()
+	@icontract.require(lambda self, keys: keys.shape[0] <= self.K, '批大小不能超过 queue 长度 K')
+	@icontract.require(lambda self, keys: keys.ndim == 2 and keys.shape[1] == self.queue.shape[0])
 	def _dequeue_and_enqueue(self, keys: torch.Tensor):
 		batch_size = keys.shape[0]
 		ptr = int(self.queue_ptr.item())
@@ -104,6 +118,10 @@ class MoCoV2(nn.Module):
 		ptr = (ptr + batch_size) % self.K
 		self.queue_ptr[0] = ptr
 
+	@icontract.require(lambda im_q, im_k: im_k.shape == im_q.shape)
+	@icontract.require(lambda im_q: im_q.ndim == 4)
+	@icontract.ensure(lambda im_q, result: result[1].shape == (im_q.shape[0],))
+	@icontract.ensure(lambda self, im_q, result: result[0].shape == (im_q.shape[0], 1 + self.K))
 	def forward(self, im_q: torch.Tensor, im_k: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 		"""
 		Args:

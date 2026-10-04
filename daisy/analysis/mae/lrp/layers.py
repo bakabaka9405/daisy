@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import icontract
 import torch
 from torch import nn
 from torch.nn import functional as F
@@ -14,6 +15,10 @@ def safe_divide(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
 	return torch.nan_to_num(a / b, nan=0.0, posinf=0.0, neginf=0.0)
 
 
+@icontract.require(lambda x, weight, relevance: relevance.shape[:-1] == x.shape[:-1] and relevance.shape[-1] == weight.shape[0])
+@icontract.require(lambda x, weight: x.shape[-1] == weight.shape[1])
+@icontract.require(lambda weight: weight.ndim == 2)
+@icontract.ensure(lambda x, result: result.shape == x.shape)
 def linear_relprop(x: torch.Tensor, weight: torch.Tensor, relevance: torch.Tensor) -> torch.Tensor:
 	"""仅沿输入与权重同号的正向贡献传播 relevance，bias 不参与分配。"""
 	positive_weight, negative_weight = weight.clamp_min(0), weight.clamp_max(0)
@@ -24,6 +29,9 @@ def linear_relprop(x: torch.Tensor, weight: torch.Tensor, relevance: torch.Tenso
 	return positive_input * (scale @ positive_weight) + negative_input * (scale @ negative_weight)
 
 
+@icontract.require(lambda x, relevance: relevance.shape == x.shape)
+@icontract.require(lambda x, norm: x.shape[x.ndim - len(norm.normalized_shape) :] == tuple(norm.normalized_shape))
+@icontract.ensure(lambda x, result: result.shape == x.shape)
 def layer_norm_relprop(x: torch.Tensor, norm: nn.LayerNorm, relevance: torch.Tensor) -> torch.Tensor:
 	"""固定标准差，沿 LayerNorm 的中心化与仿射变换传播 relevance。"""
 	axes = tuple(range(-len(norm.normalized_shape), 0))
@@ -35,6 +43,8 @@ def layer_norm_relprop(x: torch.Tensor, norm: nn.LayerNorm, relevance: torch.Ten
 	return (x / std) * (h - h.mean(dim=axes, keepdim=True))
 
 
+@icontract.require(lambda inputs, relevance: relevance.shape == torch.broadcast_shapes(inputs[0].shape, inputs[1].shape))
+@icontract.ensure(lambda inputs, result: result[0].shape == inputs[0].shape and result[1].shape == inputs[1].shape)
 def add_relprop(inputs: tuple[torch.Tensor, torch.Tensor], relevance: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 	"""按两个加数的局部贡献传播 relevance，再按分支绝对总量保持全局占比。"""
 	left_input, right_input = inputs
@@ -48,6 +58,8 @@ def add_relprop(inputs: tuple[torch.Tensor, torch.Tensor], relevance: torch.Tens
 	return left * safe_divide(left_factor, left.sum()), right * safe_divide(right_factor, right.sum())
 
 
+@icontract.require(lambda x, branch_relevances: all(relevance.shape == x.shape for relevance in branch_relevances))
+@icontract.ensure(lambda x, result: result.shape == x.shape)
 def clone_relprop(x: torch.Tensor, branch_relevances: Sequence[torch.Tensor]) -> torch.Tensor:
 	"""将多个计算分支的 relevance 按各分支相对输入的贡献汇回同一输入。"""
 	total_scale = torch.zeros_like(x)
@@ -56,6 +68,11 @@ def clone_relprop(x: torch.Tensor, branch_relevances: Sequence[torch.Tensor]) ->
 	return x * total_scale
 
 
+@icontract.require(lambda a, b, relevance: relevance.shape[:-2] == torch.broadcast_shapes(a.shape[:-2], b.shape[:-2]))
+@icontract.require(lambda a, b, relevance: relevance.shape[-2:] == (a.shape[-2], b.shape[-1]))
+@icontract.require(lambda a, b: a.shape[-1] == b.shape[-2])
+@icontract.require(lambda a, b: a.ndim >= 2 and b.ndim >= 2)
+@icontract.ensure(lambda a, b, result: result[0].shape == a.shape and result[1].shape == b.shape)
 def matmul_relprop(a: torch.Tensor, b: torch.Tensor, relevance: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 	"""按矩阵乘法中各输入对输出的局部贡献向左右输入分配 relevance。"""
 	scale = safe_divide(relevance, a @ b)
@@ -64,6 +81,10 @@ def matmul_relprop(a: torch.Tensor, b: torch.Tensor, relevance: torch.Tensor) ->
 	return a * left.sum_to_size(a.shape), b * right.sum_to_size(b.shape)
 
 
+@icontract.require(lambda x, relevance: relevance.shape == (x.shape[0], x.shape[2]))
+@icontract.require(lambda x, num_prefix_tokens: 0 <= num_prefix_tokens < x.shape[1])
+@icontract.require(lambda x: x.ndim == 3)
+@icontract.ensure(lambda x, result: result.shape == x.shape)
 def mean_pool_relprop(x: torch.Tensor, relevance: torch.Tensor, num_prefix_tokens: int) -> torch.Tensor:
 	"""按 activation 贡献将池化后的 relevance 传播给 patch token，prefix token 置零。"""
 	patches = x[:, num_prefix_tokens:]

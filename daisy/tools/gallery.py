@@ -1,4 +1,5 @@
 import cv2
+import icontract
 import numpy as np
 from pathlib import Path
 from numpy.typing import NDArray
@@ -9,6 +10,8 @@ def cv_imread(file_path):
 	return cv_img
 
 
+@icontract.require(lambda image_size: image_size[0] > 0 and image_size[1] > 0)
+@icontract.require(lambda grid_size: grid_size[0] > 0 and grid_size[1] > 0)
 def show_gallery(
 	images: list[Path | NDArray],
 	grid_size: tuple[int, int] = (3, 3),
@@ -127,6 +130,8 @@ def show_gallery(
 	cv2.destroyWindow(window_name)
 
 
+@icontract.require(lambda images: all(img.ndim == 3 and img.shape[2] == 3 for img in images), '图片必须为 (H, W, 3) 的三通道图像')
+@icontract.require(lambda image_size: image_size is None or (image_size[0] > 0 and image_size[1] > 0))
 def show_image_comparison(
 	images: list[np.ndarray], titles: list[str] | None = None, image_size: tuple[int, int] | None = None, window_name: str = 'Image Comparison'
 ) -> None:

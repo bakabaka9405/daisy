@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import icontract
 import numpy as np
 from daisy.typing import VectorF64
 
 
+@icontract.require(lambda y_true: y_true.shape[0] >= 2)
+@icontract.require(lambda y_true, y_pred: y_true.shape == y_pred.shape)
+@icontract.ensure(lambda result: np.isnan(result) or result <= 1 + 1e-9)
 def icc_a1_score(y_true: VectorF64, y_pred: VectorF64) -> np.float64:
 	"""
 	计算 two-way random-effects、absolute agreement、single measurement ICC。
@@ -12,8 +16,6 @@ def icc_a1_score(y_true: VectorF64, y_pred: VectorF64) -> np.float64:
 	"""
 
 	n = y_true.shape[0]
-	if n < 2:
-		raise ValueError(f'need at least 2 samples, got {n}')
 
 	# 将真实值和预测值视为两个评分者。
 	data = np.column_stack((y_true, y_pred))

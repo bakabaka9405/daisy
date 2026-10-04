@@ -4,6 +4,7 @@
 """
 
 from pathlib import Path
+from typing import Literal
 
 from .builder_v2 import MoCoV2
 from .builder_v3 import MoCoV3, MoCoV3_ResNet, MoCoV3_ViT
@@ -15,7 +16,7 @@ import torch
 import torch.nn as nn
 
 
-def load_moco_pretrained_weights(model: nn.Module, checkpoint_path: Path, engine: str = 'v3'):
+def load_moco_pretrained_weights(model: nn.Module, checkpoint_path: Path, engine: Literal['v2', 'v3'] = 'v3'):
 	"""从 MoCo checkpoint 中提取 encoder 权重到标准模型
 
 	Args:
@@ -38,7 +39,7 @@ def load_moco_pretrained_weights(model: nn.Module, checkpoint_path: Path, engine
 				if new_key.startswith('fc.') and new_key.split('.')[1].isdigit():
 					continue
 				new_state_dict[new_key] = v
-	elif engine == 'v3':
+	else:
 		# v3: 提取 base_encoder.* (去掉 projector/predictor)
 		prefix = 'base_encoder.'
 		for k, v in state_dict.items():
@@ -51,8 +52,6 @@ def load_moco_pretrained_weights(model: nn.Module, checkpoint_path: Path, engine
 					if parts[0] in ('fc', 'head'):
 						continue
 				new_state_dict[new_key] = v
-	else:
-		raise ValueError(f'Unknown engine: {engine}')
 
 	msg = model.load_state_dict(new_state_dict, strict=False)
 	print(f'Loaded MoCo {engine} pretrained weights from {checkpoint_path}')

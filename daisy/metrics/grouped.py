@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+import icontract
 import numpy as np
 
 from daisy.typing import VectorF64, VectorI64
@@ -11,20 +12,17 @@ from daisy.typing import VectorF64, VectorI64
 from .regression import evaluate_regression_scores, pc_score
 
 
-def _check_grouped(y_true: VectorF64, y_pred: VectorF64, groups: VectorI64) -> None:
-	if not (y_true.shape == y_pred.shape == groups.shape):
-		raise ValueError(f'y_true, y_pred and groups must have the same length, got {y_true.shape}, {y_pred.shape}, {groups.shape}')
-
-
+@icontract.require(lambda y_true, y_pred, groups: y_true.shape == y_pred.shape == groups.shape)
+@icontract.ensure(lambda result: -1 - 1e-9 <= result <= 1 + 1e-9)
 def within_group_pc(y_true: VectorF64, y_pred: VectorF64, groups: VectorI64) -> float:
 	"""在各组内分别计算 Pearson 相关系数，再取各组的平均。groups 为整数组标签。"""
-	_check_grouped(y_true, y_pred, groups)
 	return float(np.mean([pc_score(y_true[groups == g], y_pred[groups == g]) for g in np.unique(groups)]))
 
 
+@icontract.require(lambda y_true, y_pred, groups: y_true.shape == y_pred.shape == groups.shape)
+@icontract.ensure(lambda result: -1 - 1e-9 <= result <= 1 + 1e-9)
 def within_group_centered_pc(y_true: VectorF64, y_pred: VectorF64, groups: VectorI64) -> float:
 	"""在各组内分别减去组均值后，合并全部样本计算 Pearson 相关系数。groups 为整数组标签。"""
-	_check_grouped(y_true, y_pred, groups)
 	true, pred = y_true.copy(), y_pred.copy()
 	for g in np.unique(groups):
 		mask = groups == g
@@ -33,6 +31,9 @@ def within_group_centered_pc(y_true: VectorF64, y_pred: VectorF64, groups: Vecto
 	return float(pc_score(true, pred))
 
 
+@icontract.require(lambda groups, group_names: groups.min() >= 0 and groups.max() < len(group_names))
+@icontract.require(lambda y_true, y_pred, groups: y_true.shape == y_pred.shape == groups.shape)
+@icontract.ensure(lambda result: {'pc', 'icc', 'mae', 'rmse', 'pc_within', 'icc_within'} <= result.keys())
 def grouped_regression_scores(
 	y_true: VectorF64,
 	y_pred: VectorF64,
@@ -43,11 +44,7 @@ def grouped_regression_scores(
 
 	groups 为 0..len(group_names)-1 的组下标；只对实际出现的组计算并参与平均。
 	"""
-	_check_grouped(y_true, y_pred, groups)
 	present = np.unique(groups)
-	if present.min() < 0 or present.max() >= len(group_names):
-		raise ValueError(f'groups must lie in [0, {len(group_names) - 1}]')
-
 	overall = evaluate_regression_scores(y_pred, y_true)
 	scores = {'pc': float(overall['pc']), 'icc': float(overall['icc_a1']), 'mae': float(overall['mae']), 'rmse': float(overall['rmse'])}
 	for g in present:

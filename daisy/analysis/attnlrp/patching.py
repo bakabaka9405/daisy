@@ -22,16 +22,19 @@ from collections.abc import Callable
 from contextlib import ExitStack
 from typing import Any
 
+import icontract
 from timm.layers.attention import Attention as TimmAttention, maybe_add_mask, resolve_self_attn_mask
 from torch import Tensor, nn
 
 from .rules import divide_gradient, identity_rule_implicit
 
 
+@icontract.require(lambda mod: isinstance(mod, TimmAttention))
 def make_attention_forward(mod: nn.Module) -> Callable[..., Tensor]:
 	"""为 timm eager Attention 构造满足梯度缩减规则的替换前向函数。"""
 	attn_mod: Any = mod
 
+	@icontract.require(lambda x: x.ndim == 3)
 	def forward(
 		x: Tensor,
 		attn_mask: Tensor | None = None,

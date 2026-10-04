@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import override
+from typing import cast, override
 
+import icontract
 import torch.nn as nn
 from torch import Tensor
 from torch.optim import AdamW, Optimizer
@@ -18,6 +19,8 @@ class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
 	"""MAE 预训练方法。"""
 
 	@override
+	@icontract.require(lambda freeze_encoder_epochs: freeze_encoder_epochs >= 0)
+	@icontract.require(lambda mask_ratio: 0 < mask_ratio < 1)
 	def __init__(
 		self,
 		model: MaskedAutoencoderViT,
@@ -66,11 +69,10 @@ class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
 		trainer.on_epoch_start(on_epoch_start)
 
 	@override
+	@icontract.require(lambda backbone: isinstance(backbone, MaskedAutoencoderViT), 'Expected a MaskedAutoencoderViT model.')
 	def build_model(self, backbone: nn.Module) -> MaskedAutoencoderViT:
 		"""采用已传入的 MaskedAutoencoderViT 实例。"""
-		if not isinstance(backbone, MaskedAutoencoderViT):
-			raise TypeError('Expected a MaskedAutoencoderViT model.')
-		return backbone
+		return cast(MaskedAutoencoderViT, backbone)
 
 	@override
 	def build_optimizer(
@@ -93,6 +95,8 @@ class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
 			fused=True,
 		)
 
+	@icontract.require(lambda batch: batch.ndim == 4)
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: Tensor) -> Tensor:
 		"""单步前向计算并返回重构损失。"""
 		# 前向编码与解码预测

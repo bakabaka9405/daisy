@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "none"
 authors = [{ name = "bakabaka", email = "example@example.com" }]
 requires-python = ">=3.12"
+dependencies = ["icontract>=2.7"]
 classifiers = [
 	"Development Status :: 3 - Alpha",
 	"Intended Audience :: Developers",

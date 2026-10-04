@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 import time
 
+import icontract
 import torch
 from torchvision.transforms import v2 as transforms, InterpolationMode
 
@@ -18,6 +19,9 @@ from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
 from .config import MAEPretrainConfig
 
 
+@icontract.require(lambda ratio_min, ratio_max: 0 < ratio_min <= ratio_max)
+@icontract.require(lambda scale_min, scale_max: 0 < scale_min <= scale_max)
+@icontract.require(lambda input_size: min(input_size if isinstance(input_size, tuple) else (input_size,)) > 0)
 def get_mae_transform(
 	input_size: int | tuple[int, int] = 224,
 	scale_min: float = 0.2,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import cv2
+import icontract
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -10,6 +11,17 @@ import torch.nn.functional as F
 from daisy.typing import ImageF32, MatrixF32
 
 
+def _display_size(input_size: int | tuple[int, int]) -> tuple[int, int]:
+	return (input_size, input_size) if isinstance(input_size, int) else (input_size[0], input_size[1])
+
+
+@icontract.require(lambda input_size: min(_display_size(input_size)) > 0)
+@icontract.require(lambda heatmap: heatmap.ndim == 2, 'heatmap must have shape (H, W)')
+@icontract.require(lambda image: image.ndim == 3 and image.shape[0] == 3, 'image must have shape (3, H, W)')
+@icontract.ensure(lambda result: bool(np.all((result[1] >= 0) & (result[1] <= 1 + 1e-6))))
+@icontract.ensure(lambda result: bool(np.all((result[0] >= 0) & (result[0] <= 1))))
+@icontract.ensure(lambda input_size, result: result[1].shape == _display_size(input_size) + (3,))
+@icontract.ensure(lambda input_size, result: result[0].shape == _display_size(input_size))
 def show_cam_on_image(
 	image: torch.Tensor,
 	heatmap: torch.Tensor | MatrixF32,
@@ -27,20 +39,16 @@ def show_cam_on_image(
 			- heatmap: 归一化到 [0, 1] 的 2D ndarray，shape (H, W)
 			- overlay: JET 颜色映射叠加后的图像 ndarray，shape (H, W, 3)，范围 [0, 1]
 	"""
-	# 阶段 1: 校验输入维度并预处理背景图像
-	height, width = (input_size, input_size) if isinstance(input_size, int) else input_size
-	if image.ndim != 3 or image.shape[0] != 3:
-		raise ValueError(f'image must have shape (3, H, W), got {tuple(image.shape)}')
+	# 阶段 1: 预处理背景图像
+	height, width = _display_size(input_size)
 
 	img = image.detach().cpu().numpy().transpose(1, 2, 0)
 	img = np.float32(img)
 	img = (img - img.min()) / (img.max() - img.min() + 1e-8)
 	img = cv2.resize(img, (width, height))
 
-	# 阶段 2: 校验二维热力图并执行双线性空间插值
+	# 阶段 2: 二维热力图双线性空间插值
 	heatmap_tensor = torch.as_tensor(heatmap, dtype=torch.float32)
-	if heatmap_tensor.ndim != 2:
-		raise ValueError(f'heatmap must have shape (H, W), got {tuple(heatmap_tensor.shape)}')
 
 	if heatmap_tensor.shape != (height, width):
 		rescaled = (

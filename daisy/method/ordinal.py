@@ -6,6 +6,7 @@ from abc import abstractmethod
 import math
 from typing import Any, override
 
+import icontract
 import numpy as np
 import torch
 import torch.nn as nn
@@ -28,6 +29,9 @@ from daisy.training.trainer import Trainer
 from daisy.typing import GenericDataLoader
 
 
+@icontract.require(lambda score, y: y.shape == score.shape)
+@icontract.require(lambda score: score.ndim == 1)
+@icontract.ensure(lambda result: result.ndim == 0)
 def _ranking_term(score: torch.Tensor, y: torch.Tensor, *, hinge: bool) -> torch.Tensor:
 	"""批次内有序对排序项；无有效对时返回零并保持梯度图。"""
 	diff = score.unsqueeze(1) - score.unsqueeze(0)
@@ -38,6 +42,9 @@ def _ranking_term(score: torch.Tensor, y: torch.Tensor, *, hinge: bool) -> torch
 	return F.relu(1.0 - margin).mean() if hinge else F.softplus(-margin).mean()
 
 
+@icontract.require(lambda emb, y: y.shape == (emb.shape[0],))
+@icontract.require(lambda emb: emb.ndim == 2)
+@icontract.ensure(lambda result: result.ndim == 0)
 def _contrastive_term(emb: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 	"""批次内距离对比项：欧氏距离拟合标签差绝对值。"""
 	batch = emb.shape[0]
@@ -49,6 +56,9 @@ def _contrastive_term(emb: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
 	return (dist[rows, cols] - label_diff[rows, cols]).pow(2).mean()
 
 
+@icontract.require(lambda logits, y, num_classes: logits.shape == (y.shape[0], num_classes - 1))
+@icontract.require(lambda y: y.ndim == 1)
+@icontract.ensure(lambda result: result.ndim == 0)
 def _cumulative_bce(logits: torch.Tensor, y: torch.Tensor, num_classes: int) -> torch.Tensor:
 	"""累积 BCE 损失。"""
 	target = (y.unsqueeze(1) > torch.arange(num_classes - 1, device=y.device)).to(logits.dtype)
@@ -56,6 +66,8 @@ def _cumulative_bce(logits: torch.Tensor, y: torch.Tensor, num_classes: int) -> 
 	return bce.sum(dim=1).mean()
 
 
+@icontract.require(lambda score: score.ndim == 1)
+@icontract.ensure(lambda model, score, result: result.shape == (score.shape[0], model.num_classes))
 def _clm_log_probabilities(model: CLMModel, score: torch.Tensor) -> torch.Tensor:
 	"""计算 CLM 模型的各类对数概率。"""
 	threshold = model.threshold
@@ -84,6 +96,7 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 	"""有序分类与回归方法基类，负责类别数校验与预测流程。"""
 
 	@override
+	@icontract.require(lambda num_classes: num_classes >= 2, 'num_classes must be >= 2')
 	def __init__(
 		self,
 		backbone: nn.Module,
@@ -92,8 +105,6 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 		lr: float,
 		weight_decay: float = 0.05,
 	) -> None:
-		if num_classes < 2:
-			raise ValueError(f'num_classes must be >= 2, got {num_classes}')
 		self.num_classes = num_classes
 		super().__init__(
 			backbone,
@@ -107,6 +118,7 @@ class OrdinalBaseMethod[M: BackboneModel](Method[M]):
 		...
 
 	@override
+	@icontract.ensure(lambda X, result: result.shape == (X.shape[0],))
 	def predict_step(self, X: Tensor) -> torch.Tensor:
 		feat = self.model.forward_features(X)
 		return self.predict_from_features(feat.float())
@@ -136,6 +148,9 @@ class ClassificationBaseMethod(OrdinalBaseMethod[ClassificationModel]):
 		return ClassificationModel(backbone, self.num_classes)
 
 	@override
+	@icontract.require(lambda feat: feat.ndim == 2)
+	@icontract.ensure(lambda result: result.dtype == torch.int64)
+	@icontract.ensure(lambda feat, result: result.shape == (feat.shape[0],))
 	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
 		return self.model.fc(feat).argmax(dim=1)
 
@@ -143,6 +158,8 @@ class ClassificationBaseMethod(OrdinalBaseMethod[ClassificationModel]):
 class CEMethod(ClassificationBaseMethod):
 	"""标准交叉熵分类方法。"""
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -153,6 +170,8 @@ class CEMethod(ClassificationBaseMethod):
 class LabelSmoothingCEMethod(ClassificationBaseMethod):
 	"""标签平滑交叉熵分类方法。"""
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -160,13 +179,15 @@ class LabelSmoothingCEMethod(ClassificationBaseMethod):
 		return F.cross_entropy(self.model.fc(feat), targets.long(), label_smoothing=0.1)
 
 
+@icontract.require(lambda logits, targets: targets.shape == (logits.shape[0],))
+@icontract.require(lambda logits: logits.ndim == 2)
+@icontract.require(lambda temperature: math.isfinite(temperature) and temperature > 0.0, 'Temperature must be a finite positive number')
+@icontract.ensure(lambda result: result.ndim == 0)
 def sord_loss(logits: Tensor, targets: Tensor, temperature: float = 1.0) -> Tensor:
 	"""计算软序回归（SORD）损失。
 
 	使用温度系数缩放类别距离，调节软标签目标概率分布的集中程度后计算交叉熵损失。
 	"""
-	if not math.isfinite(temperature) or temperature <= 0.0:
-		raise ValueError(f'Temperature must be a finite positive number, got {temperature}')
 	num_classes = logits.shape[1]
 	targets = targets.to(device=logits.device)
 	classes = torch.arange(num_classes, device=logits.device, dtype=logits.dtype)
@@ -181,6 +202,7 @@ class SORDMethod(ClassificationBaseMethod):
 	"""
 
 	@override
+	@icontract.require(lambda temperature: math.isfinite(temperature) and temperature > 0.0, 'Temperature must be a finite positive number')
 	def __init__(
 		self,
 		backbone: nn.Module,
@@ -190,8 +212,6 @@ class SORDMethod(ClassificationBaseMethod):
 		weight_decay: float = 0.05,
 		temperature: float = 1.0,
 	) -> None:
-		if not math.isfinite(temperature) or temperature <= 0.0:
-			raise ValueError(f'Temperature must be a finite positive number, got {temperature}')
 		super().__init__(
 			backbone,
 			num_classes,
@@ -200,6 +220,8 @@ class SORDMethod(ClassificationBaseMethod):
 		)
 		self.temperature: float = float(temperature)
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -210,6 +232,8 @@ class SORDMethod(ClassificationBaseMethod):
 class RPSMethod(ClassificationBaseMethod):
 	"""连续概率排位分数（Ranked Probability Score）方法。"""
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -224,6 +248,8 @@ class RPSMethod(ClassificationBaseMethod):
 class WassersteinMethod(ClassificationBaseMethod):
 	"""Wasserstein 距离有序方法。"""
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -238,6 +264,8 @@ class WassersteinMethod(ClassificationBaseMethod):
 class DistanceCEMethod(ClassificationBaseMethod):
 	"""距离加权交叉熵有序方法。"""
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -253,6 +281,8 @@ class DistanceCEMethod(ClassificationBaseMethod):
 class UnimodalMethod(ClassificationBaseMethod):
 	"""单峰正则化有序方法。"""
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -277,6 +307,9 @@ class MSERankBaseMethod(OrdinalBaseMethod[ScalarModel]):
 		return ScalarModel(backbone, bias=True)
 
 	@override
+	@icontract.require(lambda feat: feat.ndim == 2)
+	@icontract.ensure(lambda result: result.dtype == torch.int64)
+	@icontract.ensure(lambda feat, result: result.shape == (feat.shape[0],))
 	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
 		return self.model.fc(feat).squeeze(-1).round().clamp(0, self.num_classes - 1).long()
 
@@ -284,6 +317,8 @@ class MSERankBaseMethod(OrdinalBaseMethod[ScalarModel]):
 class MSERankNetMethod(MSERankBaseMethod):
 	"""MSE 与批次内对排序 Logistic 损失混合方法。"""
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -296,6 +331,8 @@ class MSERankNetMethod(MSERankBaseMethod):
 class MSERankHingeMethod(MSERankBaseMethod):
 	"""MSE 与批次内对排序 Hinge 损失混合方法。"""
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -313,10 +350,15 @@ class CLMMethod(OrdinalBaseMethod[CLMModel]):
 		return CLMModel(backbone, self.num_classes)
 
 	@override
+	@icontract.require(lambda feat: feat.ndim == 2)
+	@icontract.ensure(lambda result: result.dtype == torch.int64)
+	@icontract.ensure(lambda feat, result: result.shape == (feat.shape[0],))
 	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
 		score = self.model.fc(feat).squeeze(-1)
 		return _clm_log_probabilities(self.model, score).argmax(dim=1)
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -333,9 +375,14 @@ class CORALMethod(OrdinalBaseMethod[CORALModel]):
 		return CORALModel(backbone, self.num_classes)
 
 	@override
+	@icontract.require(lambda feat: feat.ndim == 2)
+	@icontract.ensure(lambda result: result.dtype == torch.int64)
+	@icontract.ensure(lambda feat, result: result.shape == (feat.shape[0],))
 	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
 		return ((self.model.fc(feat) + self.model.coral_bias) > 0).sum(dim=1).long()
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -352,10 +399,15 @@ class CORNMethod(OrdinalBaseMethod[CORNModel]):
 		return CORNModel(backbone, self.num_classes)
 
 	@override
+	@icontract.require(lambda feat: feat.ndim == 2)
+	@icontract.ensure(lambda result: result.dtype == torch.int64)
+	@icontract.ensure(lambda feat, result: result.shape == (feat.shape[0],))
 	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
 		cum = torch.sigmoid(self.model.fc(feat)).cumprod(dim=1)
 		return (cum > 0.5).sum(dim=1).long()
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
@@ -376,9 +428,14 @@ class OrdinalContrastiveMethod(OrdinalBaseMethod[ContrastiveClassificationModel]
 		return ContrastiveClassificationModel(backbone, self.num_classes)
 
 	@override
+	@icontract.require(lambda feat: feat.ndim == 2)
+	@icontract.ensure(lambda result: result.dtype == torch.int64)
+	@icontract.ensure(lambda feat, result: result.shape == (feat.shape[0],))
 	def predict_from_features(self, feat: torch.Tensor) -> torch.Tensor:
 		return self.model.fc(feat).argmax(dim=1)
 
+	@icontract.require(lambda batch: batch[1].shape == (batch[0].shape[0],))
+	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, Tensor] | list[Tensor]) -> torch.Tensor:
 		images, targets = batch
 		feat = self.model.forward_features(images).float()
