@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import copy
 from dataclasses import dataclass
 import gc
+from itertools import product
 from pathlib import Path
 import re
 import tomllib
@@ -29,19 +30,6 @@ DEFAULT_RUNS = 'default'
 def _is_dotted_key_list(raw: Any) -> bool:
 	"""raw 是否为点分隔键路径（各段非空）的列表"""
 	return isinstance(raw, list) and all(isinstance(k, str) and k and all(k.split('.')) for k in raw)
-
-
-def _keys_removable(data: dict[str, Any], keys: list[tuple[str, ...]]) -> bool:
-	"""按顺序删除 keys 时每个键都存在：键在原字典中存在，且不位于先前已删除的键之下"""
-	for i, key in enumerate(keys):
-		if any(key[: len(prev)] == prev for prev in keys[:i]):
-			return False
-		node: Any = data
-		for part in key[:-1]:
-			node = node.get(part) if isinstance(node, dict) else None
-		if not isinstance(node, dict) or key[-1] not in node:
-			return False
-	return True
 
 
 @icontract.require(
@@ -69,16 +57,16 @@ def _parse_remove(raw: Any, where: str) -> list[tuple[str, ...]]:
 	return [tuple(k.split('.')) for k in raw]
 
 
-@icontract.require(lambda data, keys: _keys_removable(data, keys), 'Cannot remove key: key is not set by the inherited configuration')
 def _remove_keys(data: dict[str, Any], keys: list[tuple[str, ...]], where: str) -> None:
-	"""从原始配置字典中删除键，使其回到上一层的值或配置模型默认值
-
-	where 仅用于违约信息中标明出处。
-	"""
+	"""按顺序遍历并删除键，缺失时立即报告键路径及出处。"""
 	for key in keys:
 		node: Any = data
 		for part in key[:-1]:
+			if not isinstance(node, dict) or part not in node:
+				raise ValueError(f"Cannot remove key '{'.'.join(key)}' in {where}: key is not set by the inherited configuration")
 			node = node[part]
+		if not isinstance(node, dict) or key[-1] not in node:
+			raise ValueError(f"Cannot remove key '{'.'.join(key)}' in {where}: key is not set by the inherited configuration")
 		del node[key[-1]]
 
 
@@ -94,6 +82,25 @@ def _has_valid_run_ids(raw: Any) -> bool:
 	)
 
 
+@icontract.require(lambda raw: isinstance(raw, dict), "Invalid 'grid' in run. Expected a table.")
+def _parse_grid(raw: Any, where: str) -> list[tuple[tuple[str, ...], list[Any]]]:
+	"""按 TOML 插入顺序递归收集路径及候选值，候选内部结构保持原样。"""
+	axes: list[tuple[tuple[str, ...], list[Any]]] = []
+
+	def collect(node: dict[str, Any], prefix: tuple[str, ...]) -> None:
+		for name, value in node.items():
+			key = prefix + (name,)
+			if isinstance(value, dict) and value:
+				collect(value, key)
+			else:
+				if not isinstance(value, list) or not value:
+					raise ValueError(f"Grid axis '{'.'.join(key)}' in {where} must be a non-empty list of candidate values")
+				axes.append((key, value))
+
+	collect(raw, ())
+	return axes
+
+
 @dataclass(slots=True, frozen=True)
 class _RunEntry:
 	"""run 数组的单个条目"""
@@ -102,6 +109,7 @@ class _RunEntry:
 	default: bool  # 未指定 --runs（或 --runs 含 default）时是否运行
 	remove: list[tuple[str, ...]]  # 合并前从基础配置中删除的键
 	overrides: dict[str, Any]  # 深度合并到基础配置上的重载内容
+	grid: list[tuple[tuple[str, ...], list[Any]]]  # 按声明顺序展开的参数轴
 	source: dict[str, Any]  # 条目去掉 id 后的原文，记录到快照
 
 
@@ -139,7 +147,8 @@ def _parse_runs(raw: Any, path: Path) -> list[_RunEntry]:
 		overrides = dict(source)
 		default = overrides.pop('default', True)
 		remove = _parse_remove(overrides.pop('_remove', None), f"run '{run_id}' of task file: {path}")
-		runs.append(_RunEntry(run_id=run_id, default=default, remove=remove, overrides=overrides, source=source))
+		grid = _parse_grid(overrides.pop('grid', {}), f"run '{run_id}' of task file: {path}")
+		runs.append(_RunEntry(run_id=run_id, default=default, remove=remove, overrides=overrides, grid=grid, source=source))
 	return runs
 
 
@@ -221,7 +230,9 @@ def load_run_configs(path: Path) -> list[BaseTaskConfig]:
 	"""从 TOML 文件加载全部 run 的任务配置
 
 	run 数组的每个条目是一次参数重载：先按条目的 _remove 从基础配置中删除键（回到配置模型默认值），
-	再将其余内容深度合并到基础配置上（语义同 extends）。条目的 default（默认 true）表示未指定 --runs 时是否运行。
+	再深度合并静态重载（语义同 extends），最后用 grid 候选值整体替换对应字段。
+	grid 按 TOML 插入顺序取笛卡尔积，最右侧参数轴变化最快；所有组合保留条目的 id 与 default。
+	条目的 default（默认 true）表示未指定 --runs 时是否运行。
 	run 随 extends 继承，子文件声明 run 时整体替换父级的 run。基础配置（不含任何条目）须能单独通过校验。
 
 	Args:
@@ -242,22 +253,23 @@ def load_run_configs(path: Path) -> list[BaseTaskConfig]:
 		merged = copy.deepcopy(data)
 		_remove_keys(merged, run.remove, f"run '{run.run_id}' of task file: {path}")
 		merged = _merger.merge(merged, copy.deepcopy(run.overrides))
-		config = _build_config(merged, path, imports)
-		config.run_id = run.run_id
-		config.run_overrides = run.source
-		config.run_default = run.default
-		configs.append(config)
+		for candidates in product(*(values for _, values in run.grid)):
+			combination = copy.deepcopy(merged)
+			for (key, _), value in zip(run.grid, candidates, strict=True):
+				node = combination
+				for part in key[:-1]:
+					if not isinstance(node.get(part), dict):
+						node[part] = {}
+					node = node[part]
+				node[key[-1]] = copy.deepcopy(value)
+			config = _build_config(combination, path, imports)
+			config.run_id = run.run_id
+			config.run_overrides = copy.deepcopy(run.source)
+			config.run_default = run.default
+			configs.append(config)
 	return configs
 
 
-def _chosen_runs(configs: Sequence[BaseTaskConfig], run_ids: Sequence[str]) -> list[BaseTaskConfig]:
-	"""run_ids 选中的 run（保持原顺序）；run_ids 为空等价于 ['default']"""
-	selected = set(run_ids or [DEFAULT_RUNS])
-	explicit = selected - {DEFAULT_RUNS}
-	return [c for c in configs if c.run_id in explicit or (DEFAULT_RUNS in selected and c.run_default)]
-
-
-@icontract.require(lambda configs, run_ids: len(_chosen_runs(configs, run_ids)) > 0, 'No run selected: the task file has no default run')
 @icontract.require(lambda configs, run_ids: set(run_ids) - {DEFAULT_RUNS} <= {c.run_id for c in configs}, 'Unknown run id(s)')
 @icontract.require(
 	lambda configs, run_ids: not set(run_ids) - {DEFAULT_RUNS} or any(c.run_id for c in configs),
@@ -268,13 +280,12 @@ def select_runs(configs: Sequence[BaseTaskConfig], run_ids: Sequence[str]) -> li
 
 	run_ids 为空等价于 ['default']；其中的 'default' 表示所有默认运行（default = true）的 run，可与其他 id 组合。
 	"""
-	return _chosen_runs(configs, run_ids)
-
-
-def _distinct_output_paths(configs: Sequence[BaseTaskConfig]) -> bool:
-	"""各配置渲染后的输出路径互不相同"""
-	paths = [format_output_path(cast(Any, config).output.save_path, config).resolve() for config in configs]
-	return len(set(paths)) == len(paths)
+	selected = set(run_ids or [DEFAULT_RUNS])
+	explicit = selected - {DEFAULT_RUNS}
+	chosen = [c for c in configs if c.run_id in explicit or (DEFAULT_RUNS in selected and c.run_default)]
+	if not chosen:
+		raise ValueError('No run selected: the task file has no default run')
+	return chosen
 
 
 def run_task(
@@ -302,10 +313,6 @@ def run_task(
 	return run_fn(config, device)
 
 
-@icontract.require(
-	lambda configs: _distinct_output_paths(configs),
-	'Multiple runs resolve to the same output path. Distinguish runs in output.save_path, e.g. with {run_id}.',
-)
 @icontract.require(lambda configs: len(configs) > 0, 'run_tasks requires at least one config')
 @icontract.ensure(lambda configs, result: len(result) == len(configs))
 def run_tasks(
@@ -323,6 +330,19 @@ def run_tasks(
 	Returns:
 		各 run 的输出路径
 	"""
+	# 第一阶段：每个输出路径只渲染一次，派发任务前检查冲突。
+	seen: dict[Path, int] = {}
+	for i, config in enumerate(configs):
+		path = format_output_path(cast(Any, config).output.save_path, config).resolve()
+		if path in seen:
+			previous = seen[path]
+			raise ValueError(
+				f'Multiple runs resolve to the same output path: {path} '
+				f'(config {previous + 1}, run {configs[previous].run_id!r}; config {i + 1}, run {configs[i].run_id!r})'
+			)
+		seen[path] = i
+
+	# 第二阶段：按配置顺序运行任务。
 	outputs: list[Path] = []
 	for i, config in enumerate(configs):
 		if len(configs) > 1:
