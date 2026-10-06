@@ -66,7 +66,6 @@ class Trainer:
 		"""获取当前绑定的 process_fn。"""
 		return self._process_fn
 
-	@icontract.require(lambda process_fn: callable(process_fn), 'process_fn must be callable.')
 	@icontract.require(lambda self: self._process_fn is None, 'process_fn has already been set.')
 	def set_process_fn(self, process_fn: ProcessFn) -> Trainer:
 		"""设置训练处理闭包，至多允许绑定一次（包含构造函数初始化）。"""

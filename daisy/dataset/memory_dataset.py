@@ -15,10 +15,6 @@ class MemoryDataset[ImageT, LabelT](IndexDataset[ImageT, LabelT]):
 	transform: Callable[..., ImageT]
 
 	@icontract.require(lambda data, labels: labels is None or len(labels) == len(data), 'labels length must match data length')
-	@icontract.require(
-		lambda data: all(isinstance(i, Path) for i in data) or all(isinstance(i, Tensor) for i in data),
-		'data should all either be Path or Tensor',
-	)
 	def __init__(
 		self,
 		data: list[Path] | list[Tensor],

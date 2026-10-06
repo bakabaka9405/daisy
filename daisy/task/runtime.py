@@ -11,8 +11,6 @@ from pathlib import Path
 import shutil
 from typing import Any, cast
 
-import icontract
-
 from .base import BaseTaskConfig
 
 
@@ -41,7 +39,6 @@ def format_output_path(save_path_template: str, config: BaseTaskConfig) -> Path:
 	return Path(save_path_template.format(**values))
 
 
-@icontract.ensure(lambda result: result.is_dir())
 def resolve_output_path(save_path_template: str, config: BaseTaskConfig) -> Path:
 	"""解析并创建输出目录"""
 	output_path = format_output_path(save_path_template, config)
@@ -109,7 +106,6 @@ def save_run_snapshot(
 	save_task_snapshot(output_path, config, extra=runtime)
 
 
-@icontract.ensure(lambda imports, result: set(result) == {str(path) for path in imports})
 def save_import_files(output_path: Path, imports: Sequence[Path], *, dirname: str = 'imports') -> dict[str, str]:
 	"""复制外部 imports 文件到输出目录，返回源路径到 sha256 的映射"""
 	imports_dir = output_path / dirname

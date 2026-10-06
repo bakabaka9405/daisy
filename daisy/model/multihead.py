@@ -15,9 +15,7 @@ class MultiHeadModel(nn.Module):
 
 	@override
 	@icontract.require(lambda num_classes: all(count >= 2 for count in num_classes.values()), 'num_classes for each task must be at least 2')
-	@icontract.require(
-		lambda num_classes: all(isinstance(name, str) and len(name) > 0 for name in num_classes), 'task name must be a nonempty string'
-	)
+	@icontract.require(lambda num_classes: all(len(name) > 0 for name in num_classes), 'task name must not be empty')
 	@icontract.require(lambda num_classes: len(num_classes) > 0, 'num_classes must not be empty')
 	@icontract.require(lambda feature_dim: feature_dim > 0, 'feature_dim must be positive')
 	def __init__(

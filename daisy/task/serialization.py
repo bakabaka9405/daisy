@@ -49,7 +49,6 @@ def _get_default_example_path(task_type: str) -> Path:
 	return Path('tasks') / f'example_{task_type}.toml'
 
 
-@icontract.ensure(lambda result: not result.exists())
 def _get_available_output_path(path: Path) -> Path:
 	if not path.exists():
 		return path
@@ -62,8 +61,6 @@ def _get_available_output_path(path: Path) -> Path:
 		index += 1
 
 
-@icontract.require(lambda path, force: force or path is None or not path.exists(), 'Output file already exists')
-@icontract.ensure(lambda result: result.is_file())
 def export_example_config(task_type: str, path: Path | None = None, *, force: bool = False) -> Path:
 	"""导出某个任务类型的示例配置文件"""
 	config = build_example_config(task_type)
@@ -73,6 +70,8 @@ def export_example_config(task_type: str, path: Path | None = None, *, force: bo
 		output_path = default_path if force else _get_available_output_path(default_path)
 	else:
 		output_path = path
+		if not force and output_path.exists():
+			raise FileExistsError(f'Output file already exists: {output_path}')
 
 	output_path.parent.mkdir(parents=True, exist_ok=True)
 	save_config(config, output_path)
