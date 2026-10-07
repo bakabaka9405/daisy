@@ -78,21 +78,52 @@ def _remove_keys(data: dict[str, Any], keys: Sequence[str], where: str) -> None:
 		del node[leaf]
 
 
-def _parse_grid(raw: dict, where: str) -> list[tuple[tuple[str, ...], list[Any]]]:
-	"""按 TOML 插入顺序递归收集路径及候选值，候选内部结构保持原样。"""
-	axes: list[tuple[tuple[str, ...], list[Any]]] = []
+def _parse_grid(raw: dict[str, Any], where: str) -> list[list[dict[tuple[str, ...], Any]]]:
+	"""按 TOML 插入顺序收集参数轴，每个候选包含同时写入的字段及其值。"""
 
-	def collect(node: dict[str, Any], prefix: tuple[str, ...]) -> None:
+	def fields(node: dict[str, Any], prefix: tuple[str, ...] = ()) -> dict[tuple[str, ...], Any]:
+		result: dict[tuple[str, ...], Any] = {}
 		for name, value in node.items():
 			key = prefix + (name,)
 			if isinstance(value, dict) and value:
-				collect(value, key)
+				result.update(fields(value, key))
 			else:
-				if not isinstance(value, list) or not value:
-					raise ValueError(f"Grid axis '{'.'.join(key)}' in {where} must be a non-empty list of candidate values")
-				axes.append((key, value))
+				result[key] = value
+		return result
 
-	collect(raw, ())
+	def independent_axes(node: dict[str, Any]) -> list[list[dict[tuple[str, ...], Any]]]:
+		result: list[list[dict[tuple[str, ...], Any]]] = []
+		for key, values in fields(node).items():
+			if not isinstance(values, list) or not values:
+				raise ValueError(f"Grid axis '{'.'.join(key)}' in {where} must be a non-empty list of candidate values")
+			result.append([{key: value} for value in values])
+		return result
+
+	# 第一阶段：普通字段各自构成一个轴，_zip 的多个字段共同构成一个轴。
+	axes: list[list[dict[tuple[str, ...], Any]]] = []
+	for name, value in raw.items():
+		if name != '_zip':
+			axes.extend(independent_axes({name: value}))
+		elif isinstance(value, dict) and value:
+			columns = independent_axes(value)
+			axes.append([{key: item for column in row for key, item in column.items()} for row in zip(*columns, strict=True)])
+		elif isinstance(value, list) and value:
+			rows: list[dict[tuple[str, ...], Any]] = []
+			for row in value:
+				if not isinstance(row, dict) or not row:
+					raise ValueError(f"Grid '_zip' candidates in {where} must be non-empty tables")
+				rows.append(fields(row))
+			axes.append(rows)
+		else:
+			raise ValueError(f"Grid '_zip' in {where} must be a non-empty table or list of tables")
+
+	# 第二阶段：同一字段只能属于一个轴，避免不同轴互相覆盖。
+	seen: set[tuple[str, ...]] = set()
+	for axis in axes:
+		keys = {key for candidate in axis for key in candidate}
+		if duplicate := seen & keys:
+			raise ValueError(f'Duplicate grid fields in {where}: {sorted(".".join(key) for key in duplicate)}')
+		seen.update(keys)
 	return axes
 
 
@@ -170,15 +201,16 @@ def _expand_grid(data: dict[str, Any], path: Path, imports: list[Path], where: s
 	"""
 	axes = _parse_grid(data.pop('grid', {}), where)
 	configs: list[BaseTaskConfig] = []
-	for candidates in product(*(values for _, values in axes)):
+	for candidates in product(*axes):
 		combination = copy.deepcopy(data)
-		for (key, _), value in zip(axes, candidates, strict=True):
-			node = combination
-			for part in key[:-1]:
-				if not isinstance(node.get(part), dict):
-					node[part] = {}
-				node = node[part]
-			node[key[-1]] = copy.deepcopy(value)
+		for candidate in candidates:
+			for key, value in candidate.items():
+				node = combination
+				for part in key[:-1]:
+					if not isinstance(node.get(part), dict):
+						node[part] = {}
+					node = node[part]
+				node[key[-1]] = copy.deepcopy(value)
 		configs.append(_build_config(combination, path, imports))
 	return configs
 
@@ -212,6 +244,7 @@ def load_run_configs(path: Path) -> list[BaseTaskConfig]:
 	再深度合并其余内容（语义同 extends），最后用 grid 候选值整体替换对应字段。
 	grid 可写在顶层（随 extends 继承）与条目中，条目的 grid 与顶层 grid 深度合并，同名参数轴由条目覆盖；
 	grid 按 TOML 插入顺序取笛卡尔积，最右侧参数轴变化最快；所有组合保留条目的 id 与 default。
+	grid._zip 将候选表列表或表中的等长候选数组按位置配对，作为一个轴参与笛卡尔积。
 	条目的 default（默认 true）表示未指定 --runs 时是否运行。
 	run 随 extends 继承，子文件声明 run 时整体替换父级的 run。基础配置（不含任何条目与 grid）须能单独通过校验。
 

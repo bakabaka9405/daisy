@@ -210,7 +210,34 @@ grid.train_ratio = [0.1]  # 覆盖顶层的同名参数轴
 - 参数轴按 TOML 插入顺序排列，最右侧参数轴变化最快；同一条目展开的所有配置共享该条目的 `id` 与 `default`，`--runs` 按 `id` 选中其全部组合；
 - 无 `run` 时顶层 `grid` 直接展开基础配置；`load_config` 忽略 `grid`；
 - 输出路径须区分各组合，在 `save_path` 中引用参数轴字段（如 `{training.seed}`）；CLI 覆盖作用于展开后的每个配置，覆盖参数轴字段会使各组合输出路径相同而报错；
-- 只支持笛卡尔积；需要成对取值的参数（如同时取 `protocol.fold_seed = r` 与 `training.seed = r`）仍由外部脚本循环传入。
+
+`grid._zip` 将多个字段作为一个参数轴，支持显式列出配对候选：
+
+```toml
+[run.grid]
+_zip = [
+    { protocol.fold_seed = 0, training.seed = 42 },
+    { protocol.fold_seed = 1, training.seed = 43 },
+    { protocol.fold_seed = 2, training.seed = 44 },
+]
+training.blr = [0.001, 0.0005]
+```
+
+也可以用表提供等长数组，按位置配对：
+
+```toml
+[run.grid]
+training.blr = [0.001, 0.0005]
+
+[run.grid._zip]
+protocol.fold_seed = [0, 1, 2]
+training.seed = [42, 43, 44]
+```
+
+- 两种形式均生成三个 seed 配对，再与 `training.blr` 取笛卡尔积，共六次运行；运行顺序仍取决于轴的声明顺序；
+- `_zip` 可写在顶层 `[grid]` 或条目的 `[run.grid]` 中；数组形式随继承整体覆盖，表形式按现有规则深度合并，同名字段的数组整体覆盖；
+- `_zip` 及其候选表必须非空；表形式中的候选数组必须非空且等长，不满足时立即报错；
+- 同一字段不能同时出现在普通轴与 `_zip` 中。
 
 ## 5. 任务行为与产物
 
