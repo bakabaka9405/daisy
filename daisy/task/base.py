@@ -23,7 +23,6 @@ class BaseMetaConfig(BaseConfig):
 	description: str = ''
 	creator: str = ''
 	created_at: str = ''
-	commit: str = 'auto'  # "auto" 表示运行时自动获取
 
 
 class BaseOutputConfig(BaseConfig):

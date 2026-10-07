@@ -39,8 +39,6 @@ def build_example_config(task_type: str) -> BaseTaskConfig:
 		config.meta.creator = 'your_name'
 	if not config.meta.created_at:
 		config.meta.created_at = date.today().isoformat()
-	if not config.meta.commit:
-		config.meta.commit = 'auto'
 
 	return config
 

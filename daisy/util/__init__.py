@@ -1,6 +1,5 @@
 from .util import (
 	set_global_seed,
-	get_git_commit,
 	get_model_classifier,
 	gather_list_by_indexes,
 	shuffle_correlated_lists,
@@ -17,7 +16,6 @@ from .data import Prefetcher, make_dataloader
 
 __all__ = [
 	'set_global_seed',
-	'get_git_commit',
 	'get_model_classifier',
 	'gather_list_by_indexes',
 	'shuffle_correlated_lists',

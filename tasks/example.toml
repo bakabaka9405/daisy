@@ -11,7 +11,6 @@ title = "ResNet34 Smile Classification"
 description = "使用 ResNet34 进行三分类微笑检测"
 creator = "your_name"
 created_at = "2026-01-18"
-commit = "auto"  # 运行时自动记录 git commit hash
 
 [dataset]
 feeder = "example_sheet_ratio"  # 已注册的 feeder 标识符
@@ -62,3 +61,7 @@ log = true
 # id = "resnet50"
 # _remove = ["model.pretrained"]  # 删除上面设置的值，回到模型默认值
 # model.name = "resnet50"
+
+# 可选：grid 网格调参，顶层或 run 条目中声明，取各参数轴的笛卡尔积（save_path 需引用参数轴字段）
+# [grid]
+# training.seed = [42, 43, 44]

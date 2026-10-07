@@ -1,6 +1,5 @@
 from pathlib import Path
 import random
-import subprocess
 
 import icontract
 import torch
@@ -23,20 +22,6 @@ def set_global_seed(seed: int):
 	torch.cuda.manual_seed_all(seed)
 	torch.backends.cudnn.benchmark = False
 	torch.backends.cudnn.deterministic = True
-
-
-def get_git_commit() -> str:
-	"""获取当前 git commit hash (短)"""
-	try:
-		result = subprocess.run(
-			['git', 'rev-parse', 'HEAD'],
-			capture_output=True,
-			text=True,
-			check=True,
-		)
-		return result.stdout.strip()[:8]
-	except Exception:
-		return 'unknown'
 
 
 def enable_cudnn_benchmark():

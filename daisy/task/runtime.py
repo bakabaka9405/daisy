@@ -5,10 +5,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-import hashlib
 import json
 from pathlib import Path
-import shutil
 from typing import Any, cast
 
 from .base import BaseTaskConfig
@@ -28,7 +26,6 @@ class TaskRunContext:
 
 	output_path: Path
 	device: str
-	commit: str
 	seed: int | None = None
 
 
@@ -71,16 +68,11 @@ def prepare_task_run(
 		print(f'Seed: {seed}')
 	print('=' * 60)
 
-	if config.meta.commit == 'auto':
-		config.meta.commit = daisy.util.get_git_commit()
-	print(f'Git commit: {config.meta.commit}')
-
 	output_path = resolve_output_path(cast(Any, config).output.save_path, config)
 	print(f'Output path: {output_path}')
 	return TaskRunContext(
 		output_path=output_path,
 		device=str(device),
-		commit=config.meta.commit,
 		seed=seed,
 	)
 
@@ -92,29 +84,13 @@ def save_run_snapshot(
 	*,
 	extra: dict[str, Any] | None = None,
 ) -> None:
-	"""保存统一的运行快照信息"""
-	runtime: dict[str, Any] = {
-		'device': run_context.device,
-		'commit': run_context.commit,
-	}
+	"""保存统一的运行快照信息（源码版本由 runner 写入同目录的 provenance.json）"""
+	runtime: dict[str, Any] = {'device': run_context.device}
 	if run_context.seed is not None:
 		runtime['seed'] = run_context.seed
-	if config.imports:
-		runtime['imports'] = save_import_files(output_path, config.imports)
 	if extra:
 		runtime.update(extra)
 	save_task_snapshot(output_path, config, extra=runtime)
-
-
-def save_import_files(output_path: Path, imports: Sequence[Path], *, dirname: str = 'imports') -> dict[str, str]:
-	"""复制外部 imports 文件到输出目录，返回源路径到 sha256 的映射"""
-	imports_dir = output_path / dirname
-	imports_dir.mkdir(parents=True, exist_ok=True)
-	digests: dict[str, str] = {}
-	for path in imports:
-		shutil.copy2(path, imports_dir / path.name)
-		digests[str(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
-	return digests
 
 
 def print_task_completed(output_path: Path) -> None:

@@ -12,6 +12,7 @@
 - `tasks/__init__.py`：维护任务字典 `TASKS: dict[str, TaskEntry]`，将任务类型映射为 `(ConcreteConfig, run)` 元组，提供 `get_task(task_type) -> TaskEntry` 与装饰器 `register_task(name)`；
 - `feed.py`：`feed(config, seed=...)` 调用 feeder 构建数据划分并执行通用检查，`assert_label_range` / `assert_multitask_label_range` 校验标签范围；
 - `runtime.py`：统一处理运行头部、输出目录、运行快照和完成信息；
+- `provenance.py`：把运行涉及的 git 仓库工作区记录为隐藏 commit（源码快照），并核对已加载模块与运行期间的源码改动；
 - `serialization.py`：提供 `build_example_config`、`export_example_config` 与 `save_config`，负责任务配置序列化与示例导出；
 - `shared/`：共享配置模型（含 `FeederConfig` / `DatasetConfig`）与 transform；
 - `tasks/<task_name>/`：任务专属配置与执行逻辑。每个任务模块包含 `config.py` 与实现 `run(config: ConcreteConfig, device: torch.device) -> Path` 的 `runner.py`。
@@ -37,9 +38,25 @@
 
 runner 复用 `runtime.py`：
 
-- `prepare_task_run()`：统一 seed、banner、commit 与输出目录；
-- `save_run_snapshot()`：保存 `task_snapshot.json`，额外运行信息通过 `extra` 追加；存在 `imports` 时将外部文件复制到输出目录 `imports/`，并在 `runtime.imports` 记录各文件 sha256；
+- `prepare_task_run()`：统一 seed、banner 与输出目录；
+- `save_run_snapshot()`：保存 `task_snapshot.json`，额外运行信息通过 `extra` 追加；
 - `print_task_completed()`：统一任务完成输出。
+
+源码版本不由任务记录，而由 `run_tasks` 统一处理（见 2.3）。
+
+### 2.3 源码快照
+
+做法与 DVC experiments 相同，不改动分支、暂存区与工作区：
+
+1. 确定仓库：daisy 包、各 task 文件及其 `imports` 文件所属的 git 仓库（`git rev-parse --show-toplevel`），不在仓库中时报错；
+2. 记录快照：对每个仓库，在 index 的临时副本上执行 `git add --all` 与 `git write-tree`，得到工作区（含未提交改动与未被忽略的未跟踪文件）的 tree，再以 HEAD 为父节点 `git commit-tree`，挂在同名引用 `refs/daisy/runs/<时间>-<进程号>` 下防止被垃圾回收；一次 `daisy run` 的全部 run 共用同一快照；
+3. 模块核对：快照后与每个 run 结束后，已加载模块的源文件须位于某个仓库的快照 tree 中，或属于 Python 安装（`sys.prefix`、`sys.base_prefix` 等目录下的标准库与 site-packages），否则报错。被 `.gitignore` 忽略的目录（如 `tmp/`）中的代码不能用于正式运行；
+4. 改动检测：每个 run 结束后重新计算各仓库工作区的 tree，与快照不同的仓库记为运行期间源码被修改，打印警告，不中止运行；
+5. 每个 run 的输出目录写入 `provenance.json`：`ref`、各仓库的 `root`、`head`、`commit`（快照）、`dirty`（工作区与 HEAD 不同），以及 `changed_during_run`。
+
+复现某次运行的代码：`git worktree add <目录> <commit>`（各仓库分别执行）。快照引用可按前缀清理：`git for-each-ref --format='%(refname)' refs/daisy/runs/` 配合 `git update-ref -d`。
+
+函数内导入在运行中途才加载模块，可能读到快照之后被修改的源码；项目代码应在启动时全部加载（proj 通过 ruff 的 `PLC0415` 禁止 `src/` 中的函数内导入）。
 
 ## 3. CLI 参数与执行机制
 
@@ -54,7 +71,7 @@ CLI 使用 tyro 绑定 Pydantic 配置模型。`--` 前为命令选项，后为�
 2. 通过 `config_cls.model_validate(data)` 校验并实例化具体任务配置对象；存在 `run` 数组时，先校验不含任何条目的基础配置，再对每个条目合并后分别校验，得到各 run 的配置；
 3. 按 `--runs` 选择 run（保持 task 文件中的顺序）：`default` 表示所有默认运行（`default = true`）的 run，可与其他 run id 组合；不指定 `--runs` 时等价于 `--runs default`；未知 id、task 文件无 `run` 却给出 run id、或最终没有选中任何 run 时报错；
 4. 使用 `tyro.cli` 将命令行 `--` 后的覆盖参数绑定至每个 run 的配置实例，完成最终校验；
-5. `run_tasks(configs, device)` 检查各 run 渲染后的输出路径互不相同，再在同一进程中顺序调用 `run_task(config, device)` 分发执行；任一 run 报错立即终止，此前完成的 run 保留。
+5. `run_tasks(configs, device)` 检查各 run 渲染后的输出路径互不相同，记录源码快照并核对已加载模块（见 2.3），再在同一进程中顺序调用各任务的执行函数，每个 run 结束后写入 `provenance.json`；任一 run 报错立即终止，此前完成的 run 保留。`run_task(config, device)` 等价于只含一个配置的 `run_tasks`。
 
 `load_config(path)` 返回忽略 `run` 数组的基础配置，供 `daisy list` 等只需单个配置的场景使用。
 
@@ -80,13 +97,12 @@ title = "ResNet34 baseline"
 description = "Internal baseline for smile classification"
 creator = "your_name"
 created_at = "2026-03-09"
-commit = "auto"
 
 [output]
 save_path = "outputs/{task_id}"
 ```
 
-`[meta]` 包含 `title`（标题）、`description`（实验目标或变量）、`creator`（创建人）、`created_at`（日期）和 `commit`（提交标识，`"auto"` 由运行时回填）。
+`[meta]` 包含 `title`（标题）、`description`（实验目标或变量）、`creator`（创建人）和 `created_at`（日期）。源码版本由运行时记录在 `provenance.json` 中（见 2.3）。
 
 ### 4.1 输出与数据集模式规范
 
@@ -130,7 +146,7 @@ num_classes = 3
 
 ### 4.4 run 数组
 
-简单消融可以在一个 task 文件中用 `run` 数组描述：每个条目是一次参数重载，等价于一次带 CLI 覆盖的运行。复杂的网格调参仍由外部脚本循环调用。
+消融可以在一个 task 文件中用 `run` 数组描述：每个条目是一次参数重载，等价于一次带 CLI 覆盖的运行；对训练集比例、seed 等的网格调参用 `grid`（见 4.6）。
 
 ```toml
 extends = "base.toml"
@@ -165,6 +181,37 @@ TOML 没有 null，无法用覆盖把字段设回 `None` 或模型默认值。`_
 - 要删除的键在继承来的配置中不存在时报错，避免拼写错误被静默忽略；
 - 例：父级设置了 `model.checkpoint_path`，而模型默认值为 `None`，则 `_remove = ["model.checkpoint_path"]` 使其为 `None`。
 
+### 4.6 `grid`：网格调参
+
+`grid` 是一个表，叶子为非空的候选值数组，键路径即要替换的配置字段；运行时取各参数轴的笛卡尔积，每个组合用候选值整体替换对应字段：
+
+```toml
+extends = "base.toml"
+
+[output]
+save_path = "outputs/{run_id}_train{train_ratio}_seed{training.seed}"
+
+[grid]
+train_ratio = [0.1, 1.0]
+training.seed = [42, 43, 44]
+
+[[run]]
+id = "ce"
+
+[[run]]
+id = "ce-ft100"
+training.epochs = 100
+grid.train_ratio = [0.1]  # 覆盖顶层的同名参数轴
+```
+
+- `grid` 可写在顶层与 `[[run]]` 条目中，与 `run` 等同为保留键，不进入配置；
+- 顶层 `grid` 随 `extends` 深度合并继承，可被顶层 `_remove`（如 `_remove = ["grid.train_ratio"]`）删除；条目的 `grid` 与顶层 `grid` 按 `extends` 的语义深度合并，同名参数轴由条目覆盖，条目的 `_remove` 同样可以删除顶层参数轴；
+- 展开在 `_remove` 与重载合并之后进行，候选值整体替换字段（候选为表时不与原值合并），展开后的每个配置由配置模型校验；
+- 参数轴按 TOML 插入顺序排列，最右侧参数轴变化最快；同一条目展开的所有配置共享该条目的 `id` 与 `default`，`--runs` 按 `id` 选中其全部组合；
+- 无 `run` 时顶层 `grid` 直接展开基础配置；`load_config` 忽略 `grid`；
+- 输出路径须区分各组合，在 `save_path` 中引用参数轴字段（如 `{training.seed}`）；CLI 覆盖作用于展开后的每个配置，覆盖参数轴字段会使各组合输出路径相同而报错；
+- 只支持笛卡尔积；需要成对取值的参数（如同时取 `protocol.fold_seed = r` 与 `training.seed = r`）仍由外部脚本循环传入。
+
 ## 5. 任务行为与产物
 
 ### 5.1 分类
@@ -198,5 +245,5 @@ TOML 没有 null，无法用覆盖把字段设回 `None` 或模型默认值。`_
 - 正式实验通过 task 或 batch 入口运行，显式记录实验使用的路径、模型、划分方式、超参数与 seed；机器相关差异通过配置字段表达；
 - 固定索引表、sheet、病例分组、采样清单与外部评估数据作为实验协议记录；
 - 输出目录与 `task_id` 对应，默认可用 `outputs/{task_id}`；`proj/mae` 使用 `outputs/mae/{phase}/{task_id}`；
-- 结果表、checkpoint、预测与统计产物通过 `task_id` 关联 task 文件、commit 和关键配置；
+- 结果表、checkpoint、预测与统计产物通过 `task_id` 关联 task 文件、源码快照（`provenance.json`）和关键配置；
 - 已产生正式输出的 task 保留原配置，后续调整创建新 task；项目命名、输出目录与阶段映射的变更同步更新项目文档。
