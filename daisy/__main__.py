@@ -1,19 +1,21 @@
 """Daisy CLI 入口
 
 用法:
-	python -m daisy run <task.toml> [-d device] [--runs id ...] [-- options]  # 运行任务（含 run 数组时逐个运行）并支持参数覆盖
+	python -m daisy run <task.toml> [-d device] [--cpu-affinity mask] [--runs id ...] [-- options]  # 运行任务并支持参数覆盖
 	python -m daisy list [-d tasks_dir]                       # 列出所有任务
 	python -m daisy example <task_type> [output] [-f] [-i a.py]  # 导出示例配置
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import sys
 from typing import Annotated
 
 import tyro
 import tyro.conf
+import psutil
 
 
 @dataclass(slots=True, frozen=True)
@@ -24,12 +26,14 @@ class Run:
 		task: 任务配置文件路径
 		overrides: 通过 -- 分隔符传入的任务配置覆盖参数，作用于每个 run（优先级高于 run 条目）
 		device: 运行设备 (例如: cuda, cpu)
+		cpu_affinity: CPU 亲和度的正整数位掩码，第 i 位对应 CPU i；省略时使用 DAISY_CPU_AFFINITY，两者均未设置时保留当前亲和度
 		runs: 只运行这些 id 的 run（按任务文件中的顺序）；default 表示所有默认运行的 run，可与其他 id 组合；不指定时等价于 default
 	"""
 
 	task: Annotated[Path, tyro.conf.Positional]
 	overrides: Annotated[tuple[str, ...], tyro.conf.Positional] = ()
 	device: Annotated[str | None, tyro.conf.arg(aliases=('-d',))] = None
+	cpu_affinity: int | None = None
 	runs: tuple[str, ...] = ()
 
 
@@ -106,6 +110,14 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 	match command:
 		case Run():
+			mask = command.cpu_affinity
+			if mask is None and (env_mask := os.environ.get('DAISY_CPU_AFFINITY')) is not None:
+				mask = int(env_mask)
+			if mask is not None:
+				if mask <= 0:
+					raise ValueError('CPU affinity mask must be positive.')
+				psutil.Process().cpu_affinity([i for i in range(mask.bit_length()) if mask & (1 << i)])
+
 			from daisy.task import load_run_configs, run_tasks, select_runs
 
 			loaded = select_runs(load_run_configs(command.task), command.runs)

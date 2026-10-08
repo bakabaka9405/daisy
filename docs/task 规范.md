@@ -62,6 +62,8 @@ runner 复用 `runtime.py`：
 
 CLI 使用 tyro 绑定 Pydantic 配置模型。`--` 前为命令选项，后为任务配置覆盖项。参数优先级遵循 **CLI > run 条目 > TOML > 模型默认值**；task 文件含 `run` 数组（见 4.4）时，CLI 覆盖项作用于每个 run。
 
+`--cpu-affinity` 接收十进制正整数位掩码，第 i 位对应 CPU i。也可通过环境变量 `DAISY_CPU_AFFINITY` 设置相同的值，显式命令行参数优先。CLI 在加载任务前通过 `psutil.Process().cpu_affinity()` 设置当前进程的亲和度，后续创建的子进程（含 DataLoader worker）继承该设置；两者均未设置时保留当前亲和度。解析或设置失败时立即抛出异常。`4095` 等于 `0xFFF`，选择 CPU 0–11。
+
 执行流程包含以下阶段：
 
 1. `load_run_configs(path)` 使用 `tomllib` 读取 TOML 文件，沿 `extends` 链合并配置，并按父级在前、去重的顺序收集各层 `imports`（相对声明它的文件解析）后调用 `import_files` 导入。导入以文件名为顶层模块名，文件所在目录加入 `sys.path`；同名不同路径的文件视为冲突并报错。文件须显式声明 `task_type` 字段：
@@ -80,6 +82,8 @@ CLI 使用 tyro 绑定 Pydantic 配置模型。`--` 前为命令选项，后为�
 - 命令帮助：`python -m daisy run --help`；
 - 任务字段帮助：`python -m daisy run task.toml -- --help`；
 - 指定设备与学习率：`python -m daisy run task.toml -d cpu -- --training.lr 0.02`；
+- 指定 CPU 亲和度：`python -m daisy run task.toml --cpu-affinity 4095`；
+- 通过环境变量指定 CPU 亲和度（PowerShell）：`$env:DAISY_CPU_AFFINITY = '4095'`，随后执行 `python -m daisy run task.toml`；
 - 只运行部分 run，并对其统一覆盖：`python -m daisy run ablation.toml --runs imagenet_mae random -- --training.epochs 1`；
 - 默认运行的 run 加上一个非默认 run：`python -m daisy run ablation.toml --runs default extra`；
 - 导出示例配置：`python -m daisy example <task_type>`；
