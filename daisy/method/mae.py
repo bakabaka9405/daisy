@@ -15,6 +15,22 @@ from daisy.training.state import TrainState
 from daisy.training.trainer import Trainer
 
 
+@icontract.require(lambda pred, mask: mask.shape == pred.shape[:2])
+@icontract.require(lambda pred, target: pred.shape == target.shape)
+@icontract.require(lambda pred: pred.ndim == 3)
+@icontract.ensure(lambda result: result.ndim == 0)
+def mae_reconstruction_loss(pred: Tensor, target: Tensor, mask: Tensor, *, norm_pix_loss: bool) -> Tensor:
+	"""计算 MAE 掩码 patch 的训练重建损失。"""
+	if norm_pix_loss:
+		mean = target.mean(dim=-1, keepdim=True)
+		var = target.var(dim=-1, keepdim=True)
+		target = (target - mean) / (var + 1.0e-6) ** 0.5
+
+	loss = (pred - target) ** 2
+	loss = loss.mean(dim=-1)
+	return (loss * mask).sum() / mask.sum()
+
+
 class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
 	"""MAE 预训练方法。"""
 
@@ -51,8 +67,7 @@ class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
 		# 筛选并锁定注册时具备梯度的编码器参数，保留调用方预先冻结的参数
 		encoder_prefixes = ('patch_embed.', 'blocks.', 'norm.')
 		managed_params = tuple(
-			p for name, p in self.model.named_parameters()
-			if (name == 'cls_token' or name.startswith(encoder_prefixes)) and p.requires_grad
+			p for name, p in self.model.named_parameters() if (name == 'cls_token' or name.startswith(encoder_prefixes)) and p.requires_grad
 		)
 
 		def on_epoch_start(state: TrainState) -> None:
@@ -104,12 +119,4 @@ class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
 
 		# 图像分块与目标特征对齐
 		target = self.model.patchify(batch)
-		if self.norm_pix_loss:
-			mean = target.mean(dim=-1, keepdim=True)
-			var = target.var(dim=-1, keepdim=True)
-			target = (target - mean) / (var + 1.0e-6) ** 0.5
-
-		# 计算均方误差并对掩码区域求均值
-		loss = (pred - target) ** 2
-		loss = loss.mean(dim=-1)
-		return (loss * mask).sum() / mask.sum()
+		return mae_reconstruction_loss(pred, target, mask, norm_pix_loss=self.norm_pix_loss)
