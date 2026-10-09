@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Self
 
-import icontract
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 import tyro.conf
 
 
@@ -33,9 +32,11 @@ class BaseOutputConfig(BaseConfig):
 	save_best: bool = True
 	log: bool = True
 
-	@icontract.require(lambda self: self.keep_count >= 0)
-	def model_post_init(self, context: Any, /) -> None:
-		pass
+	@model_validator(mode='after')
+	def validate_config(self) -> Self:
+		if self.keep_count < 0:
+			raise ValueError('keep_count must be >= 0')
+		return self
 
 
 class BaseTaskConfig(BaseConfig):

@@ -1,10 +1,9 @@
 """分类任务配置"""
 
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal, Self
 
-import icontract
-from pydantic import Field
+from pydantic import Field, model_validator
 import tyro.conf
 
 from daisy.util import to_2tuple
@@ -52,18 +51,29 @@ class TrainingConfig(BaseConfig):
 	cmp_obj: Literal['acc', 'prec', 'recall', 'f1'] = 'f1'
 	transform: TransformConfig = Field(default_factory=TransformConfig)
 
-	@icontract.require(lambda self: self.early_stop_epoch >= 1)
-	@icontract.require(lambda self: min(to_2tuple(self.num_workers)) >= 0)
-	@icontract.require(lambda self: self.max_norm > 0)
-	@icontract.require(lambda self: self.accum_iter >= 1)
-	@icontract.require(lambda self: 0 <= self.smoothing < 1)
-	@icontract.require(lambda self: self.warmup_epochs >= 0)
-	@icontract.require(lambda self: self.weight_decay >= 0)
-	@icontract.require(lambda self: self.lr > 0)
-	@icontract.require(lambda self: self.batch_size >= 1)
-	@icontract.require(lambda self: self.epochs >= 1)
-	def model_post_init(self, context: Any, /) -> None:
-		pass
+	@model_validator(mode='after')
+	def validate_config(self) -> Self:
+		if self.epochs < 1:
+			raise ValueError('epochs must be >= 1')
+		if self.batch_size < 1:
+			raise ValueError('batch_size must be >= 1')
+		if not self.lr > 0:
+			raise ValueError('lr must be > 0')
+		if not self.weight_decay >= 0:
+			raise ValueError('weight_decay must be >= 0')
+		if self.warmup_epochs < 0:
+			raise ValueError('warmup_epochs must be >= 0')
+		if not 0 <= self.smoothing < 1:
+			raise ValueError('smoothing must satisfy 0 <= smoothing < 1')
+		if self.accum_iter < 1:
+			raise ValueError('accum_iter must be >= 1')
+		if not self.max_norm > 0:
+			raise ValueError('max_norm must be > 0')
+		if min(to_2tuple(self.num_workers)) < 0:
+			raise ValueError('num_workers must be >= 0')
+		if self.early_stop_epoch < 1:
+			raise ValueError('early_stop_epoch must be >= 1')
+		return self
 
 
 class ClassificationConfig(BaseTaskConfig):

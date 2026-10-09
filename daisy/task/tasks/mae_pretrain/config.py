@@ -1,10 +1,9 @@
 """MAE 预训练任务配置"""
 
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal, Self
 
-import icontract
-from pydantic import Field
+from pydantic import Field, model_validator
 import tyro.conf
 
 from daisy.feeder import ImageFolderParams
@@ -20,9 +19,11 @@ class MAEModelConfig(BaseConfig):
 	pretrained: Path | None = None  # 本地完整预训练检查点路径
 	timm_pretrained: str | None = None
 
-	@icontract.require(lambda self: min(self.img_size if isinstance(self.img_size, tuple) else (self.img_size,)) > 0)
-	def model_post_init(self, context: Any, /) -> None:
-		pass
+	@model_validator(mode='after')
+	def validate_config(self) -> Self:
+		if min(self.img_size if isinstance(self.img_size, tuple) else (self.img_size,)) <= 0:
+			raise ValueError('img_size dimensions must be > 0')
+		return self
 
 
 class MAETransformConfig(BaseConfig):
@@ -36,10 +37,13 @@ class MAETransformConfig(BaseConfig):
 	# 是否水平翻转
 	hflip: bool = True
 
-	@icontract.require(lambda self: 0 < self.ratio_min <= self.ratio_max)
-	@icontract.require(lambda self: 0 < self.scale_min <= self.scale_max)
-	def model_post_init(self, context: Any, /) -> None:
-		pass
+	@model_validator(mode='after')
+	def validate_config(self) -> Self:
+		if not 0 < self.scale_min <= self.scale_max:
+			raise ValueError('scale must satisfy 0 < scale_min <= scale_max')
+		if not 0 < self.ratio_min <= self.ratio_max:
+			raise ValueError('ratio must satisfy 0 < ratio_min <= ratio_max')
+		return self
 
 
 class MAETrainingConfig(BaseConfig):
@@ -64,17 +68,27 @@ class MAETrainingConfig(BaseConfig):
 	compile_backend: str | None = 'inductor'  # 编译后端，可选 'inductor'、'eager' 或 None
 	transform: MAETransformConfig = Field(default_factory=MAETransformConfig)
 
-	@icontract.require(lambda self: self.save_freq >= 0)
-	@icontract.require(lambda self: self.num_workers >= 0)
-	@icontract.require(lambda self: self.max_norm > 0)
-	@icontract.require(lambda self: self.accum_iter >= 1)
-	@icontract.require(lambda self: self.warmup_epochs >= 0)
-	@icontract.require(lambda self: self.weight_decay >= 0)
-	@icontract.require(lambda self: self.blr > 0)
-	@icontract.require(lambda self: self.batch_size >= 1)
-	@icontract.require(lambda self: self.epochs >= 1)
-	def model_post_init(self, context: Any, /) -> None:
-		pass
+	@model_validator(mode='after')
+	def validate_config(self) -> Self:
+		if self.epochs < 1:
+			raise ValueError('epochs must be >= 1')
+		if self.batch_size < 1:
+			raise ValueError('batch_size must be >= 1')
+		if not self.blr > 0:
+			raise ValueError('blr must be > 0')
+		if not self.weight_decay >= 0:
+			raise ValueError('weight_decay must be >= 0')
+		if self.warmup_epochs < 0:
+			raise ValueError('warmup_epochs must be >= 0')
+		if self.accum_iter < 1:
+			raise ValueError('accum_iter must be >= 1')
+		if not self.max_norm > 0:
+			raise ValueError('max_norm must be > 0')
+		if self.num_workers < 0:
+			raise ValueError('num_workers must be >= 0')
+		if self.save_freq < 0:
+			raise ValueError('save_freq must be >= 0')
+		return self
 
 
 def _default_mae_dataset() -> FeederConfig:
