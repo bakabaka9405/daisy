@@ -10,7 +10,8 @@ import math
 import icontract
 import numpy as np
 import torch
-from timm.layers.helpers import to_2tuple
+
+from daisy.util import to_2tuple
 
 
 def _num_checkpoint_pos_tokens(model, checkpoint_model: dict[str, torch.Tensor]) -> int:

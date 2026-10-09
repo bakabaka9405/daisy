@@ -7,6 +7,8 @@ import icontract
 from pydantic import Field
 import tyro.conf
 
+from daisy.util import to_2tuple
+
 from ...base import BaseConfig, BaseOutputConfig, BaseTaskConfig
 from ...shared import DatasetConfig
 
@@ -51,7 +53,7 @@ class TrainingConfig(BaseConfig):
 	transform: TransformConfig = Field(default_factory=TransformConfig)
 
 	@icontract.require(lambda self: self.early_stop_epoch >= 1)
-	@icontract.require(lambda self: min(self.num_workers if isinstance(self.num_workers, tuple) else (self.num_workers,)) >= 0)
+	@icontract.require(lambda self: min(to_2tuple(self.num_workers)) >= 0)
 	@icontract.require(lambda self: self.max_norm > 0)
 	@icontract.require(lambda self: self.accum_iter >= 1)
 	@icontract.require(lambda self: 0 <= self.smoothing < 1)

@@ -15,8 +15,9 @@ import icontract
 import torch
 import torch.nn as nn
 from timm.models.vision_transformer import VisionTransformer
-from timm.layers.helpers import to_2tuple
 from timm.layers.patch_embed import PatchEmbed
+
+from daisy.util import to_2tuple
 
 __all__ = [
 	'VisionTransformerMoCo',
@@ -104,8 +105,8 @@ class ConvStem(nn.Module):
 	):
 		super().__init__()
 
-		img_size_t: tuple[int, int] = to_2tuple(img_size)  # type: ignore[assignment]
-		patch_size_t: tuple[int, int] = to_2tuple(patch_size)  # type: ignore[assignment]
+		img_size_t = to_2tuple(img_size)
+		patch_size_t = to_2tuple(patch_size)
 		self.img_size = img_size_t
 		self.patch_size = patch_size_t
 		self.grid_size = (img_size_t[0] // patch_size_t[0], img_size_t[1] // patch_size_t[1])

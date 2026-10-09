@@ -13,6 +13,7 @@ from timm.data.loader import MultiEpochsDataLoader
 from daisy.dataset.index_dataset import IndexDataset
 from daisy.method.classification import ClassificationMethod
 from daisy.training import Eval, Trainer
+from daisy.util import to_2tuple
 
 
 def prepare_classification_training(
@@ -42,10 +43,7 @@ def prepare_classification_training(
 	train_dataset.setTransform(train_transform)
 	val_dataset.setTransform(val_transform)
 
-	if isinstance(num_workers, int):
-		workers = (num_workers, num_workers)
-	else:
-		workers = num_workers
+	workers = to_2tuple(num_workers)
 
 	train_loader = MultiEpochsDataLoader(
 		train_dataset,

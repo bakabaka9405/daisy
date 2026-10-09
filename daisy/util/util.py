@@ -10,6 +10,12 @@ from typing import Any, SupportsIndex
 from collections.abc import Iterable
 
 
+def to_2tuple[T](value: T | tuple[T, T]) -> tuple[T, T]:
+	if isinstance(value, tuple):
+		return value
+	return (value, value)
+
+
 def _has_classifier(model: Any) -> bool:
 	return hasattr(model, 'fc') or hasattr(model, 'head') or hasattr(model, 'classifier')
 

@@ -1,4 +1,5 @@
 from .util import (
+	to_2tuple,
 	set_global_seed,
 	get_model_classifier,
 	gather_list_by_indexes,
@@ -15,6 +16,7 @@ from .transform import get_default_val_transform, get_default_train_transform, L
 from .data import Prefetcher, make_dataloader
 
 __all__ = [
+	'to_2tuple',
 	'set_global_seed',
 	'get_model_classifier',
 	'gather_list_by_indexes',
