@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import cast, override
+from typing import override
 
 import icontract
-import torch.nn as nn
 from torch import Tensor
 from torch.optim import AdamW, Optimizer
 
@@ -82,12 +81,6 @@ class MAEPretrainMethod(Method[MaskedAutoencoderViT]):
 					param.grad = None
 
 		trainer.on_epoch_start(on_epoch_start)
-
-	@override
-	@icontract.require(lambda backbone: isinstance(backbone, MaskedAutoencoderViT), 'Expected a MaskedAutoencoderViT model.')
-	def build_model(self, backbone: nn.Module) -> MaskedAutoencoderViT:
-		"""采用已传入的 MaskedAutoencoderViT 实例。"""
-		return cast(MaskedAutoencoderViT, backbone)
 
 	@override
 	def build_optimizer(

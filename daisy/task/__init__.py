@@ -30,8 +30,6 @@ from .serialization import build_example_config, export_example_config, save_con
 from .shared import (
 	DatasetConfig,
 	FeederConfig,
-	InferenceModelConfig,
-	InferenceRuntimeConfig,
 	LogOutputConfig,
 )
 from .tasks import TASKS, get_task, register_task
@@ -69,8 +67,6 @@ __all__ = [
 	# 共享配置
 	'DatasetConfig',
 	'FeederConfig',
-	'InferenceModelConfig',
-	'InferenceRuntimeConfig',
 	'LogOutputConfig',
 	# 任务配置
 	'ClassificationConfig',

@@ -6,8 +6,21 @@ from typing import Literal, overload
 
 import icontract
 import numpy as np
+from sklearn.metrics import accuracy_score
 
 from daisy.typing import Array3F64, MatrixF64, MatrixI64, VectorF64, VectorI64
+from .regression import mae_score, rmse_score
+
+
+def evaluate_ordinal_scores(y_true: VectorI64, y_pred: VectorI64, num_classes: int) -> dict[str, float]:
+	"""由解码后的类别预测计算有序分类指标。"""
+	true_f, pred_f = y_true.astype(np.float64), y_pred.astype(np.float64)
+	return {
+		'mae': float(mae_score(true_f, pred_f)),
+		'rmse': float(rmse_score(true_f, pred_f)),
+		'acc': float(accuracy_score(y_true, y_pred)),
+		'kappa': qwk_score(y_true, y_pred, num_classes),
+	}
 
 
 @icontract.require(lambda y_pred, num_classes: y_pred.min() >= 0 and y_pred.max() < num_classes)
@@ -70,6 +83,7 @@ def expected_score(probs: MatrixF64 | Array3F64, values: VectorF64 | None = None
 
 
 __all__ = [
+	'evaluate_ordinal_scores',
 	'expected_score',
 	'qwk_score',
 	'rps_score',

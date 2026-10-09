@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import cast, override
+from typing import override
 
 import icontract
 import torch
-import torch.nn as nn
 from torch import Tensor
 
 from daisy.method.base import Method
@@ -39,16 +38,8 @@ class MultiHeadClassificationMethod(Method[MultiHeadModel]):
 			weight_decay=weight_decay,
 		)
 
-	@override
-	@icontract.require(lambda backbone: isinstance(backbone, MultiHeadModel), 'Expected MultiHeadModel')
-	def build_model(self, backbone: nn.Module) -> MultiHeadModel:
-		"""校验并返回 MultiHeadModel 实例。"""
-		return cast(MultiHeadModel, backbone)
-
 	@icontract.require(lambda batch: all(t.shape[0] == batch[0].shape[0] for t in batch[1].values()))
-	@icontract.require(
-		lambda self, batch: batch[1].keys() == self.model.num_classes.keys(), 'Target task keys do not match model output task keys'
-	)
+	@icontract.require(lambda self, batch: batch[1].keys() == self.model.num_classes.keys(), 'Target task keys do not match model output task keys')
 	@icontract.ensure(lambda result: result.ndim == 0)
 	def process(self, batch: tuple[Tensor, dict[str, Tensor]]) -> torch.Tensor:
 		"""执行单批计算并按任务头名称计算平均损失。"""
@@ -77,9 +68,7 @@ class MultiHeadClassificationMethod(Method[MultiHeadModel]):
 		"""使用 Trainer 执行推理并计算多任务分类评估指标。"""
 		need_probs = 'auroc' in metrics
 
-		@icontract.require(
-			lambda batch: batch[1].keys() == self.model.num_classes.keys(), 'Mismatch between target tasks and model output tasks'
-		)
+		@icontract.require(lambda batch: batch[1].keys() == self.model.num_classes.keys(), 'Mismatch between target tasks and model output tasks')
 		def predict_fn(batch: tuple[Tensor, dict[str, Tensor]]) -> dict[str, dict[str, Tensor]]:
 			images, targets = batch
 			logits_dict = self.inference_step(images)

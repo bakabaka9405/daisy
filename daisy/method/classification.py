@@ -70,11 +70,6 @@ class ClassificationMethod(Method[nn.Module]):
 			weight_decay=weight_decay,
 		)
 
-	@override
-	def build_model(self, backbone: nn.Module) -> nn.Module:
-		"""直接采用传入的完整分类模型。"""
-		return backbone
-
 	@icontract.require(lambda self, batch: self.mixup_fn is None or batch[0].shape[0] % 2 == 0, 'Mixup 要求批大小为偶数')
 	@icontract.require(lambda batch: batch[0].shape[0] == batch[1].shape[0])
 	@icontract.ensure(lambda result: result.ndim == 0)

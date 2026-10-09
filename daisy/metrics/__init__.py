@@ -13,7 +13,7 @@ from .dca import DcaCurve, DcaMode, compute_multiclass_dca_curves
 from .distribution import emd_score, js_divergence, label_histogram
 from .grouped import grouped_regression_scores, within_group_centered_pc, within_group_pc
 from .icc import icc_a1_score
-from .ordinal import expected_score, qwk_score, rps_score
+from .ordinal import evaluate_ordinal_scores, expected_score, qwk_score, rps_score
 from .regression import evaluate_regression_scores, mae_score, pc_score, rmse_score
 from .specificity import specificity_score
 
@@ -27,6 +27,7 @@ __all__ = [
 	'compute_multiclass_dca_curves',
 	'emd_score',
 	'evaluate_regression_scores',
+	'evaluate_ordinal_scores',
 	'expected_score',
 	'fast_calc_metrics',
 	'grouped_regression_scores',

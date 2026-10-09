@@ -3,16 +3,32 @@
 from pathlib import Path
 import time
 
+import icontract
 from timm import create_model
 import torch
 
+import daisy
 from daisy.classification import prepare_classification_training
 from daisy.method.classification import ClassificationMethod
 from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, RichEpochPrint, Trainer
 from ...feed import assert_label_range, feed
 from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
-from ...shared import get_classification_transform
 from .config import ClassificationConfig
+
+
+@icontract.require(
+	lambda name: name in {'rectangle_train', 'rectangle_val', 'rectangle_train_slight', 'stretch_train', 'stretch_val'}, 'Unknown transform'
+)
+def get_classification_transform(name: str):
+	"""根据名称获取分类任务 transform"""
+	transform_map = {
+		'rectangle_train': daisy.util.transform.get_rectangle_train_transform,
+		'rectangle_val': daisy.util.transform.get_rectangle_val_transform,
+		'rectangle_train_slight': daisy.util.transform.get_rectangle_train_transform_slight,
+		'stretch_train': daisy.util.transform.get_stretch_train_transform,
+		'stretch_val': daisy.util.transform.get_stretch_val_transform,
+	}
+	return transform_map[name]()
 
 
 def run(config: ClassificationConfig, device: torch.device) -> Path:
