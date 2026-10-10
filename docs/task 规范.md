@@ -7,7 +7,7 @@
 ## 2. task 系统架构
 
 - `base.py`：定义 Pydantic 配置基类 `BaseConfig`、`BaseMetaConfig`、`BaseOutputConfig` 与 `BaseTaskConfig`。`BaseTaskConfig` 继承 `BaseConfig`，由字段直接定义模型结构，统一管理 `task_type`、`meta`、`task_file` 与 `task_id`；
-- `protocol.py`：任务节点协议 `Task[R]`（`run(ctx) -> R`）、运行上下文 `RunContext`（`output_dir`、`device`、`child(key)`）、根任务类协议 `TaskType[C]`（`config_type`、以配置构造节点、`open_run(run_dir, config, device) -> TaskRun`）与已完成运行的分析视图协议 `TaskRun`（只读 `run_dir`、`config`）；
+- `protocol.py`：任务协议 `Task[C, R]`（只读 `config`、`run(ctx) -> R`）、运行上下文 `RunContext`（`output_dir`、`device`、`run(key, task)` 运行子任务）、根任务类协议 `TaskType[C]`（`config_type`、以配置构造任务、`open_run(run_dir, config, device) -> TaskRun`）与已完成运行的分析视图协议 `TaskRun`（只读 `run_dir`、`config`）；
 - `runner.py`：提供通用任务调度函数 `load_config(path) -> BaseTaskConfig` 与 `run_task(config, device) -> Path`，解析 `extends`、`imports` 与 `task_type`，以配置构造根任务节点并在输出目录中运行；
 - `runs.py`：`load_run_config(run_dir)` 与 `open_run(run_dir, run_type, device=None)`，读取已完成运行（见 2.4）；
 - `imports.py`：`import_files(paths)` 导入 task 文件 `imports` 字段声明的外部 Python 文件，触发其中的 task / feeder 注册；
@@ -21,7 +21,7 @@
 
 ### 2.1 新增任务
 
-任务是实现 `Task` 协议的节点：输入在构造时绑定，`run(ctx)` 在 `ctx.output_dir` 中执行并把结果返回给调用方。由 TOML 配置启动的根任务是以配置构造的节点类，实现 `TaskType` 协议：
+任务是实现 `Task` 协议的类：唯一输入为构造时传入的结构化配置（pydantic 模型，保存为 `config` 属性），`run(ctx)` 在 `ctx.output_dir` 中执行并把结果返回给调用方。由 TOML 配置启动的根任务还实现 `TaskType` 协议：
 
 ```python
 class ExampleTask:
@@ -39,7 +39,10 @@ class ExampleTask:
 
 - `config_type` 须标注为 `ClassVar`，类对象才满足 `TaskType` 协议；
 - 根任务不渲染输出路径、不保存快照，seed 由任务按自身配置设置（见 2.2）；
-- 子任务即父任务在 `run` 中构造并调用的普通节点，不注册，不需要 `config_type`：输入可以是配置片段、数据集、下标或其他节点返回的模型，在 `ctx.child(key)`（输出目录为 `output_dir / key`）或父任务自己的上下文中运行；嵌套方式、结果汇总、是否支持中断续跑均由父任务决定。例：`proj/mae_v5` 的评分交叉验证由根任务逐折构造训练子任务与新评分者适应子任务。
+- 子任务同样是 `Task`：配置继承 `BaseConfig`，不注册、不需要 `config_type` 与 `open_run`。父任务在 `run` 中构造子任务配置与子任务，经 `ctx.run(key, task)` 运行：创建 `output_dir / key`（`key` 可含 `/` 以嵌套），写入与根任务格式相同的 `task_snapshot.json`（见 2.2），返回子任务的结果；
+- 子任务需要的其他产物（如另一个子任务保存的模型）以路径写入其配置，使快照足以重建该子任务；嵌套方式、结果汇总、是否支持中断续跑均由父任务决定；
+- 父任务的分析视图以 `load_task_config(task_dir, config_type)` 读取子任务快照（见 2.4）；
+- 例：`proj/mae_v5` 的评分交叉验证由根任务逐折构造训练子任务（`fold{k}/`）与加载该折模型的新评分者适应子任务（`fold{k}/adapt/`）。
 
 内置任务：
 
@@ -61,8 +64,8 @@ class ExampleTask:
 `run_tasks` 对每个 run 依次：
 
 1. 创建渲染后的输出目录，打印运行头部（`print_task_header`）；
-2. 保存 `task_snapshot.json`（`runtime` 记录设备）；
-3. 以配置构造根任务节点，在 `RunContext(output_dir, device)` 中调用 `run`；
+2. 以配置构造根任务，`save_task_snapshot` 保存 `task_snapshot.json`：`task` 为任务类的完整名称，`runtime` 记录设备，其余为 `model_dump(mode='json', exclude_none=True)` 得到的配置；子任务的快照由 `RunContext.run` 以同一函数保存；
+3. 在 `RunContext(output_dir, device)` 中调用根任务的 `run`；
 4. 打印完成信息（`print_task_completed`），核对源码并写入 `provenance.json`（见 2.3）。
 
 seed 与其他运行期信息由任务自行处理：任务在 `run` 开始时按自身配置调用 `set_global_seed`，需要记录的派生量（如实际学习率）写入输出目录中的独立文件。
@@ -92,7 +95,8 @@ run.test_predictions  # 只读产物时不加载模型与数据
 run.predict('test')  # 首次访问时构建模型、加载最佳权重并重建数据划分
 ```
 
-- `load_run_config(run_dir)`：读取 `task_snapshot.json`，移除 `runtime` 与历史快照中的 `meta.commit`，按 `task_type` 选择已注册任务的 `config_type` 严格校验；不导入快照记录的 `imports`（历史路径可能已失效），外部任务须由调用方预先导入；配置字段已删除的历史快照校验失败并报错；
+- `load_run_config(run_dir)`：读取 `task_snapshot.json`，去掉 `task` 与 `runtime`，按 `task_type` 选择已注册根任务的 `config_type` 严格校验；不导入快照记录的 `imports`（历史路径可能已失效），外部任务须由调用方预先导入；配置字段已删除的历史快照校验失败并报错；
+- `load_task_config(task_dir, config_type)`：同上，但由调用方给出配置类，根任务与子任务通用；
 - `open_run(run_dir, run_type, device=None)`：调用该任务的 `open_run` 构建分析视图，返回值须为 `run_type` 实例，否则违约；`device` 默认自动选择 CUDA/CPU；
 - 分析视图为普通 dataclass，字段为 `run_dir`、`config`、`device`；模型、数据划分与产物以 `functools.cached_property` 在首次访问时加载，模型严格加载并处于 eval 模式；需要参数的操作（如 `loader(split, ...)`）为普通方法；
 - 数据划分、评估变换与推理等功能直接定义在运行对象中，不另设以配置为参数的模块级函数；任务的 `run` 以输出目录构建同一运行对象复用这些功能，训练中的模型直接赋给其 `model`；
@@ -186,7 +190,7 @@ num_classes = 3
 ### 4.3 配置序列化与示例生成
 
 - 示例构建：`build_example_config(task_type)` 通过 `get_task(task_type).config_type` 获取具体的配置类，直接实例化配置对象填充默认值，设置 `meta` 预设字段；`dataset` 为必填的任务写入占位 `feeder = '<feeder_id>'`；外部任务通过 `python -m daisy example <task_type> -i <file.py>` 先导入再导出；
-- 配置持久化：`save_config(config, path)` 通过 `config.model_dump(exclude={'task_file', 'task_id', 'imports', 'run_id', 'run_overrides', 'run_default'}, exclude_none=True)` 导出字典，使用 `tomli_w.dump` 写入 TOML 文件；`export_example_config(task_type, path)` 负责输出路径处理与文件写入。
+- 配置持久化：`save_config(config, path)` 通过 `config.model_dump(exclude={'task_file', 'task_id', 'imports', 'run_id', 'run_overrides'}, exclude_none=True)`（`run_default` 在配置模型中声明 `exclude=True`，不参与序列化） 导出字典，使用 `tomli_w.dump` 写入 TOML 文件；`export_example_config(task_type, path)` 负责输出路径处理与文件写入。
 
 ### 4.4 run 数组
 
@@ -214,7 +218,7 @@ id = "imagenet_mae_ffhq"
 - `run` 随 `extends` 继承：子文件未声明 `run` 时沿用父级的 `run`，声明时整体替换，`_remove = ["run"]` 则去掉继承来的 `run`；
 - 基础配置（不含任何条目）须能单独通过校验；
 - 各 run 的输出路径必须互不相同，通常在 `save_path` 中使用 `{run_id}`；
-- `task_snapshot.json` 记录 `run_id` 与 `run_overrides`（条目去掉 `id` 后的原文，含 `_remove` 与 `default`），无 `run` 时不出现。
+- `task_snapshot.json` 记录 `run_id` 与 `run_overrides`（条目去掉 `id` 后的原文，含 `_remove` 与 `default`）；无 `run` 时 `run_id` 为空字符串，`run_overrides` 不出现。
 
 ### 4.5 `_remove`：删除继承的值
 

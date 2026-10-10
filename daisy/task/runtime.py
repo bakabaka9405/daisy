@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import torch
 
 from daisy.util import save_json
 
 from .base import BaseTaskConfig
+
+if TYPE_CHECKING:
+	from .protocol import Task
 
 
 def format_output_path(save_path_template: str, config: BaseTaskConfig) -> Path:
@@ -40,21 +43,11 @@ def print_task_completed(output_path: Path) -> None:
 	print('=' * 60)
 
 
-def save_task_snapshot(
-	output_path: Path,
-	config: BaseTaskConfig,
-	*,
-	extra: dict[str, Any] | None = None,
-	filename: str = 'task_snapshot.json',
-) -> None:
-	"""保存 task 配置快照"""
-	# run_default 只影响选择哪些 run，条目原文（含 default）已记录在 run_overrides 中
-	snapshot = config.model_dump(mode='json', exclude={'task_file', 'run_default'}, exclude_none=True)
-	snapshot['task_id'] = config.task_id
-	if not config.run_id:
-		snapshot.pop('run_id')
-	if config.task_file is not None:
-		snapshot['task_file'] = str(config.task_file)
-	if extra:
-		snapshot['runtime'] = extra
-	save_json(output_path / filename, snapshot)
+def save_task_snapshot(output_dir: Path, task: Task[Any, Any], device: torch.device) -> None:
+	"""保存任务快照 task_snapshot.json：task 为任务类的完整名称，runtime 记录运行设备，其余为任务配置"""
+	snapshot = {
+		'task': f'{type(task).__module__}.{type(task).__qualname__}',
+		'runtime': {'device': str(device)},
+		**task.config.model_dump(mode='json', exclude_none=True),
+	}
+	save_json(output_dir / 'task_snapshot.json', snapshot)

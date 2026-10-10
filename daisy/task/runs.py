@@ -1,28 +1,37 @@
-"""已完成运行的读取：快照配置与任务提供的分析视图"""
+"""已完成运行的读取：根任务与子任务的快照配置、任务提供的分析视图"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import icontract
 import torch
 
-from .base import BaseTaskConfig
+from .base import BaseConfig, BaseTaskConfig
 from .protocol import TaskRun
 from .tasks import get_task
 
 
+def _read_snapshot(task_dir: Path) -> dict[str, Any]:
+	"""读取 task_snapshot.json 并去掉任务类名与运行环境，只留任务配置"""
+	snapshot = json.loads((task_dir / 'task_snapshot.json').read_text(encoding='utf-8'))
+	del snapshot['task'], snapshot['runtime']
+	return snapshot
+
+
+def load_task_config[C: BaseConfig](task_dir: Path, config_type: type[C]) -> C:
+	"""按 config_type 严格校验任务目录中的快照配置，根任务与子任务通用"""
+	return config_type.model_validate(_read_snapshot(task_dir))
+
+
 def load_run_config(run_dir: Path) -> BaseTaskConfig:
-	"""按快照中的 task_type 选择已注册任务的配置类，移除运行环境信息后校验 task_snapshot.json
+	"""按快照中的 task_type 选择已注册根任务的配置类，再校验快照配置
 
 	不导入快照记录的 imports（历史路径可能已失效），外部任务须由调用方预先导入注册。
 	"""
-	snapshot = json.loads((run_dir / 'task_snapshot.json').read_text(encoding='utf-8'))
-	snapshot.pop('runtime', None)
-	# 历史快照把源码版本写在 meta 中，当前由 provenance.json 单独记录
-	snapshot.get('meta', {}).pop('commit', None)
+	snapshot = _read_snapshot(run_dir)
 	return get_task(snapshot['task_type']).config_type.model_validate(snapshot)
 
 

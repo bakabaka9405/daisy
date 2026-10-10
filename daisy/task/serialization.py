@@ -78,7 +78,7 @@ def export_example_config(task_type: str, path: Path | None = None, *, force: bo
 
 def save_config(config: BaseTaskConfig, path: Path) -> None:
 	"""保存任务配置到 TOML 文件"""
-	data = config.model_dump(mode='json', exclude={'task_file', 'task_id', 'imports', 'run_id', 'run_overrides', 'run_default'}, exclude_none=True)
+	data = config.model_dump(mode='json', exclude={'task_file', 'task_id', 'imports', 'run_id', 'run_overrides'}, exclude_none=True)
 
 	with open(path, 'wb') as f:
 		tomli_w.dump(data, f)

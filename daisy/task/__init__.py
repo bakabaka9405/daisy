@@ -30,7 +30,7 @@ from .protocol import RunContext, Task, TaskRun, TaskType
 from .feed import assert_label_range, assert_multitask_label_range, feed
 from .imports import import_files
 from .runner import load_config, load_run_configs, run_task, run_tasks, select_runs
-from .runs import load_run_config, open_run
+from .runs import load_run_config, load_task_config, open_run
 from .serialization import build_example_config, export_example_config, save_config
 from .shared import (
 	DatasetConfig,
@@ -74,6 +74,7 @@ __all__ = [
 	'import_files',
 	# 已完成运行
 	'load_run_config',
+	'load_task_config',
 	'open_run',
 	'ClassificationRun',
 	'MAEPretrainRun',

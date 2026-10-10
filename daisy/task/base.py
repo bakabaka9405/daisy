@@ -54,4 +54,5 @@ class BaseTaskConfig(BaseConfig):
 	# task 文件 run 数组中当前条目的 id、重载内容与是否默认运行（加载后自动设置；无 run 时分别为空字符串、None 与 True）
 	run_id: Annotated[str, tyro.conf.Suppress] = ''
 	run_overrides: Annotated[dict[str, Any] | None, tyro.conf.Suppress] = None
-	run_default: Annotated[bool, tyro.conf.Suppress] = True
+	# 只影响选择哪些 run，不进入快照；条目原文（含 default）已记录在 run_overrides 中
+	run_default: Annotated[bool, tyro.conf.Suppress] = Field(default=True, exclude=True)
