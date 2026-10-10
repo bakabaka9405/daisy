@@ -24,7 +24,7 @@ from __future__ import annotations
 
 # 基础类
 from .base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
-from .protocol import Task, TaskRun
+from .protocol import RunContext, Task, TaskRun, TaskType
 
 # 主要接口
 from .feed import assert_label_range, assert_multitask_label_range, feed
@@ -54,8 +54,10 @@ __all__ = [
 	'BaseOutputConfig',
 	'BaseTaskConfig',
 	# 任务协议
+	'RunContext',
 	'Task',
 	'TaskRun',
+	'TaskType',
 	# 任务字典与查找
 	'TASKS',
 	'get_task',

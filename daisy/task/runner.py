@@ -18,8 +18,9 @@ import torch
 
 from .base import BaseTaskConfig
 from .imports import import_files
+from .protocol import RunContext
 from .provenance import SourceSnapshot, changed_repositories, modules_outside_snapshot, snapshot_sources
-from .runtime import format_output_path, save_json
+from .runtime import format_output_path, print_task_completed, print_task_header, save_json, save_task_snapshot
 from .tasks import get_task
 
 _merger = Merger([(dict, ['merge'])], ['override'], ['override'])
@@ -329,7 +330,8 @@ def run_tasks(
 
 	运行前检查各 run 渲染后的输出路径互不相同，避免结果互相覆盖；
 	再把相关仓库的工作区记录为快照 commit，已加载模块的源文件须全部在快照内（或属于 Python 安装）。
-	每个 run 结束后再次核对，在输出目录写入 provenance.json。
+	每个 run 创建输出目录并写入 task_snapshot.json 后，以配置构造根任务节点并在该目录中运行；
+	结束后再次核对，在输出目录写入 provenance.json。
 
 	Args:
 		configs: 各 run 的最终配置
@@ -344,9 +346,9 @@ def run_tasks(
 		device = torch.device(device)
 
 	# 第一阶段：每个输出路径只渲染一次，派发任务前检查冲突。
+	paths = [format_output_path(cast(Any, config).output.save_path, config).resolve() for config in configs]
 	seen: dict[Path, int] = {}
-	for i, config in enumerate(configs):
-		path = format_output_path(cast(Any, config).output.save_path, config).resolve()
+	for i, path in enumerate(paths):
 		if path in seen:
 			previous = seen[path]
 			raise ValueError(
@@ -365,10 +367,14 @@ def run_tasks(
 
 	# 第三阶段：按配置顺序运行任务，每个 run 结束后核对源码并写入溯源信息。
 	outputs: list[Path] = []
-	for i, config in enumerate(configs):
+	for i, (config, output_path) in enumerate(zip(configs, paths, strict=True)):
 		if len(configs) > 1:
 			print(f'\n##### Run {i + 1}/{len(configs)}: {config.run_id or config.task_id} #####')
-		output_path = get_task(config.task_type).run(config, device)
+		output_path.mkdir(parents=True, exist_ok=True)
+		print_task_header(config, device, output_path)
+		save_task_snapshot(output_path, config, extra={'device': str(device)})
+		get_task(config.task_type)(config).run(RunContext(output_path, device))
+		print_task_completed(output_path)
 		_check_modules(sources)
 		changed = changed_repositories(sources)
 		if changed:

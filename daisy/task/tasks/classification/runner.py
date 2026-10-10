@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 import time
+from typing import ClassVar
 
 import icontract
 from timm import create_model
@@ -15,10 +16,10 @@ from daisy.classification import prepare_classification_training
 from daisy.dataset.disk_dataset import DiskDataset
 from daisy.method.classification import ClassificationMethod
 from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, RichEpochPrint, Trainer
-from daisy.util import to_2tuple
+from daisy.util import set_global_seed, to_2tuple
 from daisy.util.data import Prefetcher, make_dataloader
 from ...feed import assert_label_range, feed
-from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
+from ...protocol import RunContext
 from .config import ClassificationConfig
 
 
@@ -79,26 +80,26 @@ class ClassificationRun:
 class ClassificationTask:
 	"""分类任务"""
 
-	config_type = ClassificationConfig
+	config_type: ClassVar = ClassificationConfig
 
-	def run(self, config: ClassificationConfig, device: torch.device) -> Path:
+	def __init__(self, config: ClassificationConfig) -> None:
+		self.config = config
+
+	def run(self, ctx: RunContext) -> None:
 		"""执行分类训练任务"""
 		# 初始化运行环境
+		config = self.config
 		training_cfg = config.training
-		run_context = prepare_task_run(config, device, seed=training_cfg.seed)
-		output_path = run_context.output_path
+		output_path = ctx.output_dir
+		if training_cfg.seed is not None:
+			set_global_seed(training_cfg.seed)
 
 		# 加载数据集并校验划分与标签范围
 		print('\nLoading dataset...')
 		num_classes = config.model.num_classes
-		datasets = ClassificationRun(output_path, config, device).datasets
+		datasets = ClassificationRun(output_path, config, ctx.device).datasets
 		train_dataset = datasets['train']
 		val_dataset = datasets['val']
-		save_run_snapshot(
-			output_path,
-			config,
-			run_context,
-		)
 
 		print(f'Train samples: {len(train_dataset)}')
 		print(f'Val samples: {len(val_dataset)}')
@@ -136,7 +137,7 @@ class ClassificationTask:
 		)
 
 		trainer = Trainer(
-			device=device,
+			device=ctx.device,
 			use_amp=training_cfg.use_amp,
 			accum_iter=training_cfg.accum_iter,
 			clip_grad=training_cfg.max_norm if training_cfg.clip_grad else None,
@@ -211,9 +212,6 @@ class ClassificationTask:
 
 		trainer.fit(train_loader, epochs=training_cfg.epochs)
 
-		print_task_completed(output_path)
-
-		return output_path
-
-	def open_run(self, run_dir: Path, config: ClassificationConfig, device: torch.device) -> ClassificationRun:
+	@classmethod
+	def open_run(cls, run_dir: Path, config: ClassificationConfig, device: torch.device) -> ClassificationRun:
 		return ClassificationRun(run_dir, config, device)

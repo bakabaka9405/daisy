@@ -7,13 +7,13 @@
 ## 2. task 系统架构
 
 - `base.py`：定义 Pydantic 配置基类 `BaseConfig`、`BaseMetaConfig`、`BaseOutputConfig` 与 `BaseTaskConfig`。`BaseTaskConfig` 继承 `BaseConfig`，由字段直接定义模型结构，统一管理 `task_type`、`meta`、`task_file` 与 `task_id`；
-- `protocol.py`：任务协议 `Task[C]`（`config_type`、`run(config, device) -> Path`、`open_run(run_dir, config, device) -> TaskRun`）与已完成运行的分析视图协议 `TaskRun`（只读 `run_dir`、`config`）；
-- `runner.py`：提供通用任务调度函数 `load_config(path) -> BaseTaskConfig` 与 `run_task(config, device) -> Path`，解析 `extends`、`imports` 与 `task_type` 并分发至任务的 `run`；
+- `protocol.py`：任务节点协议 `Task[R]`（`run(ctx) -> R`）、运行上下文 `RunContext`（`output_dir`、`device`、`child(key)`）、根任务类协议 `TaskType[C]`（`config_type`、以配置构造节点、`open_run(run_dir, config, device) -> TaskRun`）与已完成运行的分析视图协议 `TaskRun`（只读 `run_dir`、`config`）；
+- `runner.py`：提供通用任务调度函数 `load_config(path) -> BaseTaskConfig` 与 `run_task(config, device) -> Path`，解析 `extends`、`imports` 与 `task_type`，以配置构造根任务节点并在输出目录中运行；
 - `runs.py`：`load_run_config(run_dir)` 与 `open_run(run_dir, run_type, device=None)`，读取已完成运行（见 2.4）；
 - `imports.py`：`import_files(paths)` 导入 task 文件 `imports` 字段声明的外部 Python 文件，触发其中的 task / feeder 注册；
-- `tasks/__init__.py`：维护任务字典 `TASKS: dict[str, Task]`，将任务类型映射为任务协议对象，提供 `get_task(task_type) -> Task` 与类装饰器 `register_task(name)`；
+- `tasks/__init__.py`：维护任务字典 `TASKS: dict[str, TaskType]`，将任务类型映射为根任务类，提供 `get_task(task_type) -> TaskType` 与类装饰器 `register_task(name)`；
 - `feed.py`：`feed(config, seed=...)` 调用 feeder 构建数据划分并执行通用检查，`assert_label_range` / `assert_multitask_label_range` 校验标签范围；
-- `runtime.py`：统一处理运行头部、输出目录、运行快照和完成信息；
+- `runtime.py`：输出路径渲染、运行头部与完成信息、任务快照与 JSON 保存，供 runner 与任务使用；
 - `provenance.py`：把运行涉及的 git 仓库工作区记录为隐藏 commit（源码快照），并核对已加载模块与运行期间的源码改动；
 - `serialization.py`：提供 `build_example_config`、`export_example_config` 与 `save_config`，负责任务配置序列化与示例导出；
 - `shared/`：共享配置模型（含 `FeederConfig` / `DatasetConfig`）与 transform；
@@ -21,42 +21,51 @@
 
 ### 2.1 新增任务
 
-任务是实现 `Task` 协议的无参构造类：
+任务是实现 `Task` 协议的节点：输入在构造时绑定，`run(ctx)` 在 `ctx.output_dir` 中执行并把结果返回给调用方。由 TOML 配置启动的根任务是以配置构造的节点类，实现 `TaskType` 协议：
 
 ```python
 class ExampleTask:
-	config_type = ExampleConfig
+	config_type: ClassVar = ExampleConfig
 
-	def run(self, config: ExampleConfig, device: torch.device) -> Path: ...
+	def __init__(self, config: ExampleConfig) -> None:
+		self.config = config
 
-	def open_run(self, run_dir: Path, config: ExampleConfig, device: torch.device) -> ExampleRun:
+	def run(self, ctx: RunContext) -> None: ...
+
+	@classmethod
+	def open_run(cls, run_dir: Path, config: ExampleConfig, device: torch.device) -> ExampleRun:
 		return ExampleRun(run_dir, config, device)
 ```
+
+- `config_type` 须标注为 `ClassVar`，类对象才满足 `TaskType` 协议；
+- 根任务不渲染输出路径、不保存快照，seed 由任务按自身配置设置（见 2.2）；
+- 子任务即父任务在 `run` 中构造并调用的普通节点，不注册，不需要 `config_type`：输入可以是配置片段、数据集、下标或其他节点返回的模型，在 `ctx.child(key)`（输出目录为 `output_dir / key`）或父任务自己的上下文中运行；嵌套方式、结果汇总、是否支持中断续跑均由父任务决定。例：`proj/mae_v5` 的评分交叉验证由根任务逐折构造训练子任务与新评分者适应子任务。
 
 内置任务：
 
 1. 在 `tasks/<task_name>/` 中创建 `config.py` 与 `runner.py`：
    - `config.py` 定义继承 `BaseTaskConfig` 的具体配置类，声明字段 `task_type: Annotated[Literal['<task_name>'], tyro.conf.Suppress] = '<task_name>'`；
    - `runner.py` 实现任务类与分析视图类（见 2.4）；
-2. 在 `tasks/__init__.py` 的静态字典 `TASKS` 中显式添加任务条目 `'<task_name>': ExampleTask()`；
+2. 在 `tasks/__init__.py` 的静态字典 `TASKS` 中显式添加任务条目 `'<task_name>': ExampleTask`；
 3. 跨任务复用的配置放入 `shared/`；
 4. 公开对象在 `daisy/task/__init__.py` 显式导出，外部代码统一从 `daisy.task` 导入。
 
 外部任务（项目目录中的 Python 文件）：
 
 1. 配置类同上，定义在模块顶层；
-2. 任务类使用 `@register_task('<task_name>')` 装饰，注册其无参构造的实例；`name` 须与 `config_type` 的 `task_type` 默认值一致，且未被注册；
+2. 根任务类使用 `@register_task('<task_name>')` 装饰，注册类本身；`name` 须与 `config_type` 的 `task_type` 默认值一致，且未被注册；
 3. task 文件通过顶层 `imports` 字段导入该文件，统一以 `python -m daisy run <task.toml>` 运行，外部文件不再提供命令行入口。
 
 ### 2.2 运行生命周期
 
-runner 复用 `runtime.py`：
+`run_tasks` 对每个 run 依次：
 
-- `prepare_task_run()`：统一 seed、banner 与输出目录；
-- `save_run_snapshot()`：保存 `task_snapshot.json`，额外运行信息通过 `extra` 追加；
-- `print_task_completed()`：统一任务完成输出。
+1. 创建渲染后的输出目录，打印运行头部（`print_task_header`）；
+2. 保存 `task_snapshot.json`（`runtime` 记录设备）；
+3. 以配置构造根任务节点，在 `RunContext(output_dir, device)` 中调用 `run`；
+4. 打印完成信息（`print_task_completed`），核对源码并写入 `provenance.json`（见 2.3）。
 
-源码版本不由任务记录，而由 `run_tasks` 统一处理（见 2.3）。
+seed 与其他运行期信息由任务自行处理：任务在 `run` 开始时按自身配置调用 `set_global_seed`，需要记录的派生量（如实际学习率）写入输出目录中的独立文件。
 
 ### 2.3 源码快照
 
@@ -290,7 +299,7 @@ training.seed = [42, 43, 44]
 
 预训练使用 `MAEPretrainMethod` 与 `make_dataloader`，配合 Trainer 插件执行。
 
-- 学习率：`eff_batch_size = training.batch_size * training.accum_iter`，`actual_lr = training.blr * eff_batch_size / 256.0`。使用 cosine 调度，最终学习率写入快照的 `runtime.resolved_lr`；
+- 学习率：`eff_batch_size = training.batch_size * training.accum_iter`，`actual_lr = training.blr * eff_batch_size / 256.0`。使用 cosine 调度，实际学习率与训练 transform 写入 `runtime.json`（`resolved_lr`、`train_transform`）；
 - 预训练恢复：`training.resume` 加载 `model`、`optimizer`、`scaler`，从零基编号 `checkpoint['epoch'] + 1` 继续至目标 `epochs`，优先于 `model.timm_pretrained` 初始化；
 - 预训练保存：每轮更新完整训练状态 `checkpoint_latest.pth`，最终轮保存 `checkpoint_{epoch:04d}.pth`；`training.save_freq > 0` 时额外按该间隔保存编号检查点；
 - 输出：`output.save_path` 指定目录，`output.log` 启用 `logs/` 下的 CSV 日志。预训练日志为 `mae_log_YYYYMMDD_HHMMSS.csv`，记录训练损失与学习率。

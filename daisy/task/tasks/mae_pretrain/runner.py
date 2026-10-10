@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 import time
+from typing import ClassVar
 
 import icontract
 import torch
@@ -14,10 +15,11 @@ from daisy.dataset.disk_dataset import DiskDataset
 from daisy.method.mae import MAEPretrainMethod, mae_reconstruction_loss
 from daisy.model.mae import MaskedAutoencoderViT, create_mae_model, load_timm_pretrained_encoder_weights
 from daisy.training import CosineAnnealingLR, CSVLog, RichEpochPrint, Timer, Trainer, TrainState
-from daisy.util import Prefetcher, make_dataloader, to_2tuple
+from daisy.util import Prefetcher, make_dataloader, set_global_seed, to_2tuple
 from daisy.util.transform import LazyNormalization, LazyNormalizedTensor, get_rectangle_val_transform
 from ...feed import feed
-from ...runtime import prepare_task_run, print_task_completed, save_run_snapshot
+from ...protocol import RunContext
+from ...runtime import save_json
 from .config import MAEPretrainConfig
 
 MEAN = (0.485, 0.456, 0.406)
@@ -103,13 +105,19 @@ class MAEPretrainRun:
 class MAEPretrainTask:
 	"""MAE 预训练任务"""
 
-	config_type = MAEPretrainConfig
+	config_type: ClassVar = MAEPretrainConfig
 
-	def run(self, config: MAEPretrainConfig, device: torch.device) -> Path:
+	def __init__(self, config: MAEPretrainConfig) -> None:
+		self.config = config
+
+	def run(self, ctx: RunContext) -> None:
 		"""执行 MAE 预训练任务"""
+		config = self.config
+		device = ctx.device
 		training_cfg = config.training
-		run_context = prepare_task_run(config, device, seed=training_cfg.seed)
-		output_path = run_context.output_path
+		output_path = ctx.output_dir
+		if training_cfg.seed is not None:
+			set_global_seed(training_cfg.seed)
 
 		# 计算实际学习率与有效批大小
 		eff_batch_size = training_cfg.batch_size * training_cfg.accum_iter
@@ -134,10 +142,7 @@ class MAEPretrainTask:
 			ratio_max=transform_cfg.ratio_max,
 			hflip=transform_cfg.hflip,
 		)
-		save_run_snapshot(
-			output_path, config, run_context,
-			extra={'resolved_lr': lr, 'train_transform': repr(transform)},
-		)
+		save_json(output_path / 'runtime.json', {'resolved_lr': lr, 'train_transform': repr(transform)})
 		transformed_dataset = DiskDataset(
 			dataset.file_paths,
 			None,
@@ -249,15 +254,12 @@ class MAEPretrainTask:
 			print(f'Resumed from epoch {start_epoch}')
 
 		if start_epoch >= epochs:
-			print_task_completed(output_path)
-			return output_path
+			return
 
 		print('Ready to train...')
 		print('\nStarting MAE pretraining...')
 		trainer.fit(loader, epochs, start_epoch=start_epoch)
 
-		print_task_completed(output_path)
-		return output_path
-
-	def open_run(self, run_dir: Path, config: MAEPretrainConfig, device: torch.device) -> MAEPretrainRun:
+	@classmethod
+	def open_run(cls, run_dir: Path, config: MAEPretrainConfig, device: torch.device) -> MAEPretrainRun:
 		return MAEPretrainRun(run_dir, config, device)
