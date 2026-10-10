@@ -9,19 +9,16 @@ import torch
 import torch.nn.functional as F
 
 from daisy.typing import ImageF32, MatrixF32
+from daisy.util import to_2tuple
 
 
-def _display_size(input_size: int | tuple[int, int]) -> tuple[int, int]:
-	return (input_size, input_size) if isinstance(input_size, int) else (input_size[0], input_size[1])
-
-
-@icontract.require(lambda input_size: min(_display_size(input_size)) > 0)
+@icontract.require(lambda input_size: min(to_2tuple(input_size)) > 0)
 @icontract.require(lambda heatmap: heatmap.ndim == 2, 'heatmap must have shape (H, W)')
 @icontract.require(lambda image: image.ndim == 3 and image.shape[0] == 3, 'image must have shape (3, H, W)')
 @icontract.ensure(lambda result: bool(np.all((result[1] >= 0) & (result[1] <= 1 + 1e-6))))
 @icontract.ensure(lambda result: bool(np.all((result[0] >= 0) & (result[0] <= 1))))
-@icontract.ensure(lambda input_size, result: result[1].shape == _display_size(input_size) + (3,))
-@icontract.ensure(lambda input_size, result: result[0].shape == _display_size(input_size))
+@icontract.ensure(lambda input_size, result: result[1].shape == to_2tuple(input_size) + (3,))
+@icontract.ensure(lambda input_size, result: result[0].shape == to_2tuple(input_size))
 def show_cam_on_image(
 	image: torch.Tensor,
 	heatmap: torch.Tensor | MatrixF32,
@@ -40,7 +37,7 @@ def show_cam_on_image(
 			- overlay: JET 颜色映射叠加后的图像 ndarray，shape (H, W, 3)，范围 [0, 1]
 	"""
 	# 阶段 1: 预处理背景图像
-	height, width = _display_size(input_size)
+	height, width = to_2tuple(input_size)
 
 	img = image.detach().cpu().numpy().transpose(1, 2, 0)
 	img = np.float32(img)

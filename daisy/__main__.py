@@ -17,6 +17,8 @@ import tyro
 import tyro.conf
 import psutil
 
+from daisy.task import export_example_config, import_files, load_config, load_run_configs, run_tasks, select_runs
+
 
 @dataclass(slots=True, frozen=True)
 class Run:
@@ -70,8 +72,6 @@ type Command = (
 
 def cmd_list(cmd: ListTasks) -> None:
 	"""列出所有任务"""
-	from daisy.task import load_config
-
 	tasks_dir = Path(cmd.tasks_dir)
 	if not tasks_dir.exists():
 		print(f'任务目录不存在: {tasks_dir}')
@@ -97,8 +97,6 @@ def cmd_list(cmd: ListTasks) -> None:
 
 def cmd_example(cmd: Example) -> None:
 	"""导出任务示例配置"""
-	from daisy.task import export_example_config, import_files
-
 	import_files(cmd.imports)
 	output_path = export_example_config(cmd.task_type, cmd.output, force=cmd.force)
 	print(f'已导出示例配置: {output_path}')
@@ -117,8 +115,6 @@ def main(argv: Sequence[str] | None = None) -> None:
 				if mask <= 0:
 					raise ValueError('CPU affinity mask must be positive.')
 				psutil.Process().cpu_affinity([i for i in range(mask.bit_length()) if mask & (1 << i)])
-
-			from daisy.task import load_run_configs, run_tasks, select_runs
 
 			loaded = select_runs(load_run_configs(command.task), command.runs)
 			configs = [tyro.cli(type(c), default=c, args=command.overrides, prog='daisy run TASK --') for c in loaded]

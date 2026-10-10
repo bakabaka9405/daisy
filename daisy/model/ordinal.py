@@ -51,6 +51,10 @@ class OrdinalHead[Output](nn.Module, ABC):
 		"""解码为形状 (B,) 的 long 类别索引。"""
 		...
 
+	def high_lr_parameters(self) -> tuple[nn.Parameter, ...]:
+		"""返回需要较大学习率的参数。"""
+		return ()
+
 
 class ClassificationHead(OrdinalHead[Tensor]):
 	"""线性分类头，共享 argmax 解码并由 criterion 指定训练目标。"""
@@ -74,6 +78,9 @@ class ClassificationHead(OrdinalHead[Tensor]):
 	@override
 	def decode(self, output: Tensor) -> Tensor:
 		return output.argmax(dim=1)
+
+	def probabilities(self, output: Tensor) -> Tensor:
+		return output.softmax(dim=1)
 
 
 class ScalarHead(OrdinalHead[Tensor]):
@@ -124,6 +131,23 @@ class CLMHead(OrdinalHead[Tensor]):
 		self.threshold = nn.Parameter(torch.zeros(()))
 		self.delta = nn.Parameter(torch.zeros(num_classes - 2))
 
+	def get_ordered_thresholds(self) -> Tensor:
+		gaps = F.softplus(self.delta)
+		return self.threshold + torch.cat([gaps.new_zeros(1), gaps.cumsum(dim=0)])
+
+	@torch.no_grad()
+	@icontract.require(lambda counts: bool((counts > 0).all()))
+	@icontract.require(lambda self, counts: counts.shape == (self.num_classes,))
+	def init_from_counts(self, counts: Tensor) -> None:
+		"""根据平滑后的正类别计数初始化阈值。"""
+		tau = torch.logit(counts.cumsum(dim=0)[:-1] / counts.sum())
+		self.threshold.copy_(tau[0])
+		self.delta.copy_(torch.log(torch.expm1(tau.diff())))
+
+	@override
+	def high_lr_parameters(self) -> tuple[nn.Parameter, ...]:
+		return self.threshold, self.delta
+
 	@override
 	@icontract.require(lambda self, features: features.shape[1] == self.in_features)
 	@icontract.require(lambda features: features.ndim == 2)
@@ -138,6 +162,9 @@ class CLMHead(OrdinalHead[Tensor]):
 	def decode(self, output: Tensor) -> Tensor:
 		return output.argmax(dim=1)
 
+	def probabilities(self, output: Tensor) -> Tensor:
+		return output.exp()
+
 
 class CORALHead(OrdinalHead[Tensor]):
 	"""共享线性权重和独立阈值偏置，输出累积阈值 logits。"""
@@ -146,6 +173,18 @@ class CORALHead(OrdinalHead[Tensor]):
 		super().__init__(in_features, num_classes)
 		self.fc = nn.Linear(in_features, 1, bias=False)
 		self.coral_bias = nn.Parameter(torch.linspace(1.0, -1.0, num_classes - 1))
+
+	@torch.no_grad()
+	@icontract.require(lambda counts: bool((counts > 0).all()))
+	@icontract.require(lambda self, counts: counts.shape == (self.num_classes,))
+	def init_from_counts(self, counts: Tensor) -> None:
+		"""根据平滑后的正类别计数初始化阈值偏置。"""
+		tau = torch.logit(counts.cumsum(dim=0)[:-1] / counts.sum())
+		self.coral_bias.copy_(-tau)
+
+	@override
+	def high_lr_parameters(self) -> tuple[nn.Parameter, ...]:
+		return (self.coral_bias,)
 
 	@override
 	@icontract.require(lambda self, features: features.shape[1] == self.in_features)
@@ -161,6 +200,11 @@ class CORALHead(OrdinalHead[Tensor]):
 	def decode(self, output: Tensor) -> Tensor:
 		return (output > 0).sum(dim=1).long()
 
+	def probabilities(self, output: Tensor) -> Tensor:
+		cumulative = output.sigmoid()
+		boundaries = torch.cat([torch.ones_like(cumulative[:, :1]), cumulative, torch.zeros_like(cumulative[:, :1])], dim=1)
+		return boundaries[:, :-1] - boundaries[:, 1:]
+
 
 class CORNHead(OrdinalHead[Tensor]):
 	"""条件有序回归头，输出各条件阈值 logits。"""
@@ -168,6 +212,15 @@ class CORNHead(OrdinalHead[Tensor]):
 	def __init__(self, in_features: int, num_classes: int) -> None:
 		super().__init__(in_features, num_classes)
 		self.fc = nn.Linear(in_features, num_classes - 1)
+
+	@torch.no_grad()
+	@icontract.require(lambda counts: bool((counts > 0).all()))
+	@icontract.require(lambda self, counts: counts.shape == (self.num_classes,))
+	def init_from_counts(self, counts: Tensor) -> None:
+		"""根据平滑后的正类别计数初始化条件阈值偏置。"""
+		tail_counts = counts.flip(0).cumsum(dim=0).flip(0)
+		assert self.fc.bias is not None
+		self.fc.bias.copy_(torch.logit(tail_counts[1:] / tail_counts[:-1]))
 
 	@override
 	@icontract.require(lambda self, features: features.shape[1] == self.in_features)
@@ -182,6 +235,11 @@ class CORNHead(OrdinalHead[Tensor]):
 	@override
 	def decode(self, output: Tensor) -> Tensor:
 		return (output.sigmoid().cumprod(dim=1) > 0.5).sum(dim=1).long()
+
+	def probabilities(self, output: Tensor) -> Tensor:
+		cumulative = output.sigmoid().cumprod(dim=1)
+		boundaries = torch.cat([torch.ones_like(cumulative[:, :1]), cumulative, torch.zeros_like(cumulative[:, :1])], dim=1)
+		return boundaries[:, :-1] - boundaries[:, 1:]
 
 
 class ContrastiveClassificationHead(OrdinalHead[tuple[Tensor, Tensor]]):
@@ -207,6 +265,9 @@ class ContrastiveClassificationHead(OrdinalHead[tuple[Tensor, Tensor]]):
 	@override
 	def decode(self, output: tuple[Tensor, Tensor]) -> Tensor:
 		return output[0].argmax(dim=1)
+
+	def probabilities(self, output: tuple[Tensor, Tensor]) -> Tensor:
+		return output[0].softmax(dim=1)
 
 
 HEADS: dict[str, Callable[..., OrdinalHead[Any]]] = {

@@ -7,31 +7,45 @@
 ## 2. task 系统架构
 
 - `base.py`：定义 Pydantic 配置基类 `BaseConfig`、`BaseMetaConfig`、`BaseOutputConfig` 与 `BaseTaskConfig`。`BaseTaskConfig` 继承 `BaseConfig`，由字段直接定义模型结构，统一管理 `task_type`、`meta`、`task_file` 与 `task_id`；
-- `runner.py`：提供通用任务调度函数 `load_config(path) -> BaseTaskConfig` 与 `run_task(config, device) -> Path`，解析 `extends`、`imports` 与 `task_type` 并分发至任务执行函数；
+- `protocol.py`：任务协议 `Task[C]`（`config_type`、`run(config, device) -> Path`、`open_run(run_dir, config, device) -> TaskRun`）与已完成运行的分析视图协议 `TaskRun`（只读 `run_dir`、`config`）；
+- `runner.py`：提供通用任务调度函数 `load_config(path) -> BaseTaskConfig` 与 `run_task(config, device) -> Path`，解析 `extends`、`imports` 与 `task_type` 并分发至任务的 `run`；
+- `runs.py`：`load_run_config(run_dir)` 与 `open_run(run_dir, run_type, device=None)`，读取已完成运行（见 2.4）；
 - `imports.py`：`import_files(paths)` 导入 task 文件 `imports` 字段声明的外部 Python 文件，触发其中的 task / feeder 注册；
-- `tasks/__init__.py`：维护任务字典 `TASKS: dict[str, TaskEntry]`，将任务类型映射为 `(ConcreteConfig, run)` 元组，提供 `get_task(task_type) -> TaskEntry` 与装饰器 `register_task(name)`；
+- `tasks/__init__.py`：维护任务字典 `TASKS: dict[str, Task]`，将任务类型映射为任务协议对象，提供 `get_task(task_type) -> Task` 与类装饰器 `register_task(name)`；
 - `feed.py`：`feed(config, seed=...)` 调用 feeder 构建数据划分并执行通用检查，`assert_label_range` / `assert_multitask_label_range` 校验标签范围；
 - `runtime.py`：统一处理运行头部、输出目录、运行快照和完成信息；
 - `provenance.py`：把运行涉及的 git 仓库工作区记录为隐藏 commit（源码快照），并核对已加载模块与运行期间的源码改动；
 - `serialization.py`：提供 `build_example_config`、`export_example_config` 与 `save_config`，负责任务配置序列化与示例导出；
 - `shared/`：共享配置模型（含 `FeederConfig` / `DatasetConfig`）与 transform；
-- `tasks/<task_name>/`：任务专属配置与执行逻辑。每个任务模块包含 `config.py` 与实现 `run(config: ConcreteConfig, device: torch.device) -> Path` 的 `runner.py`。
+- `tasks/<task_name>/`：任务专属配置与执行逻辑。每个任务模块包含 `config.py` 与实现 `Task` 协议的任务类及其分析视图所在的 `runner.py`。
 
 ### 2.1 新增任务
+
+任务是实现 `Task` 协议的无参构造类：
+
+```python
+class ExampleTask:
+	config_type = ExampleConfig
+
+	def run(self, config: ExampleConfig, device: torch.device) -> Path: ...
+
+	def open_run(self, run_dir: Path, config: ExampleConfig, device: torch.device) -> ExampleRun:
+		return ExampleRun(run_dir, config, device)
+```
 
 内置任务：
 
 1. 在 `tasks/<task_name>/` 中创建 `config.py` 与 `runner.py`：
    - `config.py` 定义继承 `BaseTaskConfig` 的具体配置类，声明字段 `task_type: Annotated[Literal['<task_name>'], tyro.conf.Suppress] = '<task_name>'`；
-   - `runner.py` 实现常规函数 `run(config: ConcreteConfig, device: torch.device) -> Path` 执行任务逻辑；
-2. 在 `tasks/__init__.py` 的静态字典 `TASKS` 中显式添加任务条目 `'<task_name>': (ConcreteConfig, run_<task_name>)`；
+   - `runner.py` 实现任务类与分析视图类（见 2.4）；
+2. 在 `tasks/__init__.py` 的静态字典 `TASKS` 中显式添加任务条目 `'<task_name>': ExampleTask()`；
 3. 跨任务复用的配置放入 `shared/`；
 4. 公开对象在 `daisy/task/__init__.py` 显式导出，外部代码统一从 `daisy.task` 导入。
 
 外部任务（项目目录中的 Python 文件）：
 
 1. 配置类同上，定义在模块顶层；
-2. 执行函数使用 `@register_task('<task_name>')` 装饰，配置类由首参注解推导，且须与配置类 `task_type` 默认值一致；
+2. 任务类使用 `@register_task('<task_name>')` 装饰，注册其无参构造的实例；`name` 须与 `config_type` 的 `task_type` 默认值一致，且未被注册；
 3. task 文件通过顶层 `imports` 字段导入该文件，统一以 `python -m daisy run <task.toml>` 运行，外部文件不再提供命令行入口。
 
 ### 2.2 运行生命周期
@@ -57,6 +71,23 @@ runner 复用 `runtime.py`：
 复现某次运行的代码：`git worktree add <目录> <commit>`（各仓库分别执行）。快照引用可按前缀清理：`git for-each-ref --format='%(refname)' refs/daisy/runs/` 配合 `git update-ref -d`。
 
 函数内导入在运行中途才加载模块，可能读到快照之后被修改的源码；项目代码应在启动时全部加载（proj 通过 ruff 的 `PLC0415` 禁止 `src/` 中的函数内导入）。
+
+### 2.4 已完成运行的分析
+
+离线统计分析通过运行目录复用配置、产物与模型，不恢复训练状态：
+
+```python
+import_files([Path('src/mae_v5/classification/task.py')])  # 外部任务先导入注册
+run = open_run(run_dir, MultiTaskClassificationRun, device=device)
+run.test_predictions  # 只读产物时不加载模型与数据
+run.predict('test')  # 首次访问时构建模型、加载最佳权重并重建数据划分
+```
+
+- `load_run_config(run_dir)`：读取 `task_snapshot.json`，移除 `runtime` 与历史快照中的 `meta.commit`，按 `task_type` 选择已注册任务的 `config_type` 严格校验；不导入快照记录的 `imports`（历史路径可能已失效），外部任务须由调用方预先导入；配置字段已删除的历史快照校验失败并报错；
+- `open_run(run_dir, run_type, device=None)`：调用该任务的 `open_run` 构建分析视图，返回值须为 `run_type` 实例，否则违约；`device` 默认自动选择 CUDA/CPU；
+- 分析视图为普通 dataclass，字段为 `run_dir`、`config`、`device`；模型、数据划分与产物以 `functools.cached_property` 在首次访问时加载，模型严格加载并处于 eval 模式；需要参数的操作（如 `loader(split, ...)`）为普通方法；
+- 数据划分、评估变换与推理等功能直接定义在运行对象中，不另设以配置为参数的模块级函数；任务的 `run` 以输出目录构建同一运行对象复用这些功能，训练中的模型直接赋给其 `model`；
+- 内置视图：`ClassificationRun`（`model` 读取 `best_model.pth`、`trainer`、`datasets`、`loader`）、`MAEPretrainRun`（`model` 读取 `checkpoint_latest.pth`、`trainer`、`datasets`、`loader`、`loss`）。
 
 ## 3. CLI 参数与执行机制
 
@@ -145,7 +176,7 @@ num_classes = 3
 
 ### 4.3 配置序列化与示例生成
 
-- 示例构建：`build_example_config(task_type)` 通过 `get_task(task_type)` 获取具体的配置类，直接实例化配置对象填充默认值，设置 `meta` 预设字段；`dataset` 为必填的任务写入占位 `feeder = '<feeder_id>'`；外部任务通过 `python -m daisy example <task_type> -i <file.py>` 先导入再导出；
+- 示例构建：`build_example_config(task_type)` 通过 `get_task(task_type).config_type` 获取具体的配置类，直接实例化配置对象填充默认值，设置 `meta` 预设字段；`dataset` 为必填的任务写入占位 `feeder = '<feeder_id>'`；外部任务通过 `python -m daisy example <task_type> -i <file.py>` 先导入再导出；
 - 配置持久化：`save_config(config, path)` 通过 `config.model_dump(exclude={'task_file', 'task_id', 'imports', 'run_id', 'run_overrides', 'run_default'}, exclude_none=True)` 导出字典，使用 `tomli_w.dump` 写入 TOML 文件；`export_example_config(task_type, path)` 负责输出路径处理与文件写入。
 
 ### 4.4 run 数组

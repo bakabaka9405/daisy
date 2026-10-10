@@ -21,7 +21,7 @@ class _PlaceholderParams(BaseModel):
 @icontract.ensure(lambda task_type, result: result.task_type == task_type)
 def build_example_config(task_type: str) -> BaseTaskConfig:
 	"""根据任务类型构建示例任务配置"""
-	config_cls, _ = get_task(task_type)
+	config_cls = get_task(task_type).config_type
 
 	# 必填 dataset 无通用默认值，以跳过校验的占位 feeder 代替
 	dataset_field = config_cls.model_fields.get('dataset')

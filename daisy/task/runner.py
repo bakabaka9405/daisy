@@ -186,8 +186,7 @@ def _build_config(data: dict[str, Any], path: Path, imports: list[Path]) -> Base
 	task_type = data.get('task_type')
 	if not isinstance(task_type, str) or not task_type:
 		raise ValueError(f"Missing or invalid 'task_type' in task file: {path}. Expected non-empty string.")
-	config_cls, _ = get_task(task_type)
-	config = config_cls.model_validate(data)
+	config = get_task(task_type).config_type.model_validate(data)
 	config.task_file = path
 	config.task_id = path.stem
 	config.imports = tuple(imports)
@@ -369,8 +368,7 @@ def run_tasks(
 	for i, config in enumerate(configs):
 		if len(configs) > 1:
 			print(f'\n##### Run {i + 1}/{len(configs)}: {config.run_id or config.task_id} #####')
-		_, run_fn = get_task(config.task_type)
-		output_path = run_fn(config, device)
+		output_path = get_task(config.task_type).run(config, device)
 		_check_modules(sources)
 		changed = changed_repositories(sources)
 		if changed:

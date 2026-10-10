@@ -12,6 +12,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from daisy.method.base import Method
+from daisy.model.moco.lars import LARS
 from daisy.training.state import TrainState
 from daisy.training.trainer import Trainer
 
@@ -67,8 +68,6 @@ class MoCoPretrainMethod(Method[nn.Module]):
 	) -> torch.optim.Optimizer:
 		"""按 optimizer_type 构建 SGD/LARS/AdamW 默认优化器。"""
 		if self.optimizer_type == 'lars':
-			from daisy.model.moco.lars import LARS
-
 			return LARS(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=self.momentum)
 		if self.optimizer_type == 'adamw':
 			return torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)

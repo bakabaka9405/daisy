@@ -15,17 +15,22 @@
 
     # 含 run 数组的任务：逐个 run 的配置，顺序运行
     run_tasks(load_run_configs(Path('tasks/ablation.toml')))
+
+    # 已完成运行的分析视图（外部任务须先导入注册）
+    run = open_run(Path('outputs/example'), ClassificationRun)
 """
 
 from __future__ import annotations
 
 # 基础类
 from .base import BaseMetaConfig, BaseOutputConfig, BaseTaskConfig
+from .protocol import Task, TaskRun
 
 # 主要接口
 from .feed import assert_label_range, assert_multitask_label_range, feed
 from .imports import import_files
 from .runner import load_config, load_run_configs, run_task, run_tasks, select_runs
+from .runs import load_run_config, open_run
 from .serialization import build_example_config, export_example_config, save_config
 from .shared import (
 	DatasetConfig,
@@ -39,13 +44,18 @@ from .tasks.classification.config import (
 	TrainingConfig,
 	TransformConfig,
 )
+from .tasks.classification.runner import ClassificationRun
 from .tasks.mae_pretrain.config import MAEPretrainConfig
+from .tasks.mae_pretrain.runner import MAEPretrainRun
 
 __all__ = [
 	# 基础类
 	'BaseMetaConfig',
 	'BaseOutputConfig',
 	'BaseTaskConfig',
+	# 任务协议
+	'Task',
+	'TaskRun',
 	# 任务字典与查找
 	'TASKS',
 	'get_task',
@@ -60,6 +70,11 @@ __all__ = [
 	'export_example_config',
 	'save_config',
 	'import_files',
+	# 已完成运行
+	'load_run_config',
+	'open_run',
+	'ClassificationRun',
+	'MAEPretrainRun',
 	# 数据供给
 	'feed',
 	'assert_label_range',

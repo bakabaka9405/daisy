@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+from daisy.util import set_global_seed
 from .base import BaseTaskConfig
 
 
@@ -51,10 +52,8 @@ def prepare_task_run(
 	header_lines: Sequence[TaskHeaderLine] = (),
 ) -> TaskRunContext:
 	"""准备任务运行上下文并打印通用头部信息"""
-	import daisy
-
 	if seed is not None:
-		daisy.util.set_global_seed(seed)
+		set_global_seed(seed)
 
 	print('=' * 60)
 	print(f'Task: {config.meta.title or config.task_id}')

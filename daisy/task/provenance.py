@@ -17,6 +17,8 @@ import sys
 import tempfile
 
 import icontract
+from torch._inductor.runtime.cache_dir_utils import cache_dir
+import triton.knobs
 
 RUNS_REF_PREFIX = 'refs/daisy/runs/'
 
@@ -92,19 +94,13 @@ def changed_repositories(snapshot: SourceSnapshot) -> list[Path]:
 
 
 def _generated_code_dirs() -> list[Path]:
-	"""torch.compile 在运行时生成并导入的代码缓存目录（inductor，以及已加载 triton 时的 triton 缓存）
+	"""torch.compile 在运行时生成并导入的代码缓存目录（inductor 与 triton 缓存）
 
 	其中的模块由已加载的源码在运行时生成，不是独立的源码。
 	inductor 编译期间会把 TRITON_CACHE_DIR 指向自己的缓存目录，而 triton 的驱动工具模块（cuda_utils 等）可能在此之前
 	已从默认目录（~/.triton/cache）加载，因此默认目录与当前目录都要计入。
 	"""
-	from torch._inductor.runtime.cache_dir_utils import cache_dir
-
-	dirs = [Path(cache_dir())]
-	if 'triton' in sys.modules:
-		import triton.knobs
-
-		dirs += [Path(triton.knobs.cache.get_triton_dir('cache')), Path(triton.knobs.cache.dir)]
+	dirs = [Path(cache_dir()), Path(triton.knobs.cache.get_triton_dir('cache')), Path(triton.knobs.cache.dir)]
 	return [d.resolve() for d in dirs]
 
 
