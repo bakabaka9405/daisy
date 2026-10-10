@@ -16,11 +16,13 @@ import icontract
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter
 import torch
 
+from daisy.util import save_json
+
 from .base import BaseTaskConfig
 from .imports import import_files
 from .protocol import RunContext
 from .provenance import SourceSnapshot, changed_repositories, modules_outside_snapshot, snapshot_sources
-from .runtime import format_output_path, print_task_completed, print_task_header, save_json, save_task_snapshot
+from .runtime import format_output_path, print_task_completed, print_task_header, save_task_snapshot
 from .tasks import get_task
 
 _merger = Merger([(dict, ['merge'])], ['override'], ['override'])

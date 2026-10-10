@@ -1,4 +1,5 @@
 from .util import (
+	save_json,
 	to_2tuple,
 	set_global_seed,
 	get_model_classifier,
@@ -16,6 +17,7 @@ from .transform import get_default_val_transform, get_default_train_transform, L
 from .data import Prefetcher, make_dataloader
 
 __all__ = [
+	'save_json',
 	'to_2tuple',
 	'set_global_seed',
 	'get_model_classifier',

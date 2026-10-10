@@ -15,11 +15,10 @@ from daisy.dataset.disk_dataset import DiskDataset
 from daisy.method.mae import MAEPretrainMethod, mae_reconstruction_loss
 from daisy.model.mae import MaskedAutoencoderViT, create_mae_model, load_timm_pretrained_encoder_weights
 from daisy.training import CosineAnnealingLR, CSVLog, RichEpochPrint, Timer, Trainer, TrainState
-from daisy.util import Prefetcher, make_dataloader, set_global_seed, to_2tuple
+from daisy.util import Prefetcher, make_dataloader, save_json, set_global_seed, to_2tuple
 from daisy.util.transform import LazyNormalization, LazyNormalizedTensor, get_rectangle_val_transform
 from ...feed import feed
 from ...protocol import RunContext
-from ...runtime import save_json
 from .config import MAEPretrainConfig
 
 MEAN = (0.485, 0.456, 0.406)

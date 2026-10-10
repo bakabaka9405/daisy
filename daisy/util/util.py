@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 import random
 
 import icontract
@@ -7,6 +9,13 @@ from torch import Tensor
 from torchvision.io.image import decode_image, ImageReadMode
 from typing import Any, SupportsIndex
 from collections.abc import Iterable
+
+
+def save_json(path: Path, data: Any) -> None:
+	"""保存 JSON 文件"""
+	path.parent.mkdir(parents=True, exist_ok=True)
+	with open(path, 'w', encoding='utf-8') as f:
+		json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def to_2tuple[T](value: T | tuple[T, T]) -> tuple[T, T]:

@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-import json
 from pathlib import Path
 from typing import Any
 
 import torch
+
+from daisy.util import save_json
 
 from .base import BaseTaskConfig
 
@@ -37,13 +38,6 @@ def print_task_completed(output_path: Path) -> None:
 	print('Task completed!')
 	print(f'Output saved to: {output_path}')
 	print('=' * 60)
-
-
-def save_json(path: Path, data: Any) -> None:
-	"""保存 JSON 文件"""
-	path.parent.mkdir(parents=True, exist_ok=True)
-	with open(path, 'w', encoding='utf-8') as f:
-		json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def save_task_snapshot(
