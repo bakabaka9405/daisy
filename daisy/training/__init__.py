@@ -19,6 +19,7 @@
 Mixup/CutMix 等变换可直接在闭包内使用 ``timm.data.mixup.Mixup`` 组合。
 """
 
+from daisy.training.export import DebouncedExport, FinalExport, InstantExport, make_best_export
 from daisy.training.plugins import (
     BatchPrint,
     BestModel,
@@ -42,6 +43,10 @@ __all__ = [
     'CosineAnnealingLR',
     'Eval',
     'BestModel',
+    'InstantExport',
+    'FinalExport',
+    'DebouncedExport',
+    'make_best_export',
     'EarlyStop',
     'Checkpoint',
     'EpochPrint',

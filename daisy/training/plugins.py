@@ -10,6 +10,7 @@ import math
 import os
 import sys
 import time
+from copy import deepcopy
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal
@@ -21,6 +22,7 @@ from rich.table import Table
 
 from daisy.training._tui import EpochRecorded, Progress, TrainMonitorApp, format_value
 from daisy.training.state import TrainState
+from daisy.training.export import InstantExport
 
 if TYPE_CHECKING:
 	from daisy.training.trainer import Trainer
@@ -31,6 +33,10 @@ class Plugin:
 
 	def register(self, trainer: Trainer) -> None:
 		raise NotImplementedError
+
+	def dispose(self) -> None:
+		"""每次 fit 结束后释放插件资源。"""
+		pass
 
 
 class CosineAnnealingLR(Plugin):
@@ -110,19 +116,44 @@ class BestModel(Plugin):
 		self,
 		watch_metric: str,
 		mode: Literal['max', 'min'] = 'max',
-		save_path: Path | None = None,
+		*,
+		export: InstantExport | None = None,
 	):
 		self.watch_metric = watch_metric
 		self.mode = mode
-		self.save_path = save_path
+		self.export = export
+		self._snapshot: dict[str, Any] | None = None
 
 		self.best_value: float = -float('inf') if mode == 'max' else float('inf')
 		self.best_epoch: int = -1
-		if self.save_path:
-			self.save_path.mkdir(parents=True, exist_ok=True)
 
 	def register(self, trainer: Trainer) -> None:
 		trainer.on_epoch_end(self._check)
+		if self.export is not None:
+			trainer.on_fit_start(self._start_export)
+			trainer.on_batch_end(self._check_export)
+			trainer.on_fit_end(self._finish_export)
+
+	def restore(self, model: torch.nn.Module) -> None:
+		if self._snapshot is None:
+			raise RuntimeError('No best model snapshot is available')
+		model.load_state_dict(deepcopy(self._snapshot))
+
+	def _check_export(self, state: TrainState) -> None:
+		assert self.export is not None
+		self.export.check()
+
+	def _start_export(self, state: TrainState) -> None:
+		assert self.export is not None
+		self.export.start()
+
+	def _finish_export(self, state: TrainState) -> None:
+		assert self.export is not None
+		self.export.close(success=True)
+
+	def dispose(self) -> None:
+		if self.export is not None:
+			self.export.close(success=False)
 
 	def _is_better(self, current: float) -> bool:
 		return current > self.best_value if self.mode == 'max' else current < self.best_value
@@ -132,10 +163,11 @@ class BestModel(Plugin):
 		if val is None:
 			return
 		if self._is_better(val):
+			self._snapshot = {k: v.detach().cpu().clone() if torch.is_tensor(v) else deepcopy(v) for k, v in state.model.state_dict().items()}
 			self.best_value = val
 			self.best_epoch = state.epoch
-			if self.save_path:
-				torch.save(state.model.state_dict(), self.save_path / 'best_model.pth')
+			if self.export is not None:
+				self.export.submit(self._snapshot)
 
 
 class EarlyStop(Plugin):
@@ -277,18 +309,32 @@ class RichEpochPrint(Plugin):
 		self.history = []
 		app = TrainMonitorApp(run, self._columns, self.max_log_lines)
 		self._app = app
-		app.run()
-		# 用户中止或界面崩溃时训练线程仍在运行，需等待其在下一个回调处终止
-		if app.worker.is_alive():
-			app.abort.set()
-			app.worker.join()
-		self._app = None
+		errors: list[BaseException] = []
+		try:
+			app.run()
+		except BaseException as error:
+			errors.append(error)
+		finally:
+			# 界面退出后先终止并等待训练，外层插件才能安全关闭导出资源。
+			try:
+				app.abort.set()
+				if app.worker.ident is not None:
+					app.worker.join()
+			finally:
+				self._app = None
 
-		self._replay(app)
-		if app.return_code:
-			raise RuntimeError(f'RichEpochPrint 界面异常退出（return_code={app.return_code}）。') from app.error
-		if app.error is not None:
-			raise app.error
+		if app.return_code and not errors:
+			errors.append(RuntimeError(f'RichEpochPrint exited with return_code={app.return_code}'))
+		if app.error is not None and all(app.error is not error for error in errors):
+			errors.append(app.error)
+		try:
+			self._replay(app)
+		except BaseException as error:
+			errors.append(error)
+		if len(errors) > 1:
+			raise BaseExceptionGroup('UI, training or replay failed', errors)
+		if errors:
+			raise errors[0]
 		if app.result is None:
 			raise RuntimeError('RichEpochPrint 界面退出时训练未执行。')
 		return app.result

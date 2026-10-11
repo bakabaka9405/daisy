@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 import tyro.conf
@@ -30,6 +30,8 @@ class BaseOutputConfig(BaseConfig):
 	save_path: str = 'outputs/{task_id}'  # 支持 {task_id}、{run_id}、{date} 及任意配置字段（如 {training.seed}）
 	keep_count: int = 1
 	save_best: bool = True
+	best_export: Literal['instant', 'final', 'debounced'] = 'instant'
+	best_export_debounce_seconds: float = Field(default=30.0, gt=0)
 	log: bool = True
 
 	@model_validator(mode='after')

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from functools import partial
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import icontract
 import torch
@@ -12,6 +12,9 @@ from daisy.util.data import Prefetcher
 
 from daisy.training.state import TrainState
 from torch.utils._pytree import tree_leaves, tree_map
+
+if TYPE_CHECKING:
+	from daisy.training.plugins import Plugin
 
 
 SideEffectFn = Callable[[TrainState], None]
@@ -60,6 +63,7 @@ class Trainer:
 		self._on_batch_start: list[SideEffectFn] = []
 		self._on_batch_end: list[SideEffectFn] = []
 		self._around_fit: list[FitWrapper] = []
+		self._plugins: list[Plugin] = []
 
 	@property
 	def process_fn(self) -> ProcessFn | None:
@@ -101,10 +105,11 @@ class Trainer:
 		self._around_fit.append(fn)
 		return self
 
-	def use(self, *plugins: Any) -> Trainer:
+	def use(self, *plugins: Plugin) -> Trainer:
 		"""注册 Plugin。"""
 		for plugin in plugins:
 			plugin.register(self)
+			self._plugins.append(plugin)
 		return self
 
 	@icontract.require(lambda epochs, start_epoch: 0 <= start_epoch <= epochs)
@@ -113,10 +118,27 @@ class Trainer:
 	@icontract.require(lambda self: self.model is not None, 'fit 需要 model。')
 	def fit(self, train_loader: DataLoader, epochs: int, *, start_epoch: int = 0) -> TrainState:
 		"""执行 ``[start_epoch, epochs)`` 区间训练并返回最终状态。"""
-		run: FitFn = partial(self._fit, train_loader, epochs, start_epoch)
-		for wrapper in reversed(self._around_fit):
-			run = partial(wrapper, run)
-		return run()
+		errors: list[BaseException] = []
+		try:
+			run: FitFn = partial(self._fit, train_loader, epochs, start_epoch)
+			for wrapper in reversed(self._around_fit):
+				run = partial(wrapper, run)
+			return run()
+		except BaseException as error:
+			errors.append(error)
+		finally:
+			for plugin in reversed(self._plugins):
+				try:
+					plugin.dispose()
+				except BaseException as error:
+					errors.append(error)
+
+		if len(errors) > 1:
+			raise BaseExceptionGroup('Training or plugin disposal failed', errors)
+		if errors:
+			raise errors[0]
+
+		assert False
 
 	def _fit(self, train_loader: DataLoader, epochs: int, start_epoch: int) -> TrainState:
 		# 前提已由 fit 的契约保证，此处仅做类型收窄

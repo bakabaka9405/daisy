@@ -15,7 +15,7 @@ import daisy
 from daisy.classification import prepare_classification_training
 from daisy.dataset.disk_dataset import DiskDataset
 from daisy.method.classification import ClassificationMethod
-from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, RichEpochPrint, Trainer
+from daisy.training import BestModel, Checkpoint, CosineAnnealingLR, CSVLog, EarlyStop, RichEpochPrint, Trainer, make_best_export
 from daisy.util import set_global_seed, to_2tuple
 from daisy.util.data import Prefetcher, make_dataloader
 from ...feed import assert_label_range, feed
@@ -172,7 +172,11 @@ class ClassificationTask:
 				BestModel(
 					watch_metric=watch_metric,
 					mode='max',
-					save_path=output_path,
+					export=make_best_export(
+						output_path / 'best_model.pth',
+						config.output.best_export,
+						debounce_seconds=config.output.best_export_debounce_seconds,
+					),
 				)
 			)
 
