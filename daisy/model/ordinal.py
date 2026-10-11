@@ -55,6 +55,13 @@ class OrdinalHead[Output](nn.Module, ABC):
 		"""返回需要较大学习率的参数。"""
 		return ()
 
+	def init_from_counts(self, counts: Tensor) -> None:
+		"""根据平滑后的正类别计数初始化；默认无需初始化。"""
+
+	def artifacts(self) -> dict[str, Any]:
+		"""训练后需要保存的参数，名称到可 JSON 序列化的内容；默认无。"""
+		return {}
+
 
 class ClassificationHead(OrdinalHead[Tensor]):
 	"""线性分类头，共享 argmax 解码并由 criterion 指定训练目标。"""
@@ -135,6 +142,7 @@ class CLMHead(OrdinalHead[Tensor]):
 		gaps = F.softplus(self.delta)
 		return self.threshold + torch.cat([gaps.new_zeros(1), gaps.cumsum(dim=0)])
 
+	@override
 	@torch.no_grad()
 	@icontract.require(lambda counts: bool((counts > 0).all()))
 	@icontract.require(lambda self, counts: counts.shape == (self.num_classes,))
@@ -143,6 +151,11 @@ class CLMHead(OrdinalHead[Tensor]):
 		tau = torch.logit(counts.cumsum(dim=0)[:-1] / counts.sum())
 		self.threshold.copy_(tau[0])
 		self.delta.copy_(torch.log(torch.expm1(tau.diff())))
+
+	@override
+	def artifacts(self) -> dict[str, Any]:
+		"""有序阈值 thresholds。"""
+		return {'thresholds': self.get_ordered_thresholds().detach().float().cpu().tolist()}
 
 	@override
 	def high_lr_parameters(self) -> tuple[nn.Parameter, ...]:
@@ -174,6 +187,7 @@ class CORALHead(OrdinalHead[Tensor]):
 		self.fc = nn.Linear(in_features, 1, bias=False)
 		self.coral_bias = nn.Parameter(torch.linspace(1.0, -1.0, num_classes - 1))
 
+	@override
 	@torch.no_grad()
 	@icontract.require(lambda counts: bool((counts > 0).all()))
 	@icontract.require(lambda self, counts: counts.shape == (self.num_classes,))
@@ -213,6 +227,7 @@ class CORNHead(OrdinalHead[Tensor]):
 		super().__init__(in_features, num_classes)
 		self.fc = nn.Linear(in_features, num_classes - 1)
 
+	@override
 	@torch.no_grad()
 	@icontract.require(lambda counts: bool((counts > 0).all()))
 	@icontract.require(lambda self, counts: counts.shape == (self.num_classes,))
