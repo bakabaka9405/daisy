@@ -123,7 +123,6 @@ class TrainMonitorApp(App[None]):
 
 	def __init__(self, run: Callable[[], TrainState], columns: Sequence[str], max_log_lines: int) -> None:
 		super().__init__()
-		self._run = run
 		self._columns = columns
 		self._max_log_lines = max_log_lines
 
@@ -132,7 +131,7 @@ class TrainMonitorApp(App[None]):
 		self.finished = False
 		self.abort = threading.Event()
 		self.print_history: list[tuple[str, bool]] = []
-		self.worker = threading.Thread(target=self._train, name='RichEpochPrint-fit')
+		self.worker = threading.Thread(target=self._train, args=(run,), name='RichEpochPrint-fit')
 
 		self._post_lock = threading.Lock()
 		self._accepting = True
@@ -162,9 +161,9 @@ class TrainMonitorApp(App[None]):
 			if self._accepting:
 				self.post_message(message)
 
-	def _train(self) -> None:
+	def _train(self, run: Callable[[], TrainState]) -> None:
 		try:
-			self.result = self._run()
+			self.result = run()
 		except BaseException as e:
 			# 不恢复训练：异常交由主线程在界面关闭后原样重新抛出
 			self.error = e
